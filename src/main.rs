@@ -7,7 +7,7 @@ fn main() {
     let event_loop = EventLoop::new();
     let window = winit::window::WindowBuilder::new()
         .with_title("vulkan test")
-        .with_inner_size(winit::dpi::LogicalSize::new(1024, 768))
+        .with_inner_size(winit::dpi::PhysicalSize::new(1024, 768))
         .build(&event_loop)
         .unwrap();
 
