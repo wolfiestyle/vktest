@@ -451,7 +451,7 @@ impl VulkanDevice {
             .present_modes
             .iter()
             .cloned()
-            .find(|&mode| mode == vk::PresentModeKHR::MAILBOX)
+            .find(|&mode| mode == vk::PresentModeKHR::IMMEDIATE)
             .unwrap_or(vk::PresentModeKHR::FIFO);
 
         let extent = if self.dev_info.surf_caps.current_extent.width != u32::max_value() {
