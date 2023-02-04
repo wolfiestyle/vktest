@@ -5,11 +5,16 @@ use inline_spirv::include_spirv;
 use std::collections::HashSet;
 use std::ffi::{c_char, c_void, CStr, CString};
 use winit::dpi::PhysicalSize;
-use winit::platform::unix::WindowExtUnix;
 use winit::window::Window;
 
 const VALIDATION_LAYER: &CStr = cstr!("VK_LAYER_KHRONOS_validation");
-const REQ_INSTANCE_EXTENSIONS: [&CStr; 2] = [khr::Surface::name(), khr::XlibSurface::name()];
+const REQ_INSTANCE_EXTENSIONS: [&CStr; 2] = [
+    khr::Surface::name(),
+    #[cfg(target_family = "unix")]
+    khr::XlibSurface::name(),
+    #[cfg(target_family = "windows")]
+    khr::Win32Surface::name(),
+];
 const REQ_DEVICE_EXTENSIONS: [&CStr; 1] = [khr::Swapchain::name()];
 
 struct VulkanInstance {
@@ -122,7 +127,10 @@ impl VulkanInstance {
         Ok(messenger)
     }
 
+    #[cfg(target_family = "unix")]
     fn create_surface(&self, window: &Window) -> VulkanResult<vk::SurfaceKHR> {
+        use winit::platform::unix::WindowExtUnix;
+
         let surface_ci = vk::XlibSurfaceCreateInfoKHR::builder()
             .window(window.xlib_window().ok_or(Error::EngineError("Failed to get Xlib window"))?)
             .dpy(window.xlib_display().ok_or(Error::EngineError("Failed to get Xlib display"))? as _);
@@ -131,6 +139,21 @@ impl VulkanInstance {
             surface_loader
                 .create_xlib_surface(&surface_ci, None)
                 .map_err(Error::bind_msg("Failed to create Xlib surface"))
+        }
+    }
+
+    #[cfg(target_family = "windows")]
+    fn create_surface(&self, window: &Window) -> VulkanResult<vk::SurfaceKHR> {
+        use winit::platform::windows::WindowExtWindows;
+
+        let surface_ci = vk::Win32SurfaceCreateInfoKHR::builder()
+            .hwnd(window.hwnd() as _)
+            .hinstance(window.hinstance() as _);
+        let surface_loader = khr::Win32Surface::new(&self.entry, &self.instance);
+        unsafe {
+            surface_loader
+                .create_win32_surface(&surface_ci, None)
+                .map_err(Error::bind_msg("Failed to create Win32 surface"))
         }
     }
 
