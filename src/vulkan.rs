@@ -16,6 +16,7 @@ const REQ_INSTANCE_EXTENSIONS: [&CStr; 2] = [
     khr::Win32Surface::name(),
 ];
 const REQ_DEVICE_EXTENSIONS: [&CStr; 1] = [khr::Swapchain::name()];
+const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
 struct VulkanInstance {
     entry: ash::Entry,
@@ -711,16 +712,15 @@ impl VulkanDevice {
         }
     }
 
-    fn create_command_buffer(&self, pool: vk::CommandPool) -> VulkanResult<vk::CommandBuffer> {
+    fn create_command_buffers(&self, pool: vk::CommandPool, count: u32) -> VulkanResult<Vec<vk::CommandBuffer>> {
         let alloc_info = vk::CommandBufferAllocateInfo::builder()
             .command_pool(pool)
             .level(vk::CommandBufferLevel::PRIMARY)
-            .command_buffer_count(1);
+            .command_buffer_count(count);
 
         unsafe {
             self.device
                 .allocate_command_buffers(&alloc_info)
-                .map(|vec| vec[0])
                 .map_err(Error::bind_msg("Failed to allocate command buffers"))
         }
     }
@@ -768,10 +768,11 @@ pub struct VulkanApp {
     pipeline_layout: vk::PipelineLayout,
     framebuffers: Vec<vk::Framebuffer>,
     command_pool: vk::CommandPool,
-    cmd_buffer: vk::CommandBuffer,
-    image_avail: vk::Semaphore,
-    render_finished: vk::Semaphore,
-    in_flight: vk::Fence,
+    command_buffers: Vec<vk::CommandBuffer>,
+    image_avail_sems: Vec<vk::Semaphore>,
+    render_finished_sems: Vec<vk::Semaphore>,
+    in_flight_fens: Vec<vk::Fence>,
+    current_frame: usize,
 }
 
 impl VulkanApp {
@@ -784,10 +785,10 @@ impl VulkanApp {
         let (pipeline, pipeline_layout) = vk.create_graphics_pipeline(render_pass, &swapchain)?;
         let framebuffers = vk.create_framebuffers(&swapchain, render_pass)?;
         let command_pool = vk.create_command_pool()?;
-        let cmd_buffer = vk.create_command_buffer(command_pool)?;
-        let image_avail = vk.create_semaphore()?;
-        let render_finished = vk.create_semaphore()?;
-        let in_flight = vk.create_fence()?;
+        let command_buffers = vk.create_command_buffers(command_pool, MAX_FRAMES_IN_FLIGHT as u32)?;
+        let image_avail_sems = (0..MAX_FRAMES_IN_FLIGHT).map(|_| vk.create_semaphore()).collect::<Result<_, _>>()?;
+        let render_finished_sems = (0..MAX_FRAMES_IN_FLIGHT).map(|_| vk.create_semaphore()).collect::<Result<_, _>>()?;
+        let in_flight_fens = (0..MAX_FRAMES_IN_FLIGHT).map(|_| vk.create_fence()).collect::<Result<_, _>>()?;
 
         Ok(Self {
             device: vk,
@@ -797,10 +798,11 @@ impl VulkanApp {
             pipeline_layout,
             framebuffers,
             command_pool,
-            cmd_buffer,
-            image_avail,
-            render_finished,
-            in_flight,
+            command_buffers,
+            image_avail_sems,
+            render_finished_sems,
+            in_flight_fens,
+            current_frame: 0,
         })
     }
 
@@ -843,48 +845,50 @@ impl VulkanApp {
     }
 
     pub fn draw_frame(&mut self) -> VulkanResult<bool> {
-        let image_idx = unsafe {
+        let in_flight_fen = [self.in_flight_fens[self.current_frame]];
+        let image_avail_sem = [self.image_avail_sems[self.current_frame]];
+        let render_finish_sem = [self.render_finished_sems[self.current_frame]];
+        let command_buffer = [self.command_buffers[self.current_frame]];
+        self.current_frame = (self.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
+
+        let image_indices = unsafe {
             self.device
-                .wait_for_fences(&[self.in_flight], true, u64::MAX)
+                .wait_for_fences(&in_flight_fen, true, u64::MAX)
                 .map_err(Error::bind_msg("Failed waiting for error"))?;
             self.device
-                .reset_fences(&[self.in_flight])
+                .reset_fences(&in_flight_fen)
                 .map_err(Error::bind_msg("Failed resetting fences"))?;
             let (image_idx, _) = self
                 .device
                 .swapchain_utils
-                .acquire_next_image(self.swapchain.handle, u64::MAX, self.image_avail, vk::Fence::null())
+                .acquire_next_image(self.swapchain.handle, u64::MAX, image_avail_sem[0], vk::Fence::null())
                 .map_err(Error::bind_msg("Failed to acquire swapchain image"))?;
             self.device
-                .reset_command_buffer(self.cmd_buffer, vk::CommandBufferResetFlags::empty())
+                .reset_command_buffer(command_buffer[0], vk::CommandBufferResetFlags::empty())
                 .map_err(Error::bind_msg("Failed to reset command buffer"))?;
 
-            self.record_command_buffer(self.cmd_buffer, image_idx)?;
+            self.record_command_buffer(command_buffer[0], image_idx)?;
 
-            image_idx
+            [image_idx]
         };
 
-        let wait_semaphores = [self.image_avail];
-        let signal_semaphores = [self.render_finished];
         let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
-        let command_buffers = [self.cmd_buffer];
         let submit_info = [vk::SubmitInfo::builder()
-            .wait_semaphores(&wait_semaphores)
+            .wait_semaphores(&image_avail_sem)
             .wait_dst_stage_mask(&wait_stages)
-            .command_buffers(&command_buffers)
-            .signal_semaphores(&signal_semaphores)
+            .command_buffers(&command_buffer)
+            .signal_semaphores(&render_finish_sem)
             .build()];
 
         unsafe {
             self.device
-                .queue_submit(self.device.graphics_queue, &submit_info, self.in_flight)
+                .queue_submit(self.device.graphics_queue, &submit_info, in_flight_fen[0])
                 .map_err(Error::bind_msg("Failed to submit draw command buffer"))?
         }
 
         let swapchains = [self.swapchain.handle];
-        let image_indices = [image_idx];
         let present_info = vk::PresentInfoKHR::builder()
-            .wait_semaphores(&signal_semaphores)
+            .wait_semaphores(&render_finish_sem)
             .swapchains(&swapchains)
             .image_indices(&image_indices);
 
@@ -901,9 +905,11 @@ impl Drop for VulkanApp {
     fn drop(&mut self) {
         unsafe {
             self.device.device_wait_idle().expect("Failed to wait idle");
-            self.device.destroy_semaphore(self.image_avail, None);
-            self.device.destroy_semaphore(self.render_finished, None);
-            self.device.destroy_fence(self.in_flight, None);
+            for i in 0..MAX_FRAMES_IN_FLIGHT {
+                self.device.destroy_semaphore(self.image_avail_sems[i], None);
+                self.device.destroy_semaphore(self.render_finished_sems[i], None);
+                self.device.destroy_fence(self.in_flight_fens[i], None);
+            }
             self.device.destroy_command_pool(self.command_pool, None);
             for &fb in &self.framebuffers {
                 self.device.destroy_framebuffer(fb, None);
