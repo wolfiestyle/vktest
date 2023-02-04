@@ -25,7 +25,7 @@ impl VulkanInstance {
         let validation_enabled = cfg!(debug_assertions) && Self::check_validation_support(&entry)?;
         let app_name = CString::new(env!("CARGO_PKG_NAME")).unwrap();
         let engine_name = cstr!("Snow3Derg");
-        let instance = Self::create_instance(&entry, window, &app_name, &engine_name, validation_enabled)?;
+        let instance = Self::create_instance(&entry, window, &app_name, engine_name, validation_enabled)?;
         let (debug_messenger, debug_utils) = if validation_enabled {
             let debug_utils = ext::DebugUtils::new(&entry, &instance);
             (Self::setup_debug_utils(&debug_utils)?, Some(debug_utils))
@@ -420,7 +420,7 @@ pub struct VulkanDevice {
 impl VulkanDevice {
     pub fn new(window: &Window) -> VulkanResult<Self> {
         let vk = VulkanInstance::new(window)?;
-        let surface = vk.create_surface(&window)?;
+        let surface = vk.create_surface(window)?;
         let dev_info = vk.pick_physical_device(surface)?;
         eprintln!("Selected device: {:?}", dev_info.name);
         let device = vk.create_logical_device(&dev_info)?;
