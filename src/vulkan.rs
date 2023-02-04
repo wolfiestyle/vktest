@@ -306,32 +306,6 @@ impl Drop for VulkanInstance {
     }
 }
 
-extern "system" fn vulkan_debug_utils_callback(
-    msg_severity: vk::DebugUtilsMessageSeverityFlagsEXT, msg_type: vk::DebugUtilsMessageTypeFlagsEXT,
-    cb_data: *const vk::DebugUtilsMessengerCallbackDataEXT, _user_data: *mut c_void,
-) -> vk::Bool32 {
-    let message = unsafe { CStr::from_ptr((*cb_data).p_message) }.to_string_lossy();
-    eprintln!("Debug: [{msg_severity:?}][{msg_type:?}] {message}");
-    vk::FALSE
-}
-
-fn create_debug_messenger_ci() -> vk::DebugUtilsMessengerCreateInfoEXT {
-    vk::DebugUtilsMessengerCreateInfoEXT::builder()
-        .message_severity(
-            vk::DebugUtilsMessageSeverityFlagsEXT::ERROR
-            //| vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE
-            //| vk::DebugUtilsMessageSeverityFlagsEXT::INFO
-            | vk::DebugUtilsMessageSeverityFlagsEXT::WARNING,
-        )
-        .message_type(
-            vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
-                | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
-                | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION,
-        )
-        .pfn_user_callback(Some(vulkan_debug_utils_callback))
-        .build()
-}
-
 #[derive(Debug, Default)]
 struct DeviceInfo {
     phys_dev: vk::PhysicalDevice,
@@ -851,7 +825,7 @@ impl VulkanApp {
         let command_buffer = [self.command_buffers[self.current_frame]];
         self.current_frame = (self.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
 
-        let image_indices = unsafe {
+        let image_idx = unsafe {
             self.device
                 .wait_for_fences(&in_flight_fen, true, u64::MAX)
                 .map_err(Error::bind_msg("Failed waiting for error"))?;
@@ -867,10 +841,10 @@ impl VulkanApp {
                 .reset_command_buffer(command_buffer[0], vk::CommandBufferResetFlags::empty())
                 .map_err(Error::bind_msg("Failed to reset command buffer"))?;
 
-            self.record_command_buffer(command_buffer[0], image_idx)?;
-
-            [image_idx]
+            image_idx
         };
+
+        self.record_command_buffer(command_buffer[0], image_idx)?;
 
         let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
         let submit_info = [vk::SubmitInfo::builder()
@@ -887,6 +861,7 @@ impl VulkanApp {
         }
 
         let swapchains = [self.swapchain.handle];
+        let image_indices = [image_idx];
         let present_info = vk::PresentInfoKHR::builder()
             .wait_semaphores(&render_finish_sem)
             .swapchains(&swapchains)
@@ -955,4 +930,30 @@ impl std::fmt::Display for Error {
 fn vk_to_cstr(raw: &[c_char]) -> &CStr {
     //TODO: replace with `CStr::from_bytes_until_nul` when it's stable
     unsafe { CStr::from_ptr(raw.as_ptr()) }
+}
+
+extern "system" fn vulkan_debug_utils_callback(
+    msg_severity: vk::DebugUtilsMessageSeverityFlagsEXT, msg_type: vk::DebugUtilsMessageTypeFlagsEXT,
+    cb_data: *const vk::DebugUtilsMessengerCallbackDataEXT, _user_data: *mut c_void,
+) -> vk::Bool32 {
+    let message = unsafe { CStr::from_ptr((*cb_data).p_message) }.to_string_lossy();
+    eprintln!("Debug: [{msg_severity:?}][{msg_type:?}] {message}");
+    vk::FALSE
+}
+
+fn create_debug_messenger_ci() -> vk::DebugUtilsMessengerCreateInfoEXT {
+    vk::DebugUtilsMessengerCreateInfoEXT::builder()
+        .message_severity(
+            vk::DebugUtilsMessageSeverityFlagsEXT::ERROR
+            //| vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE
+            //| vk::DebugUtilsMessageSeverityFlagsEXT::INFO
+            | vk::DebugUtilsMessageSeverityFlagsEXT::WARNING,
+        )
+        .message_type(
+            vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
+                | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
+                | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION,
+        )
+        .pfn_user_callback(Some(vulkan_debug_utils_callback))
+        .build()
 }

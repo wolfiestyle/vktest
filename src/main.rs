@@ -1,7 +1,7 @@
+use std::time::{Duration, Instant};
+use vktest::vulkan::VulkanApp;
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
-use vktest::vulkan::VulkanApp;
-use std::time::{Instant, Duration};
 
 fn main() {
     let event_loop = EventLoop::new();
