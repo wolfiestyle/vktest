@@ -8,13 +8,6 @@ use winit::dpi::PhysicalSize;
 use winit::window::Window;
 
 const VALIDATION_LAYER: &CStr = cstr!("VK_LAYER_KHRONOS_validation");
-const REQ_INSTANCE_EXTENSIONS: [&CStr; 2] = [
-    khr::Surface::name(),
-    #[cfg(target_family = "unix")]
-    khr::XlibSurface::name(),
-    #[cfg(target_family = "windows")]
-    khr::Win32Surface::name(),
-];
 const REQ_DEVICE_EXTENSIONS: [&CStr; 1] = [khr::Swapchain::name()];
 const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
@@ -27,12 +20,12 @@ struct VulkanInstance {
 }
 
 impl VulkanInstance {
-    fn new() -> VulkanResult<Self> {
+    fn new(window: &Window) -> VulkanResult<Self> {
         let entry = unsafe { ash::Entry::load().map_err(Error::LoadingError)? };
         let validation_enabled = cfg!(debug_assertions) && Self::check_validation_support(&entry)?;
         let app_name = CString::new(env!("CARGO_PKG_NAME")).unwrap();
         let engine_name = cstr!("Snow3Derg");
-        let instance = Self::create_instance(&entry, &app_name, &engine_name, validation_enabled)?;
+        let instance = Self::create_instance(&entry, window, &app_name, &engine_name, validation_enabled)?;
         let (debug_messenger, debug_utils) = if validation_enabled {
             let debug_utils = ext::DebugUtils::new(&entry, &instance);
             (Self::setup_debug_utils(&debug_utils)?, Some(debug_utils))
@@ -64,13 +57,14 @@ impl VulkanInstance {
         Ok(validation_supp)
     }
 
-    fn get_required_instance_extensions(entry: &ash::Entry, validation_enabled: bool) -> VulkanResult<Vec<*const i8>> {
+    fn get_required_instance_extensions(entry: &ash::Entry, window: &Window, validation_enabled: bool) -> VulkanResult<Vec<*const i8>> {
         let ext_list = entry
             .enumerate_instance_extension_properties(None)
             .map_err(Error::bind_msg("Failed to enumerate instance extension properties"))?;
         let supported_exts: Vec<_> = ext_list.iter().map(|ext| vk_to_cstr(&ext.extension_name)).collect();
         //eprintln!("Supported instance extensions: {supported_exts:#?}");
-        REQ_INSTANCE_EXTENSIONS
+        let required_exts = [khr::Surface::name(), Self::get_platform_ext_name(window)];
+        required_exts
             .iter()
             .cloned()
             .chain(validation_enabled.then(ext::DebugUtils::name))
@@ -86,8 +80,28 @@ impl VulkanInstance {
             .collect()
     }
 
-    fn create_instance(entry: &ash::Entry, app_name: &CStr, engine_name: &CStr, validation_enabled: bool) -> VulkanResult<ash::Instance> {
-        let extension_names = Self::get_required_instance_extensions(entry, validation_enabled)?;
+    #[cfg(target_family = "unix")]
+    fn get_platform_ext_name(window: &Window) -> &'static CStr {
+        use winit::platform::unix::WindowExtUnix;
+
+        if window.wayland_surface().is_some() {
+            khr::WaylandSurface::name()
+        } else if window.xlib_window().is_some() {
+            khr::XlibSurface::name()
+        } else {
+            panic!("Failed to detect Wayland or X11");
+        }
+    }
+
+    #[cfg(target_family = "windows")]
+    fn get_platform_ext_name(_window: &Window) -> &'static CStr {
+        khr::Win32Surface::name()
+    }
+
+    fn create_instance(
+        entry: &ash::Entry, window: &Window, app_name: &CStr, engine_name: &CStr, validation_enabled: bool,
+    ) -> VulkanResult<ash::Instance> {
+        let extension_names = Self::get_required_instance_extensions(entry, window, validation_enabled)?;
 
         let mut layer_names = Vec::with_capacity(1);
         if validation_enabled {
@@ -132,14 +146,28 @@ impl VulkanInstance {
     fn create_surface(&self, window: &Window) -> VulkanResult<vk::SurfaceKHR> {
         use winit::platform::unix::WindowExtUnix;
 
-        let surface_ci = vk::XlibSurfaceCreateInfoKHR::builder()
-            .window(window.xlib_window().ok_or(Error::EngineError("Failed to get Xlib window"))?)
-            .dpy(window.xlib_display().ok_or(Error::EngineError("Failed to get Xlib display"))? as _);
-        let surface_loader = khr::XlibSurface::new(&self.entry, &self.instance);
-        unsafe {
-            surface_loader
-                .create_xlib_surface(&surface_ci, None)
-                .map_err(Error::bind_msg("Failed to create Xlib surface"))
+        if let Some(wl_surface) = window.wayland_surface() {
+            let surface_ci = vk::WaylandSurfaceCreateInfoKHR::builder()
+                .surface(wl_surface)
+                .display(window.wayland_display().unwrap());
+            let surface_loader = khr::WaylandSurface::new(&self.entry, &self.instance);
+            unsafe {
+                surface_loader
+                    .create_wayland_surface(&surface_ci, None)
+                    .map_err(Error::bind_msg("Failed to create Wayland surface"))
+            }
+        } else if let Some(xlib_win) = window.xlib_window() {
+            let surface_ci = vk::XlibSurfaceCreateInfoKHR::builder()
+                .window(xlib_win)
+                .dpy(window.xlib_display().unwrap() as _);
+            let surface_loader = khr::XlibSurface::new(&self.entry, &self.instance);
+            unsafe {
+                surface_loader
+                    .create_xlib_surface(&surface_ci, None)
+                    .map_err(Error::bind_msg("Failed to create Xlib surface"))
+            }
+        } else {
+            Err(Error::EngineError("Failed to get Wayland or Xlib window handle"))
         }
     }
 
@@ -391,7 +419,7 @@ pub struct VulkanDevice {
 
 impl VulkanDevice {
     pub fn new(window: &Window) -> VulkanResult<Self> {
-        let vk = VulkanInstance::new()?;
+        let vk = VulkanInstance::new(window)?;
         let surface = vk.create_surface(&window)?;
         let dev_info = vk.pick_physical_device(surface)?;
         eprintln!("Selected device: {:?}", dev_info.name);
