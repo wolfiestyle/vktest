@@ -254,7 +254,17 @@ impl VulkanInstance {
             return Err(Error::UnsuitableDevice);
         }
 
-        // swapchain support
+        Ok(DeviceInfo {
+            phys_dev,
+            dev_type,
+            name,
+            graphics_idx: graphics_idx.unwrap(),
+            present_idx: present_idx.unwrap(),
+            //extensions,
+        })
+    }
+
+    fn query_surface_info(&self, phys_dev: vk::PhysicalDevice, surface: vk::SurfaceKHR) -> VulkanResult<SurfaceInfo> {
         let surf_caps = unsafe {
             self.surface_utils
                 .get_physical_device_surface_capabilities(phys_dev, surface)
@@ -271,19 +281,12 @@ impl VulkanInstance {
                 .map_err(Error::bind_msg("Failed to get surface present modes"))?
         };
         if surf_formats.is_empty() || present_modes.is_empty() {
-            eprintln!("Device {name:?} has incomplete surface capabilities");
-            return Err(Error::UnsuitableDevice);
+            return Err(Error::EngineError("Device has incomplete surface capabilities"));
         }
 
-        Ok(DeviceInfo {
-            phys_dev,
-            dev_type,
-            name,
-            graphics_idx: graphics_idx.unwrap(),
-            present_idx: present_idx.unwrap(),
-            //extensions,
-            surf_caps,
-            surf_formats,
+        Ok(SurfaceInfo {
+            capabilities: surf_caps,
+            formats: surf_formats,
             present_modes,
         })
     }
@@ -342,9 +345,6 @@ struct DeviceInfo {
     graphics_idx: u32,
     present_idx: u32,
     //extensions: HashSet<CString>,
-    surf_caps: vk::SurfaceCapabilitiesKHR,
-    surf_formats: Vec<vk::SurfaceFormatKHR>,
-    present_modes: Vec<vk::PresentModeKHR>,
 }
 
 impl DeviceInfo {
@@ -353,6 +353,50 @@ impl DeviceInfo {
             vec![self.graphics_idx]
         } else {
             vec![self.graphics_idx, self.present_idx]
+        }
+    }
+}
+
+#[derive(Debug)]
+struct SurfaceInfo {
+    capabilities: vk::SurfaceCapabilitiesKHR,
+    formats: Vec<vk::SurfaceFormatKHR>,
+    present_modes: Vec<vk::PresentModeKHR>,
+}
+
+impl SurfaceInfo {
+    fn surface_format(&self) -> &vk::SurfaceFormatKHR {
+        self.formats
+            .iter()
+            .find(|&fmt| fmt.format == vk::Format::B8G8R8A8_SRGB && fmt.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR)
+            .or_else(|| self.formats.first())
+            .expect("Empty surface formats")
+    }
+
+    fn present_mode(&self) -> vk::PresentModeKHR {
+        self.present_modes
+            .iter()
+            .cloned()
+            .find(|&mode| mode == vk::PresentModeKHR::IMMEDIATE)
+            .unwrap_or(vk::PresentModeKHR::FIFO)
+    }
+
+    fn calc_extent(&self, width: u32, height: u32) -> vk::Extent2D {
+        if self.capabilities.current_extent.width != u32::max_value() {
+            self.capabilities.current_extent
+        } else {
+            vk::Extent2D {
+                width: width.clamp(self.capabilities.min_image_extent.width, self.capabilities.max_image_extent.width),
+                height: height.clamp(self.capabilities.min_image_extent.height, self.capabilities.max_image_extent.height),
+            }
+        }
+    }
+
+    fn calc_image_count(&self, count: u32) -> u32 {
+        if self.capabilities.max_image_count > 0 {
+            count.clamp(self.capabilities.min_image_count, self.capabilities.max_image_count)
+        } else {
+            count.max(self.capabilities.min_image_count)
         }
     }
 }
@@ -411,6 +455,7 @@ pub struct VulkanDevice {
     instance: VulkanInstance,
     surface: vk::SurfaceKHR,
     dev_info: DeviceInfo,
+    surface_info: SurfaceInfo,
     device: ash::Device,
     graphics_queue: vk::Queue,
     present_queue: vk::Queue,
@@ -423,6 +468,7 @@ impl VulkanDevice {
         let surface = vk.create_surface(window)?;
         let dev_info = vk.pick_physical_device(surface)?;
         eprintln!("Selected device: {:?}", dev_info.name);
+        let surface_info = vk.query_surface_info(dev_info.phys_dev, surface)?;
         let device = vk.create_logical_device(&dev_info)?;
         let graphics_queue = unsafe { device.get_device_queue(dev_info.graphics_idx, 0) };
         let present_queue = unsafe { device.get_device_queue(dev_info.present_idx, 0) };
@@ -432,6 +478,7 @@ impl VulkanDevice {
             instance: vk,
             surface,
             dev_info,
+            surface_info,
             device,
             graphics_queue,
             present_queue,
@@ -440,43 +487,10 @@ impl VulkanDevice {
     }
 
     fn create_swapchain(&self, window_width: u32, window_height: u32, image_count: u32) -> VulkanResult<SwapchainInfo> {
-        let surface_format = self
-            .dev_info
-            .surf_formats
-            .iter()
-            .find(|&fmt| fmt.format == vk::Format::B8G8R8A8_SRGB && fmt.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR)
-            .or_else(|| self.dev_info.surf_formats.first())
-            .ok_or(Error::EngineError("Empty surface formats"))?;
-
-        let present_mode = self
-            .dev_info
-            .present_modes
-            .iter()
-            .cloned()
-            .find(|&mode| mode == vk::PresentModeKHR::IMMEDIATE)
-            .unwrap_or(vk::PresentModeKHR::FIFO);
-
-        let extent = if self.dev_info.surf_caps.current_extent.width != u32::max_value() {
-            self.dev_info.surf_caps.current_extent
-        } else {
-            vk::Extent2D {
-                width: window_width.clamp(
-                    self.dev_info.surf_caps.min_image_extent.width,
-                    self.dev_info.surf_caps.max_image_extent.width,
-                ),
-                height: window_height.clamp(
-                    self.dev_info.surf_caps.min_image_extent.height,
-                    self.dev_info.surf_caps.max_image_extent.height,
-                ),
-            }
-        };
-
-        let img_count = if self.dev_info.surf_caps.max_image_count > 0 {
-            image_count.clamp(self.dev_info.surf_caps.min_image_count, self.dev_info.surf_caps.max_image_count)
-        } else {
-            image_count.max(self.dev_info.surf_caps.min_image_count)
-        };
-
+        let surface_format = self.surface_info.surface_format();
+        let present_mode = self.surface_info.present_mode();
+        let extent = self.surface_info.calc_extent(window_width, window_height);
+        let img_count = self.surface_info.calc_image_count(image_count);
         let que_families = self.dev_info.unique_families();
         let img_sharing_mode = if que_families.len() > 1 {
             vk::SharingMode::CONCURRENT
@@ -494,7 +508,7 @@ impl VulkanDevice {
             .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
             .image_sharing_mode(img_sharing_mode)
             .queue_family_indices(&que_families)
-            .pre_transform(self.dev_info.surf_caps.current_transform)
+            .pre_transform(self.surface_info.capabilities.current_transform)
             .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
             .present_mode(present_mode)
             .clipped(true);
