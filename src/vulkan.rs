@@ -58,14 +58,29 @@ impl VulkanInstance {
         Ok(validation_supp)
     }
 
+    fn check_portability_support(entry: &ash::Entry, names_ret: &mut Vec<*const c_char>) -> VulkanResult<bool> {
+        let ext_list = entry
+            .enumerate_instance_extension_properties(None)
+            .map_err(Error::bind_msg("Failed to enumerate instance extension properties"))?;
+        let supported_exts: Vec<_> = ext_list.iter().map(|ext| vk_to_cstr(&ext.extension_name)).collect();
+        //eprintln!("Supported instance extensions: {supported_exts:#?}");
+        let ext_names = [vk::KhrPortabilityEnumerationFn::name(), khr::GetPhysicalDeviceProperties2::name()];
+        let supported = ext_names.into_iter().all(|ext| supported_exts.contains(&ext));
+        if supported {
+            names_ret.extend(ext_names.map(CStr::as_ptr));
+        }
+        Ok(supported)
+    }
+
     fn create_instance(
         entry: &ash::Entry, window: &Window, app_name: &CStr, engine_name: &CStr, validation_enabled: bool,
     ) -> VulkanResult<ash::Instance> {
         let mut extension_names = ash_window::enumerate_required_extensions(window.raw_display_handle())
             .map_err(Error::bind_msg("Unsupported display platform"))?
             .to_vec();
-        extension_names.push(vk::KhrPortabilityEnumerationFn::name().as_ptr());
-        extension_names.push(khr::GetPhysicalDeviceProperties2::name().as_ptr());
+        let portability = Self::check_portability_support(entry, &mut extension_names)?
+            .then_some(vk::InstanceCreateFlags::ENUMERATE_PORTABILITY_KHR)
+            .unwrap_or_default();
 
         let mut layer_names = Vec::with_capacity(1);
         if validation_enabled {
@@ -83,7 +98,7 @@ impl VulkanInstance {
 
         let dbg_messenger_ci = create_debug_messenger_ci();
         let mut instance_ci = vk::InstanceCreateInfo::builder()
-            .flags(vk::InstanceCreateFlags::ENUMERATE_PORTABILITY_KHR)
+            .flags(portability)
             .application_info(&app_info)
             .enabled_extension_names(&extension_names)
             .enabled_layer_names(&layer_names);
