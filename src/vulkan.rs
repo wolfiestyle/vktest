@@ -2,6 +2,7 @@ use ash::extensions::{ext, khr};
 use ash::vk;
 use cstr::cstr;
 use inline_spirv::include_spirv;
+use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use std::collections::HashSet;
 use std::ffi::{c_char, c_void, CStr, CString};
 use winit::window::Window;
@@ -57,54 +58,15 @@ impl VulkanInstance {
         Ok(validation_supp)
     }
 
-    fn get_required_instance_extensions(entry: &ash::Entry, window: &Window, validation_enabled: bool) -> VulkanResult<Vec<*const i8>> {
-        let ext_list = entry
-            .enumerate_instance_extension_properties(None)
-            .map_err(Error::bind_msg("Failed to enumerate instance extension properties"))?;
-        let supported_exts: Vec<_> = ext_list.iter().map(|ext| vk_to_cstr(&ext.extension_name)).collect();
-        //eprintln!("Supported instance extensions: {supported_exts:#?}");
-        let required_exts = [khr::Surface::name(), Self::get_platform_ext_name(window)];
-        required_exts
-            .iter()
-            .cloned()
-            .chain(validation_enabled.then(ext::DebugUtils::name))
-            .map(|ext| {
-                if supported_exts.contains(&ext) {
-                    eprintln!("Using instance extension {ext:?}");
-                    Ok(ext.as_ptr())
-                } else {
-                    eprintln!("Unsupported instance extension {ext:?}");
-                    Err(Error::EngineError("Couldn't find all required instance extensions"))
-                }
-            })
-            .collect()
-    }
-
-    #[cfg(target_family = "unix")]
-    fn get_platform_ext_name(window: &Window) -> &'static CStr {
-        use winit::platform::unix::WindowExtUnix;
-
-        if window.wayland_surface().is_some() {
-            khr::WaylandSurface::name()
-        } else if window.xlib_window().is_some() {
-            khr::XlibSurface::name()
-        } else {
-            panic!("Failed to detect Wayland or X11");
-        }
-    }
-
-    #[cfg(target_family = "windows")]
-    fn get_platform_ext_name(_window: &Window) -> &'static CStr {
-        khr::Win32Surface::name()
-    }
-
     fn create_instance(
         entry: &ash::Entry, window: &Window, app_name: &CStr, engine_name: &CStr, validation_enabled: bool,
     ) -> VulkanResult<ash::Instance> {
-        let extension_names = Self::get_required_instance_extensions(entry, window, validation_enabled)?;
-
+        let mut extension_names = ash_window::enumerate_required_extensions(window.raw_display_handle())
+            .map_err(Error::bind_msg("Unsupported display platform"))?
+            .to_vec();
         let mut layer_names = Vec::with_capacity(1);
         if validation_enabled {
+            extension_names.push(ext::DebugUtils::name().as_ptr());
             layer_names.push(VALIDATION_LAYER.as_ptr());
             eprintln!("Using instance layer {VALIDATION_LAYER:?}");
         }
@@ -142,47 +104,16 @@ impl VulkanInstance {
         Ok(messenger)
     }
 
-    #[cfg(target_family = "unix")]
     fn create_surface(&self, window: &Window) -> VulkanResult<vk::SurfaceKHR> {
-        use winit::platform::unix::WindowExtUnix;
-
-        if let Some(wl_surface) = window.wayland_surface() {
-            let surface_ci = vk::WaylandSurfaceCreateInfoKHR::builder()
-                .surface(wl_surface)
-                .display(window.wayland_display().unwrap());
-            let surface_loader = khr::WaylandSurface::new(&self.entry, &self.instance);
-            unsafe {
-                surface_loader
-                    .create_wayland_surface(&surface_ci, None)
-                    .map_err(Error::bind_msg("Failed to create Wayland surface"))
-            }
-        } else if let Some(xlib_win) = window.xlib_window() {
-            let surface_ci = vk::XlibSurfaceCreateInfoKHR::builder()
-                .window(xlib_win)
-                .dpy(window.xlib_display().unwrap() as _);
-            let surface_loader = khr::XlibSurface::new(&self.entry, &self.instance);
-            unsafe {
-                surface_loader
-                    .create_xlib_surface(&surface_ci, None)
-                    .map_err(Error::bind_msg("Failed to create Xlib surface"))
-            }
-        } else {
-            Err(Error::EngineError("Failed to get Wayland or Xlib window handle"))
-        }
-    }
-
-    #[cfg(target_family = "windows")]
-    fn create_surface(&self, window: &Window) -> VulkanResult<vk::SurfaceKHR> {
-        use winit::platform::windows::WindowExtWindows;
-
-        let surface_ci = vk::Win32SurfaceCreateInfoKHR::builder()
-            .hwnd(window.hwnd() as _)
-            .hinstance(window.hinstance() as _);
-        let surface_loader = khr::Win32Surface::new(&self.entry, &self.instance);
         unsafe {
-            surface_loader
-                .create_win32_surface(&surface_ci, None)
-                .map_err(Error::bind_msg("Failed to create Win32 surface"))
+            ash_window::create_surface(
+                &self.entry,
+                &self.instance,
+                window.raw_display_handle(),
+                window.raw_window_handle(),
+                None,
+            )
+            .map_err(Error::bind_msg("Failed to create surface"))
         }
     }
 
