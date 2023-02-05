@@ -4,11 +4,11 @@ use cstr::cstr;
 use inline_spirv::include_spirv;
 use std::collections::HashSet;
 use std::ffi::{c_char, c_void, CStr, CString};
-use winit::dpi::PhysicalSize;
 use winit::window::Window;
 
 const VALIDATION_LAYER: &CStr = cstr!("VK_LAYER_KHRONOS_validation");
 const REQ_DEVICE_EXTENSIONS: [&CStr; 1] = [khr::Swapchain::name()];
+const SWAPCHAIN_IMAGE_COUNT: u32 = 3;
 const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
 struct VulkanInstance {
@@ -401,6 +401,7 @@ impl SurfaceInfo {
     }
 }
 
+#[derive(Debug)]
 struct SwapchainInfo {
     handle: vk::SwapchainKHR,
     //images: Vec<vk::Image>,
@@ -486,10 +487,12 @@ impl VulkanDevice {
         })
     }
 
-    fn create_swapchain(&self, window_width: u32, window_height: u32, image_count: u32) -> VulkanResult<SwapchainInfo> {
+    fn create_swapchain(&self, window: &Window, image_count: u32, old_swapchain: Option<vk::SwapchainKHR>) -> VulkanResult<SwapchainInfo> {
         let surface_format = self.surface_info.surface_format();
         let present_mode = self.surface_info.present_mode();
-        let extent = self.surface_info.calc_extent(window_width, window_height);
+        let win_size = window.inner_size();
+        eprintln!("window size: {} x {}", win_size.width, win_size.height);
+        let extent = self.surface_info.calc_extent(win_size.width, win_size.height);
         let img_count = self.surface_info.calc_image_count(image_count);
         let que_families = self.dev_info.unique_families();
         let img_sharing_mode = if que_families.len() > 1 {
@@ -511,7 +514,8 @@ impl VulkanDevice {
             .pre_transform(self.surface_info.capabilities.current_transform)
             .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
             .present_mode(present_mode)
-            .clipped(true);
+            .clipped(true)
+            .old_swapchain(old_swapchain.unwrap_or_default());
 
         let swapchain = unsafe {
             self.swapchain_utils
@@ -758,6 +762,19 @@ impl VulkanDevice {
                 .map_err(Error::bind_msg("Failed to create fence"))
         }
     }
+
+    fn wait_idle(&self) -> VulkanResult<()> {
+        unsafe {
+            self.device
+                .device_wait_idle()
+                .map_err(Error::bind_msg("Failed to wait device idle"))
+        }
+    }
+
+    fn update_surface_info(&mut self) -> VulkanResult<()> {
+        self.surface_info = self.instance.query_surface_info(self.dev_info.phys_dev, self.surface)?;
+        Ok(())
+    }
 }
 
 impl std::ops::Deref for VulkanDevice {
@@ -794,9 +811,7 @@ pub struct VulkanApp {
 impl VulkanApp {
     pub fn new(window: &Window) -> VulkanResult<Self> {
         let vk = VulkanDevice::new(window)?;
-        let PhysicalSize { width, height } = window.inner_size();
-        eprintln!("window size: {width} x {height}");
-        let swapchain = vk.create_swapchain(width, height, 3)?;
+        let swapchain = vk.create_swapchain(window, SWAPCHAIN_IMAGE_COUNT, None)?;
         let render_pass = vk.create_render_pass(swapchain.format)?;
         let (pipeline, pipeline_layout) = vk.create_graphics_pipeline(render_pass, &swapchain)?;
         let framebuffers = vk.create_framebuffers(&swapchain, render_pass)?;
@@ -860,31 +875,39 @@ impl VulkanApp {
         Ok(())
     }
 
-    pub fn draw_frame(&mut self) -> VulkanResult<bool> {
+    pub fn draw_frame(&mut self, window: &Window) -> VulkanResult<()> {
         let in_flight_fen = [self.in_flight_fens[self.current_frame]];
         let image_avail_sem = [self.image_avail_sems[self.current_frame]];
         let render_finish_sem = [self.render_finished_sems[self.current_frame]];
         let command_buffer = [self.command_buffers[self.current_frame]];
-        self.current_frame = (self.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
 
         let image_idx = unsafe {
             self.device
                 .wait_for_fences(&in_flight_fen, true, u64::MAX)
                 .map_err(Error::bind_msg("Failed waiting for error"))?;
+            let acquire_res =
+                self.device
+                    .swapchain_utils
+                    .acquire_next_image(self.swapchain.handle, u64::MAX, image_avail_sem[0], vk::Fence::null());
+            match acquire_res {
+                Ok((idx, _)) => idx,
+                Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
+                    eprintln!("swapchain out of date");
+                    self.recreate_swapchain(window)?;
+                    return Ok(());
+                }
+                Err(e) => return Err(Error::VulkanError("Failed to acquire swapchain image", e)),
+            }
+        };
+
+        unsafe {
             self.device
                 .reset_fences(&in_flight_fen)
                 .map_err(Error::bind_msg("Failed resetting fences"))?;
-            let (image_idx, _) = self
-                .device
-                .swapchain_utils
-                .acquire_next_image(self.swapchain.handle, u64::MAX, image_avail_sem[0], vk::Fence::null())
-                .map_err(Error::bind_msg("Failed to acquire swapchain image"))?;
             self.device
                 .reset_command_buffer(command_buffer[0], vk::CommandBufferResetFlags::empty())
                 .map_err(Error::bind_msg("Failed to reset command buffer"))?;
-
-            image_idx
-        };
+        }
 
         self.record_command_buffer(command_buffer[0], image_idx)?;
 
@@ -909,35 +932,62 @@ impl VulkanApp {
             .swapchains(&swapchains)
             .image_indices(&image_indices);
 
-        unsafe {
+        let suboptimal = unsafe {
             self.device
                 .swapchain_utils
                 .queue_present(self.device.present_queue, &present_info)
-                .map_err(Error::bind_msg("Failed to present queue"))
+                .map_err(Error::bind_msg("Failed to present queue"))?
+        };
+
+        self.current_frame = (self.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
+
+        if suboptimal {
+            eprintln!("swapchain suboptimal");
+            self.recreate_swapchain(window)?;
         }
+
+        Ok(())
+    }
+
+    unsafe fn cleanup_swapchain(&mut self) {
+        for &fb in &self.framebuffers {
+            self.device.destroy_framebuffer(fb, None);
+        }
+        for &imgview in &self.swapchain.image_views {
+            self.device.destroy_image_view(imgview, None);
+        }
+        self.device.swapchain_utils.destroy_swapchain(self.swapchain.handle, None);
+    }
+
+    fn recreate_swapchain(&mut self, window: &Window) -> VulkanResult<()> {
+        self.device.wait_idle()?;
+        self.device.update_surface_info()?;
+        let swapchain = self
+            .device
+            .create_swapchain(window, SWAPCHAIN_IMAGE_COUNT, Some(self.swapchain.handle))?;
+        let framebuffers = self.device.create_framebuffers(&swapchain, self.render_pass)?;
+        unsafe { self.cleanup_swapchain() };
+        self.swapchain = swapchain;
+        self.framebuffers = framebuffers;
+
+        Ok(())
     }
 }
 
 impl Drop for VulkanApp {
     fn drop(&mut self) {
         unsafe {
-            self.device.device_wait_idle().expect("Failed to wait idle");
+            self.device.wait_idle().unwrap();
             for i in 0..MAX_FRAMES_IN_FLIGHT {
                 self.device.destroy_semaphore(self.image_avail_sems[i], None);
                 self.device.destroy_semaphore(self.render_finished_sems[i], None);
                 self.device.destroy_fence(self.in_flight_fens[i], None);
             }
             self.device.destroy_command_pool(self.command_pool, None);
-            for &fb in &self.framebuffers {
-                self.device.destroy_framebuffer(fb, None);
-            }
             self.device.destroy_pipeline(self.pipeline, None);
             self.device.destroy_pipeline_layout(self.pipeline_layout, None);
             self.device.destroy_render_pass(self.render_pass, None);
-            for &imgview in &self.swapchain.image_views {
-                self.device.destroy_image_view(imgview, None);
-            }
-            self.device.swapchain_utils.destroy_swapchain(self.swapchain.handle, None);
+            self.cleanup_swapchain();
         }
     }
 }

@@ -36,7 +36,7 @@ fn main() {
             window.request_redraw();
         }
         Event::RedrawRequested(_) => {
-            vk_app.draw_frame().unwrap();
+            vk_app.draw_frame(&window).unwrap();
 
             let cur_time = Instant::now();
             if cur_time - prev_time > Duration::from_secs(1) {
