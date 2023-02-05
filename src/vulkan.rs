@@ -64,6 +64,9 @@ impl VulkanInstance {
         let mut extension_names = ash_window::enumerate_required_extensions(window.raw_display_handle())
             .map_err(Error::bind_msg("Unsupported display platform"))?
             .to_vec();
+        extension_names.push(vk::KhrPortabilityEnumerationFn::name().as_ptr());
+        extension_names.push(khr::GetPhysicalDeviceProperties2::name().as_ptr());
+
         let mut layer_names = Vec::with_capacity(1);
         if validation_enabled {
             extension_names.push(ext::DebugUtils::name().as_ptr());
@@ -80,6 +83,7 @@ impl VulkanInstance {
 
         let dbg_messenger_ci = create_debug_messenger_ci();
         let mut instance_ci = vk::InstanceCreateInfo::builder()
+            .flags(vk::InstanceCreateFlags::ENUMERATE_PORTABILITY_KHR)
             .application_info(&app_info)
             .enabled_extension_names(&extension_names)
             .enabled_layer_names(&layer_names);
@@ -191,7 +195,7 @@ impl VulkanInstance {
             name,
             graphics_idx: graphics_idx.unwrap(),
             present_idx: present_idx.unwrap(),
-            //extensions,
+            extensions,
         })
     }
 
@@ -237,7 +241,10 @@ impl VulkanInstance {
 
         let features = vk::PhysicalDeviceFeatures::default();
         let layers = [VALIDATION_LAYER.as_ptr()];
-        let extensions: Vec<_> = REQ_DEVICE_EXTENSIONS.into_iter().map(CStr::as_ptr).collect();
+        let mut extensions: Vec<_> = REQ_DEVICE_EXTENSIONS.into_iter().map(CStr::as_ptr).collect();
+        if dev_info.extensions.contains(vk::KhrPortabilitySubsetFn::name()) {
+            extensions.push(vk::KhrPortabilitySubsetFn::name().as_ptr());
+        }
 
         let mut device_ci = vk::DeviceCreateInfo::builder()
             .queue_create_infos(&queues_ci)
@@ -275,7 +282,7 @@ struct DeviceInfo {
     dev_type: DeviceType,
     graphics_idx: u32,
     present_idx: u32,
-    //extensions: HashSet<CString>,
+    extensions: HashSet<CString>,
 }
 
 impl DeviceInfo {
