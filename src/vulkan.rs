@@ -255,21 +255,15 @@ impl VulkanInstance {
             .collect();
 
         let features = vk::PhysicalDeviceFeatures::default();
-        let layers = [VALIDATION_LAYER.as_ptr()];
         let mut extensions = REQ_DEVICE_EXTENSIONS.map(CStr::as_ptr).to_vec();
         if dev_info.extensions.contains(vk::KhrPortabilitySubsetFn::name()) {
             extensions.push(vk::KhrPortabilitySubsetFn::name().as_ptr());
         }
 
-        let mut device_ci = vk::DeviceCreateInfo::builder()
+        let device_ci = vk::DeviceCreateInfo::builder()
             .queue_create_infos(&queues_ci)
             .enabled_features(&features)
             .enabled_extension_names(&extensions);
-
-        if self.debug_utils.is_some() {
-            // validation enabled
-            device_ci = device_ci.enabled_layer_names(&layers);
-        }
 
         unsafe {
             self.instance
@@ -802,7 +796,7 @@ impl VulkanApp {
         let swapchain = vk.create_swapchain(window, SWAPCHAIN_IMAGE_COUNT, None)?;
 
         let vert_spv = include_spirv!("src/shaders/triangle.vert.glsl", vert, glsl);
-        let frag_spv = include_spirv!("src/shaders/triangle.frag.glsl", frag, glsl);
+        let frag_spv = include_spirv!("src/shaders/color.frag.glsl", frag, glsl);
         let render_pass = vk.create_render_pass(swapchain.format)?;
         let framebuffers = vk.create_framebuffers(&swapchain, render_pass)?;
         let (pipeline, pipeline_layout) = vk.create_graphics_pipeline(vert_spv, frag_spv, render_pass)?;
