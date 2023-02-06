@@ -571,10 +571,10 @@ impl VulkanDevice {
     }
 
     fn create_graphics_pipeline(
-        &self, render_pass: vk::RenderPass, swapchain: &SwapchainInfo,
+        &self, vert_shader_spv: &[u32], frag_shader_spv: &[u32], render_pass: vk::RenderPass,
     ) -> VulkanResult<(vk::Pipeline, vk::PipelineLayout)> {
-        let vert_shader = self.create_shader_module(include_spirv!("src/shaders/triangle.vert.glsl", vert, glsl))?;
-        let frag_shader = self.create_shader_module(include_spirv!("src/shaders/triangle.frag.glsl", frag, glsl))?;
+        let vert_shader = self.create_shader_module(vert_shader_spv)?;
+        let frag_shader = self.create_shader_module(frag_shader_spv)?;
 
         let entry_point = cstr!("main");
         let shader_stages_ci = [
@@ -592,14 +592,15 @@ impl VulkanDevice {
 
         let vertex_input_ci = vk::PipelineVertexInputStateCreateInfo::default();
 
-        let input_assembly_ci = vk::PipelineInputAssemblyStateCreateInfo::builder().topology(vk::PrimitiveTopology::TRIANGLE_LIST);
+        let input_assembly_ci = vk::PipelineInputAssemblyStateCreateInfo::builder()
+            .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
+            .primitive_restart_enable(false);
 
-        let viewport = [swapchain.viewport()];
-        let scissor = [swapchain.extent_rect()];
-
-        let viewport_state_ci = vk::PipelineViewportStateCreateInfo::builder()
-            .viewports(&viewport)
-            .scissors(&scissor);
+        let viewport_state_ci = vk::PipelineViewportStateCreateInfo {
+            viewport_count: 1,
+            scissor_count: 1,
+            ..Default::default()
+        };
 
         let dynamic_state_ci =
             vk::PipelineDynamicStateCreateInfo::builder().dynamic_states(&[vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR]);
@@ -617,9 +618,16 @@ impl VulkanDevice {
         let color_attach = [vk::PipelineColorBlendAttachmentState::builder()
             .color_write_mask(vk::ColorComponentFlags::RGBA)
             .blend_enable(false)
+            .src_color_blend_factor(vk::BlendFactor::ONE)
+            .dst_color_blend_factor(vk::BlendFactor::ZERO)
+            .color_blend_op(vk::BlendOp::ADD)
+            .src_color_blend_factor(vk::BlendFactor::ONE)
+            .dst_color_blend_factor(vk::BlendFactor::ZERO)
+            .alpha_blend_op(vk::BlendOp::ADD)
             .build()];
 
         let color_blend_ci = vk::PipelineColorBlendStateCreateInfo::builder()
+            .logic_op_enable(false)
             .logic_op(vk::LogicOp::COPY)
             .attachments(&color_attach);
 
@@ -792,9 +800,13 @@ impl VulkanApp {
     pub fn new(window: &Window) -> VulkanResult<Self> {
         let vk = VulkanDevice::new(window)?;
         let swapchain = vk.create_swapchain(window, SWAPCHAIN_IMAGE_COUNT, None)?;
+
+        let vert_spv = include_spirv!("src/shaders/triangle.vert.glsl", vert, glsl);
+        let frag_spv = include_spirv!("src/shaders/triangle.frag.glsl", frag, glsl);
         let render_pass = vk.create_render_pass(swapchain.format)?;
-        let (pipeline, pipeline_layout) = vk.create_graphics_pipeline(render_pass, &swapchain)?;
         let framebuffers = vk.create_framebuffers(&swapchain, render_pass)?;
+        let (pipeline, pipeline_layout) = vk.create_graphics_pipeline(vert_spv, frag_spv, render_pass)?;
+
         let command_pool = vk.create_command_pool()?;
         let command_buffers = vk.create_command_buffers(command_pool, MAX_FRAMES_IN_FLIGHT as u32)?;
         let sync = (0..MAX_FRAMES_IN_FLIGHT)
