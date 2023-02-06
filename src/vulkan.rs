@@ -256,7 +256,7 @@ impl VulkanInstance {
 
         let features = vk::PhysicalDeviceFeatures::default();
         let layers = [VALIDATION_LAYER.as_ptr()];
-        let mut extensions: Vec<_> = REQ_DEVICE_EXTENSIONS.into_iter().map(CStr::as_ptr).collect();
+        let mut extensions = REQ_DEVICE_EXTENSIONS.map(CStr::as_ptr).to_vec();
         if dev_info.extensions.contains(vk::KhrPortabilitySubsetFn::name()) {
             extensions.push(vk::KhrPortabilitySubsetFn::name().as_ptr());
         }
@@ -380,6 +380,13 @@ impl SwapchainInfo {
             offset: Default::default(),
             extent: self.extent,
         }
+    }
+
+    unsafe fn cleanup(&mut self, device: &VulkanDevice) {
+        for &imgview in &self.image_views {
+            device.destroy_image_view(imgview, None);
+        }
+        device.swapchain_utils.destroy_swapchain(self.handle, None);
     }
 }
 
@@ -746,6 +753,28 @@ impl Drop for VulkanDevice {
     }
 }
 
+struct FrameSyncState {
+    image_avail_sem: vk::Semaphore,
+    render_finished_sem: vk::Semaphore,
+    in_flight_fen: vk::Fence,
+}
+
+impl FrameSyncState {
+    fn new(device: &VulkanDevice) -> VulkanResult<Self> {
+        Ok(Self {
+            image_avail_sem: device.create_semaphore()?,
+            render_finished_sem: device.create_semaphore()?,
+            in_flight_fen: device.create_fence()?,
+        })
+    }
+
+    unsafe fn cleanup(&mut self, device: &ash::Device) {
+        device.destroy_semaphore(self.image_avail_sem, None);
+        device.destroy_semaphore(self.render_finished_sem, None);
+        device.destroy_fence(self.in_flight_fen, None);
+    }
+}
+
 pub struct VulkanApp {
     device: VulkanDevice,
     swapchain: SwapchainInfo,
@@ -755,9 +784,7 @@ pub struct VulkanApp {
     framebuffers: Vec<vk::Framebuffer>,
     command_pool: vk::CommandPool,
     command_buffers: Vec<vk::CommandBuffer>,
-    image_avail_sems: Vec<vk::Semaphore>,
-    render_finished_sems: Vec<vk::Semaphore>,
-    in_flight_fens: Vec<vk::Fence>,
+    sync: Vec<FrameSyncState>,
     current_frame: usize,
 }
 
@@ -770,9 +797,9 @@ impl VulkanApp {
         let framebuffers = vk.create_framebuffers(&swapchain, render_pass)?;
         let command_pool = vk.create_command_pool()?;
         let command_buffers = vk.create_command_buffers(command_pool, MAX_FRAMES_IN_FLIGHT as u32)?;
-        let image_avail_sems = (0..MAX_FRAMES_IN_FLIGHT).map(|_| vk.create_semaphore()).collect::<Result<_, _>>()?;
-        let render_finished_sems = (0..MAX_FRAMES_IN_FLIGHT).map(|_| vk.create_semaphore()).collect::<Result<_, _>>()?;
-        let in_flight_fens = (0..MAX_FRAMES_IN_FLIGHT).map(|_| vk.create_fence()).collect::<Result<_, _>>()?;
+        let sync = (0..MAX_FRAMES_IN_FLIGHT)
+            .map(|_| FrameSyncState::new(&vk))
+            .collect::<Result<_, _>>()?;
 
         Ok(Self {
             device: vk,
@@ -783,9 +810,7 @@ impl VulkanApp {
             framebuffers,
             command_pool,
             command_buffers,
-            image_avail_sems,
-            render_finished_sems,
-            in_flight_fens,
+            sync,
             current_frame: 0,
         })
     }
@@ -829,9 +854,9 @@ impl VulkanApp {
     }
 
     pub fn draw_frame(&mut self, window: &Window) -> VulkanResult<()> {
-        let in_flight_fen = [self.in_flight_fens[self.current_frame]];
-        let image_avail_sem = [self.image_avail_sems[self.current_frame]];
-        let render_finish_sem = [self.render_finished_sems[self.current_frame]];
+        let in_flight_fen = [self.sync[self.current_frame].in_flight_fen];
+        let image_avail_sem = [self.sync[self.current_frame].image_avail_sem];
+        let render_finish_sem = [self.sync[self.current_frame].render_finished_sem];
         let command_buffer = [self.command_buffers[self.current_frame]];
 
         let image_idx = unsafe {
@@ -906,10 +931,7 @@ impl VulkanApp {
         for &fb in &self.framebuffers {
             self.device.destroy_framebuffer(fb, None);
         }
-        for &imgview in &self.swapchain.image_views {
-            self.device.destroy_image_view(imgview, None);
-        }
-        self.device.swapchain_utils.destroy_swapchain(self.swapchain.handle, None);
+        self.swapchain.cleanup(&self.device);
     }
 
     fn recreate_swapchain(&mut self, window: &Window) -> VulkanResult<()> {
@@ -931,10 +953,8 @@ impl Drop for VulkanApp {
     fn drop(&mut self) {
         unsafe {
             self.device.wait_idle().unwrap();
-            for i in 0..MAX_FRAMES_IN_FLIGHT {
-                self.device.destroy_semaphore(self.image_avail_sems[i], None);
-                self.device.destroy_semaphore(self.render_finished_sems[i], None);
-                self.device.destroy_fence(self.in_flight_fens[i], None);
+            for elem in &mut self.sync {
+                elem.cleanup(&self.device);
             }
             self.device.destroy_command_pool(self.command_pool, None);
             self.device.destroy_pipeline(self.pipeline, None);
