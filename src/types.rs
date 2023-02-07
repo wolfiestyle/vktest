@@ -1,5 +1,32 @@
 use ash::vk;
 
+pub type VulkanResult<T> = Result<T, Error>;
+
+#[derive(Debug)]
+pub enum Error {
+    LoadingError(ash::LoadingError),
+    VulkanError(&'static str, vk::Result),
+    EngineError(&'static str),
+    UnsuitableDevice, // used internally
+}
+
+impl Error {
+    pub const fn bind_msg(msg: &'static str) -> impl Fn(vk::Result) -> Self {
+        move |err| Self::VulkanError(msg, err)
+    }
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        match self {
+            Self::LoadingError(err) => write!(f, "Failed to load Vulkan library: {err}"),
+            Self::VulkanError(desc, err) => write!(f, "{desc}: {err}"),
+            Self::EngineError(desc) => write!(f, "{desc}"),
+            Self::UnsuitableDevice => write!(f, "Unsuitable device"),
+        }
+    }
+}
+
 pub trait TypeFormat {
     const VK_FORMAT: vk::Format;
 }

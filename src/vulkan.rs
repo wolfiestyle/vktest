@@ -1061,33 +1061,6 @@ impl Drop for VulkanApp {
     }
 }
 
-pub type VulkanResult<T> = Result<T, Error>;
-
-#[derive(Debug)]
-pub enum Error {
-    LoadingError(ash::LoadingError),
-    VulkanError(&'static str, vk::Result),
-    EngineError(&'static str),
-    UnsuitableDevice, // used internally
-}
-
-impl Error {
-    const fn bind_msg(msg: &'static str) -> impl Fn(vk::Result) -> Self {
-        move |err| Self::VulkanError(msg, err)
-    }
-}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        match self {
-            Self::LoadingError(err) => write!(f, "Failed to load Vulkan library: {err}"),
-            Self::VulkanError(desc, err) => write!(f, "{desc}: {err}"),
-            Self::EngineError(desc) => write!(f, "{desc}"),
-            Self::UnsuitableDevice => write!(f, "Unsuitable device"),
-        }
-    }
-}
-
 fn vk_to_cstr(raw: &[c_char]) -> &CStr {
     //TODO: replace with `CStr::from_bytes_until_nul` when it's stable
     unsafe { CStr::from_ptr(raw.as_ptr()) }
