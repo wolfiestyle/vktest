@@ -1,3 +1,4 @@
+use crate::types::*;
 use ash::extensions::{ext, khr};
 use ash::vk;
 use cstr::cstr;
@@ -204,6 +205,9 @@ impl VulkanInstance {
             return Err(Error::UnsuitableDevice);
         }
 
+        // memory properties
+        let mem_props = unsafe { self.instance.get_physical_device_memory_properties(phys_dev) };
+
         Ok(DeviceInfo {
             phys_dev,
             dev_type,
@@ -211,6 +215,7 @@ impl VulkanInstance {
             graphics_idx: graphics_idx.unwrap(),
             present_idx: present_idx.unwrap(),
             extensions,
+            mem_props,
         })
     }
 
@@ -292,6 +297,7 @@ struct DeviceInfo {
     graphics_idx: u32,
     present_idx: u32,
     extensions: HashSet<CString>,
+    mem_props: vk::PhysicalDeviceMemoryProperties,
 }
 
 impl DeviceInfo {
@@ -301,6 +307,15 @@ impl DeviceInfo {
         } else {
             vec![self.graphics_idx, self.present_idx]
         }
+    }
+
+    fn find_memory_type(&self, type_filter: u32, prop_flags: vk::MemoryPropertyFlags) -> VulkanResult<u32> {
+        for i in 0..self.mem_props.memory_type_count {
+            if type_filter & (1 << i) != 0 && self.mem_props.memory_types[i as usize].property_flags.contains(prop_flags) {
+                return Ok(i);
+            }
+        }
+        Err(Error::EngineError("Failed to find suitable memory type"))
     }
 }
 
@@ -584,7 +599,14 @@ impl VulkanDevice {
                 .build(),
         ];
 
-        let vertex_input_ci = vk::PipelineVertexInputStateCreateInfo::default();
+        //FIXME: this should come as a parameter
+        type Vertex = ([f32; 2], [f32; 3]);
+        let binding_desc = [<Vertex>::binding_desc(0)];
+        let attr_desc = <Vertex>::attr_desc(0);
+
+        let vertex_input_ci = vk::PipelineVertexInputStateCreateInfo::builder()
+            .vertex_binding_descriptions(&binding_desc)
+            .vertex_attribute_descriptions(&attr_desc);
 
         let input_assembly_ci = vk::PipelineInputAssemblyStateCreateInfo::builder()
             .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
@@ -737,6 +759,58 @@ impl VulkanDevice {
         self.surface_info = self.instance.query_surface_info(self.dev_info.phys_dev, self.surface)?;
         Ok(())
     }
+
+    fn allocate_buffer(&self, size: vk::DeviceSize, usage: vk::BufferUsageFlags) -> VulkanResult<(vk::Buffer, vk::DeviceMemory)> {
+        let buffer_ci = vk::BufferCreateInfo::builder()
+            .size(size)
+            .usage(usage)
+            .sharing_mode(vk::SharingMode::EXCLUSIVE);
+
+        let buffer = unsafe {
+            self.device
+                .create_buffer(&buffer_ci, None)
+                .map_err(Error::bind_msg("Failed to create vertex buffer"))?
+        };
+
+        let mem_reqs = unsafe { self.device.get_buffer_memory_requirements(buffer) };
+        let mem_type = self.dev_info.find_memory_type(
+            mem_reqs.memory_type_bits,
+            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+        )?;
+
+        let alloc_info = vk::MemoryAllocateInfo::builder()
+            .allocation_size(mem_reqs.size)
+            .memory_type_index(mem_type);
+
+        let memory = unsafe {
+            self.device
+                .allocate_memory(&alloc_info, None)
+                .map_err(Error::bind_msg("Failed to allocate vertex buffer memory"))?
+        };
+        unsafe {
+            self.device
+                .bind_buffer_memory(buffer, memory, 0)
+                .map_err(Error::bind_msg("Failed to bind buffer memory"))?
+        };
+
+        Ok((buffer, memory))
+    }
+
+    fn create_buffer<T: Copy>(&self, data: &[T], usage: vk::BufferUsageFlags) -> VulkanResult<(vk::Buffer, vk::DeviceMemory)> {
+        let size = std::mem::size_of_val(data) as _;
+        let (buffer, memory) = self.allocate_buffer(size, usage)?;
+
+        unsafe {
+            let mapped_ptr = self
+                .device
+                .map_memory(memory, 0, size, vk::MemoryMapFlags::empty())
+                .map_err(Error::bind_msg("Failed to map buffer memory"))? as *mut T;
+            std::slice::from_raw_parts_mut(mapped_ptr, data.len() as usize).copy_from_slice(data);
+            self.device.unmap_memory(memory);
+        };
+
+        Ok((buffer, memory))
+    }
 }
 
 impl std::ops::Deref for VulkanDevice {
@@ -788,6 +862,8 @@ pub struct VulkanApp {
     command_buffers: Vec<vk::CommandBuffer>,
     sync: Vec<FrameSyncState>,
     current_frame: usize,
+    vertex_buffer: vk::Buffer,
+    vb_memory: vk::DeviceMemory,
 }
 
 impl VulkanApp {
@@ -795,7 +871,7 @@ impl VulkanApp {
         let vk = VulkanDevice::new(window)?;
         let swapchain = vk.create_swapchain(window, SWAPCHAIN_IMAGE_COUNT, None)?;
 
-        let vert_spv = include_spirv!("src/shaders/triangle.vert.glsl", vert, glsl);
+        let vert_spv = include_spirv!("src/shaders/color.vert.glsl", vert, glsl);
         let frag_spv = include_spirv!("src/shaders/color.frag.glsl", frag, glsl);
         let render_pass = vk.create_render_pass(swapchain.format)?;
         let framebuffers = vk.create_framebuffers(&swapchain, render_pass)?;
@@ -806,6 +882,13 @@ impl VulkanApp {
         let sync = (0..MAX_FRAMES_IN_FLIGHT)
             .map(|_| FrameSyncState::new(&vk))
             .collect::<Result<_, _>>()?;
+
+        let vertices = [
+            ([0.0, -0.5], [1.0, 0.0, 0.0]),
+            ([0.5, 0.5], [0.0, 1.0, 0.0]),
+            ([-0.5, 0.5f32], [0.0, 0.0, 1.0f32]),
+        ];
+        let (vertex_buffer, vb_memory) = vk.create_buffer(&vertices, vk::BufferUsageFlags::VERTEX_BUFFER)?;
 
         Ok(Self {
             device: vk,
@@ -818,6 +901,8 @@ impl VulkanApp {
             command_buffers,
             sync,
             current_frame: 0,
+            vertex_buffer,
+            vb_memory,
         })
     }
 
@@ -842,11 +927,14 @@ impl VulkanApp {
 
         let viewport = [self.swapchain.viewport()];
         let scissor = [self.swapchain.extent_rect()];
+        let buffers = [self.vertex_buffer];
+        let offsets = [0];
         unsafe {
             self.device
                 .cmd_begin_render_pass(cmd_buffer, &renderpass_info, vk::SubpassContents::INLINE);
             self.device
                 .cmd_bind_pipeline(cmd_buffer, vk::PipelineBindPoint::GRAPHICS, self.pipeline);
+            self.device.cmd_bind_vertex_buffers(cmd_buffer, 0, &buffers, &offsets);
             self.device.cmd_set_viewport(cmd_buffer, 0, &viewport);
             self.device.cmd_set_scissor(cmd_buffer, 0, &scissor);
             self.device.cmd_draw(cmd_buffer, 3, 1, 0, 0);
@@ -959,6 +1047,8 @@ impl Drop for VulkanApp {
     fn drop(&mut self) {
         unsafe {
             self.device.wait_idle().unwrap();
+            self.device.destroy_buffer(self.vertex_buffer, None);
+            self.device.free_memory(self.vb_memory, None);
             for elem in &mut self.sync {
                 elem.cleanup(&self.device);
             }
