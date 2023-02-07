@@ -601,8 +601,8 @@ impl VulkanDevice {
 
         //FIXME: this should come as a parameter
         type Vertex = ([f32; 2], [f32; 3]);
-        let binding_desc = [<Vertex>::binding_desc(0)];
-        let attr_desc = <Vertex>::attr_desc(0);
+        let binding_desc = [Vertex::binding_desc(0)];
+        let attr_desc = Vertex::attr_desc(0);
 
         let vertex_input_ci = vk::PipelineVertexInputStateCreateInfo::builder()
             .vertex_binding_descriptions(&binding_desc)

@@ -1,4 +1,5 @@
 use ash::vk;
+use memoffset::offset_of_tuple;
 
 pub type VulkanResult<T> = Result<T, Error>;
 
@@ -62,21 +63,23 @@ pub trait VertexAttrDesc {
     fn attr_desc(binding: u32) -> Vec<vk::VertexInputAttributeDescription>;
 }
 
-impl<A: TypeFormat, B: TypeFormat> VertexAttrDesc for (A, B) {
-    fn attr_desc(binding: u32) -> Vec<vk::VertexInputAttributeDescription> {
-        vec![
-            vk::VertexInputAttributeDescription::builder()
-                .binding(binding)
-                .location(0)
-                .format(A::VK_FORMAT)
-                .offset(0)
-                .build(),
-            vk::VertexInputAttributeDescription::builder()
-                .binding(binding)
-                .location(1)
-                .format(B::VK_FORMAT)
-                .offset(std::mem::size_of::<A>() as _)
-                .build(),
-        ]
-    }
+macro_rules! impl_tuple_desc {
+    ($($name:ident $idx:tt),+) => {
+        impl<$($name: TypeFormat),+> VertexAttrDesc for ($($name,)+) {
+            fn attr_desc(binding: u32) -> Vec<vk::VertexInputAttributeDescription> {
+                vec![$(
+                    vk::VertexInputAttributeDescription::builder()
+                        .binding(binding)
+                        .location($idx)
+                        .format($name::VK_FORMAT)
+                        .offset(offset_of_tuple!(Self, $idx) as _)
+                        .build()
+                ),+]
+            }
+        }
+    };
 }
+
+impl_tuple_desc!(A 0);
+impl_tuple_desc!(A 0, B 1);
+impl_tuple_desc!(A 0, B 1, C 2);
