@@ -145,10 +145,8 @@ impl VulkanDevice {
             .collect()
     }
 
-    pub fn create_command_pool(&self, flags: vk::CommandPoolCreateFlags) -> VulkanResult<vk::CommandPool> {
-        let command_pool_ci = vk::CommandPoolCreateInfo::builder()
-            .flags(flags)
-            .queue_family_index(self.dev_info.graphics_idx);
+    pub fn create_command_pool(&self, family_idx: u32, flags: vk::CommandPoolCreateFlags) -> VulkanResult<vk::CommandPool> {
+        let command_pool_ci = vk::CommandPoolCreateInfo::builder().flags(flags).queue_family_index(family_idx);
 
         unsafe {
             self.device
@@ -182,10 +180,6 @@ impl VulkanDevice {
     pub fn create_fence(&self) -> VulkanResult<vk::Fence> {
         let fence_ci = vk::FenceCreateInfo::builder().flags(vk::FenceCreateFlags::SIGNALED);
         unsafe { self.device.create_fence(&fence_ci, None).describe_err("Failed to create fence") }
-    }
-
-    pub fn wait_idle(&self) -> VulkanResult<()> {
-        unsafe { self.device.device_wait_idle().describe_err("Failed to wait device idle") }
     }
 
     pub fn update_surface_info(&mut self) -> VulkanResult<()> {

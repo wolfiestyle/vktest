@@ -17,7 +17,6 @@ pub struct VulkanApp {
     pipeline_layout: vk::PipelineLayout,
     framebuffers: Vec<vk::Framebuffer>,
     command_pool: vk::CommandPool,
-    transfer_pool: vk::CommandPool,
     command_buffers: Vec<vk::CommandBuffer>,
     sync: Vec<FrameSyncState>,
     current_frame: usize,
@@ -38,8 +37,7 @@ impl VulkanApp {
         let framebuffers = vk.create_framebuffers(&swapchain, render_pass)?;
         let (pipeline, pipeline_layout) = Self::create_graphics_pipeline(&vk, vert_spv, frag_spv, render_pass)?;
 
-        let command_pool = vk.create_command_pool(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)?;
-        let transfer_pool = vk.create_command_pool(vk::CommandPoolCreateFlags::TRANSIENT)?;
+        let command_pool = vk.create_command_pool(vk.dev_info.graphics_idx, vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)?;
         let command_buffers = vk.create_command_buffers(command_pool, MAX_FRAMES_IN_FLIGHT as u32)?;
         let sync = (0..MAX_FRAMES_IN_FLIGHT)
             .map(|_| FrameSyncState::new(&vk))
@@ -52,8 +50,8 @@ impl VulkanApp {
             ([-0.5, 0.5], [1.0, 1.0, 1.0]),
         ];
         let indices: [u16; 6] = [0, 1, 2, 2, 3, 0];
-        let (vertex_buffer, vb_memory) = vk.create_buffer(&vertices, vk::BufferUsageFlags::VERTEX_BUFFER, transfer_pool)?;
-        let (index_buffer, ib_memory) = vk.create_buffer(&indices, vk::BufferUsageFlags::INDEX_BUFFER, transfer_pool)?;
+        let (vertex_buffer, vb_memory) = vk.create_buffer(&vertices, vk::BufferUsageFlags::VERTEX_BUFFER, command_pool)?;
+        let (index_buffer, ib_memory) = vk.create_buffer(&indices, vk::BufferUsageFlags::INDEX_BUFFER, command_pool)?;
 
         Ok(Self {
             device: vk,
@@ -63,7 +61,6 @@ impl VulkanApp {
             pipeline_layout,
             framebuffers,
             command_pool,
-            transfer_pool,
             command_buffers,
             sync,
             current_frame: 0,
@@ -339,7 +336,7 @@ impl VulkanApp {
     }
 
     fn recreate_swapchain(&mut self, window: &Window) -> VulkanResult<()> {
-        self.device.wait_idle()?;
+        unsafe { self.device.device_wait_idle()? };
         self.device.update_surface_info()?;
         let swapchain = self
             .device
@@ -356,7 +353,7 @@ impl VulkanApp {
 impl Drop for VulkanApp {
     fn drop(&mut self) {
         unsafe {
-            self.device.wait_idle().unwrap();
+            self.device.device_wait_idle().unwrap();
             self.device.destroy_buffer(self.vertex_buffer, None);
             self.device.free_memory(self.vb_memory, None);
             self.device.destroy_buffer(self.index_buffer, None);
@@ -365,7 +362,6 @@ impl Drop for VulkanApp {
                 elem.cleanup(&self.device);
             }
             self.device.destroy_command_pool(self.command_pool, None);
-            self.device.destroy_command_pool(self.transfer_pool, None);
             self.device.destroy_pipeline(self.pipeline, None);
             self.device.destroy_pipeline_layout(self.pipeline_layout, None);
             self.device.destroy_render_pass(self.render_pass, None);
