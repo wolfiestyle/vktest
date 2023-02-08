@@ -801,7 +801,7 @@ impl VulkanDevice {
                 .device
                 .map_memory(memory, 0, size, vk::MemoryMapFlags::empty())
                 .map_err(Error::bind_msg("Failed to map buffer memory"))? as *mut T;
-            std::slice::from_raw_parts_mut(mapped_ptr, data.len() as usize).copy_from_slice(data);
+            std::slice::from_raw_parts_mut(mapped_ptr, data.len()).copy_from_slice(data);
             self.device.unmap_memory(memory);
         };
         Ok(())
