@@ -23,6 +23,8 @@ pub struct VulkanApp {
     current_frame: usize,
     vertex_buffer: vk::Buffer,
     vb_memory: vk::DeviceMemory,
+    index_buffer: vk::Buffer,
+    ib_memory: vk::DeviceMemory,
 }
 
 impl VulkanApp {
@@ -43,12 +45,15 @@ impl VulkanApp {
             .map(|_| FrameSyncState::new(&vk))
             .collect::<Result<_, _>>()?;
 
-        let vertices: [Vertex; 3] = [
-            ([0.0, -0.5], [1.0, 0.0, 0.0]),
-            ([0.5, 0.5], [0.0, 1.0, 0.0]),
-            ([-0.5, 0.5f32], [0.0, 0.0, 1.0f32]),
+        let vertices: [Vertex; 4] = [
+            ([-0.5, -0.5], [1.0, 0.0, 0.0]),
+            ([0.5, -0.5], [0.0, 1.0, 0.0]),
+            ([0.5, 0.5], [0.0, 0.0, 1.0]),
+            ([-0.5, 0.5], [1.0, 1.0, 1.0]),
         ];
+        let indices: [u16; 6] = [0, 1, 2, 2, 3, 0];
         let (vertex_buffer, vb_memory) = vk.create_buffer(&vertices, vk::BufferUsageFlags::VERTEX_BUFFER, transfer_pool)?;
+        let (index_buffer, ib_memory) = vk.create_buffer(&indices, vk::BufferUsageFlags::INDEX_BUFFER, transfer_pool)?;
 
         Ok(Self {
             device: vk,
@@ -64,6 +69,8 @@ impl VulkanApp {
             current_frame: 0,
             vertex_buffer,
             vb_memory,
+            index_buffer,
+            ib_memory,
         })
     }
 
@@ -238,9 +245,11 @@ impl VulkanApp {
             self.device
                 .cmd_bind_pipeline(cmd_buffer, vk::PipelineBindPoint::GRAPHICS, self.pipeline);
             self.device.cmd_bind_vertex_buffers(cmd_buffer, 0, &buffers, &offsets);
+            self.device
+                .cmd_bind_index_buffer(cmd_buffer, self.index_buffer, 0, vk::IndexType::UINT16);
             self.device.cmd_set_viewport(cmd_buffer, 0, &viewport);
             self.device.cmd_set_scissor(cmd_buffer, 0, &scissor);
-            self.device.cmd_draw(cmd_buffer, 3, 1, 0, 0);
+            self.device.cmd_draw_indexed(cmd_buffer, 6, 1, 0, 0, 0);
             self.device.cmd_end_render_pass(cmd_buffer);
             self.device
                 .end_command_buffer(cmd_buffer)
@@ -350,6 +359,8 @@ impl Drop for VulkanApp {
             self.device.wait_idle().unwrap();
             self.device.destroy_buffer(self.vertex_buffer, None);
             self.device.free_memory(self.vb_memory, None);
+            self.device.destroy_buffer(self.index_buffer, None);
+            self.device.free_memory(self.ib_memory, None);
             for elem in &mut self.sync {
                 elem.cleanup(&self.device);
             }
