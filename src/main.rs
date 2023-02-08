@@ -1,5 +1,5 @@
 use std::time::{Duration, Instant};
-use vktest::vulkan::VulkanApp;
+use vktest::VulkanApp;
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 

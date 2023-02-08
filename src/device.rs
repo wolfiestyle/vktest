@@ -1,5 +1,5 @@
-use crate::vulkan::instance::{DeviceInfo, SurfaceInfo, VulkanInstance};
-use crate::vulkan::types::*;
+use crate::instance::{DeviceInfo, SurfaceInfo, VulkanInstance};
+use crate::types::*;
 use ash::extensions::khr;
 use ash::vk;
 use winit::window::Window;

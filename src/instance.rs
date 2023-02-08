@@ -1,4 +1,4 @@
-use crate::vulkan::types::*;
+use crate::types::*;
 use ash::extensions::{ext, khr};
 use ash::vk;
 use cstr::cstr;

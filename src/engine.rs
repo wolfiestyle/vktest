@@ -1,5 +1,5 @@
-use crate::vulkan::device::{SwapchainInfo, VulkanDevice};
-use crate::vulkan::types::*;
+use crate::device::{SwapchainInfo, VulkanDevice};
+use crate::types::*;
 use ash::vk;
 use cstr::cstr;
 use inline_spirv::include_spirv;
