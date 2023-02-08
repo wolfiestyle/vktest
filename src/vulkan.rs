@@ -12,6 +12,7 @@ const VALIDATION_LAYER: &CStr = cstr!("VK_LAYER_KHRONOS_validation");
 const REQ_DEVICE_EXTENSIONS: [&CStr; 1] = [khr::Swapchain::name()];
 const SWAPCHAIN_IMAGE_COUNT: u32 = 3;
 const MAX_FRAMES_IN_FLIGHT: usize = 2;
+type Vertex = ([f32; 2], [f32; 3]);
 
 struct VulkanInstance {
     entry: ash::Entry,
@@ -599,8 +600,6 @@ impl VulkanDevice {
                 .build(),
         ];
 
-        //FIXME: this should come as a parameter
-        type Vertex = ([f32; 2], [f32; 3]);
         let binding_desc = [Vertex::binding_desc(0)];
         let attr_desc = Vertex::attr_desc(0);
 
@@ -939,7 +938,7 @@ impl VulkanApp {
             .map(|_| FrameSyncState::new(&vk))
             .collect::<Result<_, _>>()?;
 
-        let vertices = [
+        let vertices: [Vertex; 3] = [
             ([0.0, -0.5], [1.0, 0.0, 0.0]),
             ([0.5, 0.5], [0.0, 1.0, 0.0]),
             ([-0.5, 0.5f32], [0.0, 0.0, 1.0f32]),
