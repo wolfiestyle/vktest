@@ -24,7 +24,7 @@ struct VulkanInstance {
 
 impl VulkanInstance {
     fn new(window: &Window) -> VulkanResult<Self> {
-        let entry = unsafe { ash::Entry::load().map_err(Error::LoadingError)? };
+        let entry = unsafe { ash::Entry::load()? };
         let validation_enabled = cfg!(debug_assertions) && Self::check_validation_support(&entry)?;
         let app_name = CString::new(env!("CARGO_PKG_NAME")).unwrap();
         let engine_name = cstr!("Snow3Derg");
@@ -49,7 +49,7 @@ impl VulkanInstance {
     fn check_validation_support(entry: &ash::Entry) -> VulkanResult<bool> {
         let supported_layers = entry
             .enumerate_instance_layer_properties()
-            .map_err(Error::bind_msg("Failed to enumerate instance layer properties"))?;
+            .describe_err("Failed to enumerate instance layer properties")?;
         //eprintln!("Supported instance layers: {supported_layers:#?}");
         let validation_supp = supported_layers
             .iter()
@@ -63,7 +63,7 @@ impl VulkanInstance {
     fn check_portability_support(entry: &ash::Entry, names_ret: &mut Vec<*const c_char>) -> VulkanResult<bool> {
         let ext_list = entry
             .enumerate_instance_extension_properties(None)
-            .map_err(Error::bind_msg("Failed to enumerate instance extension properties"))?;
+            .describe_err("Failed to enumerate instance extension properties")?;
         let supported_exts: Vec<_> = ext_list.iter().map(|ext| vk_to_cstr(&ext.extension_name)).collect();
         //eprintln!("Supported instance extensions: {supported_exts:#?}");
         let ext_names = [vk::KhrPortabilityEnumerationFn::name(), khr::GetPhysicalDeviceProperties2::name()];
@@ -78,7 +78,7 @@ impl VulkanInstance {
         entry: &ash::Entry, window: &Window, app_name: &CStr, engine_name: &CStr, validation_enabled: bool,
     ) -> VulkanResult<ash::Instance> {
         let mut extension_names = ash_window::enumerate_required_extensions(window.raw_display_handle())
-            .map_err(Error::bind_msg("Unsupported display platform"))?
+            .describe_err("Unsupported display platform")?
             .to_vec();
         let portability = Self::check_portability_support(entry, &mut extension_names)?
             .then_some(vk::InstanceCreateFlags::ENUMERATE_PORTABILITY_KHR)
@@ -108,11 +108,7 @@ impl VulkanInstance {
             instance_ci.p_next = &dbg_messenger_ci as *const _ as _;
         }
 
-        unsafe {
-            entry
-                .create_instance(&instance_ci, None)
-                .map_err(Error::bind_msg("Failed to create instance"))
-        }
+        unsafe { entry.create_instance(&instance_ci, None).describe_err("Failed to create instance") }
     }
 
     fn setup_debug_utils(debug_utils: &ext::DebugUtils) -> VulkanResult<vk::DebugUtilsMessengerEXT> {
@@ -120,7 +116,7 @@ impl VulkanInstance {
         let messenger = unsafe {
             debug_utils
                 .create_debug_utils_messenger(&dbg_messenger_ci, None)
-                .map_err(Error::bind_msg("Error creating debug utils callback"))?
+                .describe_err("Error creating debug utils callback")?
         };
         Ok(messenger)
     }
@@ -134,7 +130,7 @@ impl VulkanInstance {
                 window.raw_window_handle(),
                 None,
             )
-            .map_err(Error::bind_msg("Failed to create surface"))
+            .describe_err("Failed to create surface")
         }
     }
 
@@ -142,19 +138,19 @@ impl VulkanInstance {
         let phys_devices = unsafe {
             self.instance
                 .enumerate_physical_devices()
-                .map_err(Error::bind_msg("Failed to enumerate physical devices"))?
+                .describe_err("Failed to enumerate physical devices")?
         };
 
         let dev_infos = phys_devices
             .into_iter()
             .map(|phys_dev| self.query_device_feature_support(phys_dev, surface))
-            .filter(|result| !matches!(result, Err(Error::UnsuitableDevice)))
+            .filter(|result| !matches!(result, Err(VkError::UnsuitableDevice)))
             .collect::<Result<Vec<_>, _>>()?;
 
         dev_infos
             .into_iter()
             .max_by(|a, b| a.dev_type.cmp(&b.dev_type))
-            .ok_or(Error::EngineError("Failed to find a suitable GPU"))
+            .ok_or(VkError::EngineError("Failed to find a suitable GPU"))
     }
 
     fn query_device_feature_support(&self, phys_dev: vk::PhysicalDevice, surface: vk::SurfaceKHR) -> VulkanResult<DeviceInfo> {
@@ -178,7 +174,7 @@ impl VulkanInstance {
             let present_supp = unsafe {
                 self.surface_utils
                     .get_physical_device_surface_support(phys_dev, idx, surface)
-                    .map_err(Error::bind_msg("Error querying surface support"))?
+                    .describe_err("Error querying surface support")?
             };
             if present_supp {
                 present_idx = Some(idx);
@@ -189,21 +185,21 @@ impl VulkanInstance {
         }
         if graphics_idx.is_none() || present_idx.is_none() {
             eprintln!("Device {name:?} has incomplete queues");
-            return Err(Error::UnsuitableDevice);
+            return Err(VkError::UnsuitableDevice);
         }
 
         // supported extensions
         let ext_list = unsafe {
             self.instance
                 .enumerate_device_extension_properties(phys_dev)
-                .map_err(Error::bind_msg("Failed to enumerate device extensions"))?
+                .describe_err("Failed to enumerate device extensions")?
         };
         let extensions: HashSet<_> = ext_list.iter().map(|ext| vk_to_cstr(&ext.extension_name).to_owned()).collect();
         //eprintln!("Supported device extensions: {extensions:#?}");
         let missing_ext = REQ_DEVICE_EXTENSIONS.into_iter().find(|&ext_name| !extensions.contains(ext_name));
         if let Some(ext_name) = missing_ext {
             eprintln!("Device {name:?} has missing extension {ext_name:?}");
-            return Err(Error::UnsuitableDevice);
+            return Err(VkError::UnsuitableDevice);
         }
 
         // memory properties
@@ -224,20 +220,20 @@ impl VulkanInstance {
         let surf_caps = unsafe {
             self.surface_utils
                 .get_physical_device_surface_capabilities(phys_dev, surface)
-                .map_err(Error::bind_msg("Failed to get surface capabilities"))?
+                .describe_err("Failed to get surface capabilities")?
         };
         let surf_formats = unsafe {
             self.surface_utils
                 .get_physical_device_surface_formats(phys_dev, surface)
-                .map_err(Error::bind_msg("Failed to get surface formats"))?
+                .describe_err("Failed to get surface formats")?
         };
         let present_modes = unsafe {
             self.surface_utils
                 .get_physical_device_surface_present_modes(phys_dev, surface)
-                .map_err(Error::bind_msg("Failed to get surface present modes"))?
+                .describe_err("Failed to get surface present modes")?
         };
         if surf_formats.is_empty() || present_modes.is_empty() {
-            return Err(Error::EngineError("Device has incomplete surface capabilities"));
+            return Err(VkError::EngineError("Device has incomplete surface capabilities"));
         }
 
         Ok(SurfaceInfo {
@@ -274,7 +270,7 @@ impl VulkanInstance {
         unsafe {
             self.instance
                 .create_device(dev_info.phys_dev, &device_ci, None)
-                .map_err(Error::bind_msg("Failed to create logical device"))
+                .describe_err("Failed to create logical device")
         }
     }
 }
@@ -316,7 +312,7 @@ impl DeviceInfo {
                 return Ok(i);
             }
         }
-        Err(Error::EngineError("Failed to find suitable memory type"))
+        Err(VkError::EngineError("Failed to find suitable memory type"))
     }
 }
 
@@ -490,13 +486,13 @@ impl VulkanDevice {
         let swapchain = unsafe {
             self.swapchain_utils
                 .create_swapchain(&swapchain_ci, None)
-                .map_err(Error::bind_msg("Failed to create swapchain"))?
+                .describe_err("Failed to create swapchain")?
         };
 
         let images = unsafe {
             self.swapchain_utils
                 .get_swapchain_images(swapchain)
-                .map_err(Error::bind_msg("Failed to get swapchain images"))?
+                .describe_err("Failed to get swapchain images")?
         };
 
         let image_views = images
@@ -518,7 +514,7 @@ impl VulkanDevice {
                 unsafe { self.device.create_image_view(&imageview_ci, None) }
             })
             .collect::<Result<_, _>>()
-            .map_err(Error::bind_msg("Failed to create image views"))?;
+            .describe_err("Failed to create image views")?;
 
         Ok(SwapchainInfo {
             handle: swapchain,
@@ -535,7 +531,7 @@ impl VulkanDevice {
         unsafe {
             self.device
                 .create_shader_module(&shader_ci, None)
-                .map_err(Error::bind_msg("Failed to create shader module"))
+                .describe_err("Failed to create shader module")
         }
     }
 
@@ -576,7 +572,7 @@ impl VulkanDevice {
         unsafe {
             self.device
                 .create_render_pass(&render_pass_ci, None)
-                .map_err(Error::bind_msg("Failed to create render pass"))
+                .describe_err("Failed to create render pass")
         }
     }
 
@@ -651,7 +647,7 @@ impl VulkanDevice {
         let pipeline_layout = unsafe {
             self.device
                 .create_pipeline_layout(&pipeline_layout_ci, None)
-                .map_err(Error::bind_msg("Failed to create pipeline layout"))?
+                .describe_err("Failed to create pipeline layout")?
         };
 
         let pipeline_ci = vk::GraphicsPipelineCreateInfo::builder()
@@ -670,7 +666,7 @@ impl VulkanDevice {
         let pipeline = unsafe {
             self.device
                 .create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_ci], None)
-                .map_err(|(_, err)| Error::VulkanError("Error creating pipeline", err))?
+                .map_err(|(_, err)| VkError::VulkanMsg("Error creating pipeline", err))?
         };
 
         unsafe {
@@ -697,7 +693,7 @@ impl VulkanDevice {
                 unsafe {
                     self.device
                         .create_framebuffer(&framebuffer_ci, None)
-                        .map_err(Error::bind_msg("Failed to create framebuffer"))
+                        .describe_err("Failed to create framebuffer")
                 }
             })
             .collect()
@@ -711,7 +707,7 @@ impl VulkanDevice {
         unsafe {
             self.device
                 .create_command_pool(&command_pool_ci, None)
-                .map_err(Error::bind_msg("Failed to create command pool"))
+                .describe_err("Failed to create command pool")
         }
     }
 
@@ -724,7 +720,7 @@ impl VulkanDevice {
         unsafe {
             self.device
                 .allocate_command_buffers(&alloc_info)
-                .map_err(Error::bind_msg("Failed to allocate command buffers"))
+                .describe_err("Failed to allocate command buffers")
         }
     }
 
@@ -733,25 +729,17 @@ impl VulkanDevice {
         unsafe {
             self.device
                 .create_semaphore(&semaphore_ci, None)
-                .map_err(Error::bind_msg("Failed to create semaphore"))
+                .describe_err("Failed to create semaphore")
         }
     }
 
     fn create_fence(&self) -> VulkanResult<vk::Fence> {
         let fence_ci = vk::FenceCreateInfo::builder().flags(vk::FenceCreateFlags::SIGNALED);
-        unsafe {
-            self.device
-                .create_fence(&fence_ci, None)
-                .map_err(Error::bind_msg("Failed to create fence"))
-        }
+        unsafe { self.device.create_fence(&fence_ci, None).describe_err("Failed to create fence") }
     }
 
     fn wait_idle(&self) -> VulkanResult<()> {
-        unsafe {
-            self.device
-                .device_wait_idle()
-                .map_err(Error::bind_msg("Failed to wait device idle"))
-        }
+        unsafe { self.device.device_wait_idle().describe_err("Failed to wait device idle") }
     }
 
     fn update_surface_info(&mut self) -> VulkanResult<()> {
@@ -770,7 +758,7 @@ impl VulkanDevice {
         let buffer = unsafe {
             self.device
                 .create_buffer(&buffer_ci, None)
-                .map_err(Error::bind_msg("Failed to create vertex buffer"))?
+                .describe_err("Failed to create buffer")?
         };
 
         let mem_reqs = unsafe { self.device.get_buffer_memory_requirements(buffer) };
@@ -783,12 +771,12 @@ impl VulkanDevice {
         let memory = unsafe {
             self.device
                 .allocate_memory(&alloc_info, None)
-                .map_err(Error::bind_msg("Failed to allocate vertex buffer memory"))?
+                .describe_err("Failed to allocate buffer memory")?
         };
         unsafe {
             self.device
                 .bind_buffer_memory(buffer, memory, 0)
-                .map_err(Error::bind_msg("Failed to bind buffer memory"))?
+                .describe_err("Failed to bind buffer memory")?
         };
 
         Ok((buffer, memory))
@@ -800,7 +788,7 @@ impl VulkanDevice {
             let mapped_ptr = self
                 .device
                 .map_memory(memory, 0, size, vk::MemoryMapFlags::empty())
-                .map_err(Error::bind_msg("Failed to map buffer memory"))? as *mut T;
+                .describe_err("Failed to map buffer memory")? as *mut T;
             std::slice::from_raw_parts_mut(mapped_ptr, data.len()).copy_from_slice(data);
             self.device.unmap_memory(memory);
         };
@@ -818,21 +806,21 @@ impl VulkanDevice {
         unsafe {
             self.device
                 .begin_command_buffer(cmd_buffer[0], &begin_info)
-                .map_err(Error::bind_msg("Failed to begin recording command buffer"))?;
+                .describe_err("Failed to begin recording command buffer")?;
             self.device.cmd_copy_buffer(cmd_buffer[0], src_buffer, dst_buffer, &[copy_region]);
             self.device
                 .end_command_buffer(cmd_buffer[0])
-                .map_err(Error::bind_msg("Failed to end recording command buffer"))?;
+                .describe_err("Failed to end recording command buffer")?;
         }
 
         let submit_info = [vk::SubmitInfo::builder().command_buffers(&cmd_buffer).build()];
         unsafe {
             self.device
                 .queue_submit(self.graphics_queue, &submit_info, vk::Fence::null())
-                .map_err(Error::bind_msg("Failed to submit queue"))?;
+                .describe_err("Failed to submit queue")?;
             self.device
                 .queue_wait_idle(self.graphics_queue)
-                .map_err(Error::bind_msg("Failed to wait queue idle"))?;
+                .describe_err("Failed to wait queue idle")?;
             self.device.free_command_buffers(pool, &cmd_buffer);
         }
 
@@ -967,7 +955,7 @@ impl VulkanApp {
         unsafe {
             self.device
                 .begin_command_buffer(cmd_buffer, &begin_info)
-                .map_err(Error::bind_msg("Failed to begin recording command buffer"))?;
+                .describe_err("Failed to begin recording command buffer")?;
         }
 
         let clear_color = [vk::ClearValue {
@@ -997,7 +985,7 @@ impl VulkanApp {
             self.device.cmd_end_render_pass(cmd_buffer);
             self.device
                 .end_command_buffer(cmd_buffer)
-                .map_err(Error::bind_msg("Failed to record command buffer"))?;
+                .describe_err("Failed to end recording command buffer")?;
         }
 
         Ok(())
@@ -1012,7 +1000,7 @@ impl VulkanApp {
         let image_idx = unsafe {
             self.device
                 .wait_for_fences(&in_flight_fen, true, u64::MAX)
-                .map_err(Error::bind_msg("Failed waiting for error"))?;
+                .describe_err("Failed waiting for error")?;
             let acquire_res =
                 self.device
                     .swapchain_utils
@@ -1024,17 +1012,15 @@ impl VulkanApp {
                     self.recreate_swapchain(window)?;
                     return Ok(());
                 }
-                Err(e) => return Err(Error::VulkanError("Failed to acquire swapchain image", e)),
+                Err(e) => return Err(VkError::VulkanMsg("Failed to acquire swapchain image", e)),
             }
         };
 
         unsafe {
-            self.device
-                .reset_fences(&in_flight_fen)
-                .map_err(Error::bind_msg("Failed resetting fences"))?;
+            self.device.reset_fences(&in_flight_fen).describe_err("Failed resetting fences")?;
             self.device
                 .reset_command_buffer(command_buffer[0], vk::CommandBufferResetFlags::empty())
-                .map_err(Error::bind_msg("Failed to reset command buffer"))?;
+                .describe_err("Failed to reset command buffer")?;
         }
 
         self.record_command_buffer(command_buffer[0], image_idx)?;
@@ -1050,7 +1036,7 @@ impl VulkanApp {
         unsafe {
             self.device
                 .queue_submit(self.device.graphics_queue, &submit_info, in_flight_fen[0])
-                .map_err(Error::bind_msg("Failed to submit draw command buffer"))?
+                .describe_err("Failed to submit draw command buffer")?
         }
 
         let swapchains = [self.swapchain.handle];
@@ -1064,7 +1050,7 @@ impl VulkanApp {
             self.device
                 .swapchain_utils
                 .queue_present(self.device.present_queue, &present_info)
-                .map_err(Error::bind_msg("Failed to present queue"))?
+                .describe_err("Failed to present queue")?
         };
 
         self.current_frame = (self.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;

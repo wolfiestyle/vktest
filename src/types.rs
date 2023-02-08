@@ -1,30 +1,62 @@
 use ash::vk;
 use memoffset::offset_of_tuple;
 
-pub type VulkanResult<T> = Result<T, Error>;
+pub type VulkanResult<T> = Result<T, VkError>;
 
 #[derive(Debug)]
-pub enum Error {
-    LoadingError(ash::LoadingError),
-    VulkanError(&'static str, vk::Result),
+pub enum VkError {
+    LoadingFailed(ash::LoadingError),
+    Vulkan(vk::Result),
+    VulkanMsg(&'static str, vk::Result),
     EngineError(&'static str),
     UnsuitableDevice, // used internally
 }
 
-impl Error {
-    pub const fn bind_msg(msg: &'static str) -> impl Fn(vk::Result) -> Self {
-        move |err| Self::VulkanError(msg, err)
-    }
-}
-
-impl std::fmt::Display for Error {
+impl std::fmt::Display for VkError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         match self {
-            Self::LoadingError(err) => write!(f, "Failed to load Vulkan library: {err}"),
-            Self::VulkanError(desc, err) => write!(f, "{desc}: {err}"),
+            Self::LoadingFailed(err) => write!(f, "Failed to load Vulkan library: {err}"),
+            Self::Vulkan(err) => write!(f, "Vulkan error: {err}"),
+            Self::VulkanMsg(msg, err) => write!(f, "{msg}: {err}"),
             Self::EngineError(desc) => write!(f, "{desc}"),
             Self::UnsuitableDevice => write!(f, "Unsuitable device"),
         }
+    }
+}
+
+impl std::error::Error for VkError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            VkError::LoadingFailed(err) => Some(err),
+            VkError::Vulkan(err) | VkError::VulkanMsg(_, err) => Some(err),
+            _ => None,
+        }
+    }
+}
+
+impl From<ash::LoadingError> for VkError {
+    fn from(err: ash::LoadingError) -> Self {
+        VkError::LoadingFailed(err)
+    }
+}
+
+impl From<vk::Result> for VkError {
+    fn from(err: vk::Result) -> Self {
+        VkError::Vulkan(err)
+    }
+}
+
+pub trait ErrorDescription<M> {
+    type Output;
+
+    fn describe_err(self, msg: M) -> VulkanResult<Self::Output>;
+}
+
+impl<T> ErrorDescription<&'static str> for ash::prelude::VkResult<T> {
+    type Output = T;
+
+    fn describe_err(self, msg: &'static str) -> VulkanResult<Self::Output> {
+        self.map_err(|err| VkError::VulkanMsg(msg, err))
     }
 }
 
