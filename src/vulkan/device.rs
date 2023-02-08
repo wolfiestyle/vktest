@@ -1,9 +1,7 @@
-use crate::vulkan::engine::Vertex;
 use crate::vulkan::instance::{DeviceInfo, SurfaceInfo, VulkanInstance};
 use crate::vulkan::types::*;
 use ash::extensions::khr;
 use ash::vk;
-use cstr::cstr;
 use winit::window::Window;
 
 pub struct VulkanDevice {
@@ -115,7 +113,7 @@ impl VulkanDevice {
         })
     }
 
-    fn create_shader_module(&self, spirv_code: &[u32]) -> VulkanResult<vk::ShaderModule> {
+    pub fn create_shader_module(&self, spirv_code: &[u32]) -> VulkanResult<vk::ShaderModule> {
         let shader_ci = vk::ShaderModuleCreateInfo::builder().code(spirv_code);
 
         unsafe {
@@ -123,148 +121,6 @@ impl VulkanDevice {
                 .create_shader_module(&shader_ci, None)
                 .describe_err("Failed to create shader module")
         }
-    }
-
-    pub fn create_render_pass(&self, format: vk::Format) -> VulkanResult<vk::RenderPass> {
-        let color_attach = [vk::AttachmentDescription {
-            flags: vk::AttachmentDescriptionFlags::empty(),
-            format,
-            samples: vk::SampleCountFlags::TYPE_1,
-            load_op: vk::AttachmentLoadOp::CLEAR,
-            store_op: vk::AttachmentStoreOp::STORE,
-            stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
-            stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
-            initial_layout: vk::ImageLayout::UNDEFINED,
-            final_layout: vk::ImageLayout::PRESENT_SRC_KHR,
-        }];
-
-        let attach_ref = [vk::AttachmentReference {
-            attachment: 0,
-            layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-        }];
-
-        let subpass = [vk::SubpassDescription::builder().color_attachments(&attach_ref).build()];
-
-        let dependency = [vk::SubpassDependency::builder()
-            .src_subpass(vk::SUBPASS_EXTERNAL)
-            .dst_subpass(0)
-            .src_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
-            .src_access_mask(vk::AccessFlags::empty())
-            .dst_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
-            .dst_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
-            .build()];
-
-        let render_pass_ci = vk::RenderPassCreateInfo::builder()
-            .attachments(&color_attach)
-            .subpasses(&subpass)
-            .dependencies(&dependency);
-
-        unsafe {
-            self.device
-                .create_render_pass(&render_pass_ci, None)
-                .describe_err("Failed to create render pass")
-        }
-    }
-
-    pub fn create_graphics_pipeline(
-        &self, vert_shader_spv: &[u32], frag_shader_spv: &[u32], render_pass: vk::RenderPass,
-    ) -> VulkanResult<(vk::Pipeline, vk::PipelineLayout)> {
-        let vert_shader = self.create_shader_module(vert_shader_spv)?;
-        let frag_shader = self.create_shader_module(frag_shader_spv)?;
-
-        let entry_point = cstr!("main");
-        let shader_stages_ci = [
-            vk::PipelineShaderStageCreateInfo::builder()
-                .stage(vk::ShaderStageFlags::VERTEX)
-                .module(vert_shader)
-                .name(entry_point)
-                .build(),
-            vk::PipelineShaderStageCreateInfo::builder()
-                .stage(vk::ShaderStageFlags::FRAGMENT)
-                .module(frag_shader)
-                .name(entry_point)
-                .build(),
-        ];
-
-        let binding_desc = [Vertex::binding_desc(0)];
-        let attr_desc = Vertex::attr_desc(0);
-
-        let vertex_input_ci = vk::PipelineVertexInputStateCreateInfo::builder()
-            .vertex_binding_descriptions(&binding_desc)
-            .vertex_attribute_descriptions(&attr_desc);
-
-        let input_assembly_ci = vk::PipelineInputAssemblyStateCreateInfo::builder()
-            .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
-            .primitive_restart_enable(false);
-
-        let viewport_state_ci = vk::PipelineViewportStateCreateInfo {
-            viewport_count: 1,
-            scissor_count: 1,
-            ..Default::default()
-        };
-
-        let dynamic_state_ci =
-            vk::PipelineDynamicStateCreateInfo::builder().dynamic_states(&[vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR]);
-
-        let rasterizer_ci = vk::PipelineRasterizationStateCreateInfo::builder()
-            .polygon_mode(vk::PolygonMode::FILL)
-            .line_width(1.0)
-            .cull_mode(vk::CullModeFlags::BACK)
-            .front_face(vk::FrontFace::CLOCKWISE);
-
-        let multisample_ci = vk::PipelineMultisampleStateCreateInfo::builder()
-            .rasterization_samples(vk::SampleCountFlags::TYPE_1)
-            .min_sample_shading(1.0);
-
-        let color_attach = [vk::PipelineColorBlendAttachmentState::builder()
-            .color_write_mask(vk::ColorComponentFlags::RGBA)
-            .blend_enable(false)
-            .src_color_blend_factor(vk::BlendFactor::ONE)
-            .dst_color_blend_factor(vk::BlendFactor::ZERO)
-            .color_blend_op(vk::BlendOp::ADD)
-            .src_color_blend_factor(vk::BlendFactor::ONE)
-            .dst_color_blend_factor(vk::BlendFactor::ZERO)
-            .alpha_blend_op(vk::BlendOp::ADD)
-            .build()];
-
-        let color_blend_ci = vk::PipelineColorBlendStateCreateInfo::builder()
-            .logic_op_enable(false)
-            .logic_op(vk::LogicOp::COPY)
-            .attachments(&color_attach);
-
-        let pipeline_layout_ci = vk::PipelineLayoutCreateInfo::default();
-
-        let pipeline_layout = unsafe {
-            self.device
-                .create_pipeline_layout(&pipeline_layout_ci, None)
-                .describe_err("Failed to create pipeline layout")?
-        };
-
-        let pipeline_ci = vk::GraphicsPipelineCreateInfo::builder()
-            .stages(&shader_stages_ci)
-            .vertex_input_state(&vertex_input_ci)
-            .input_assembly_state(&input_assembly_ci)
-            .viewport_state(&viewport_state_ci)
-            .rasterization_state(&rasterizer_ci)
-            .multisample_state(&multisample_ci)
-            .color_blend_state(&color_blend_ci)
-            .dynamic_state(&dynamic_state_ci)
-            .layout(pipeline_layout)
-            .render_pass(render_pass)
-            .build();
-
-        let pipeline = unsafe {
-            self.device
-                .create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_ci], None)
-                .map_err(|(_, err)| VkError::VulkanMsg("Error creating pipeline", err))?
-        };
-
-        unsafe {
-            self.device.destroy_shader_module(vert_shader, None);
-            self.device.destroy_shader_module(frag_shader, None);
-        }
-
-        Ok((pipeline[0], pipeline_layout))
     }
 
     pub fn create_framebuffers(&self, swapchain: &SwapchainInfo, render_pass: vk::RenderPass) -> VulkanResult<Vec<vk::Framebuffer>> {
