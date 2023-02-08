@@ -704,9 +704,9 @@ impl VulkanDevice {
             .collect()
     }
 
-    fn create_command_pool(&self) -> VulkanResult<vk::CommandPool> {
+    fn create_command_pool(&self, flags: vk::CommandPoolCreateFlags) -> VulkanResult<vk::CommandPool> {
         let command_pool_ci = vk::CommandPoolCreateInfo::builder()
-            .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
+            .flags(flags)
             .queue_family_index(self.dev_info.graphics_idx);
 
         unsafe {
@@ -760,7 +760,9 @@ impl VulkanDevice {
         Ok(())
     }
 
-    fn allocate_buffer(&self, size: vk::DeviceSize, usage: vk::BufferUsageFlags) -> VulkanResult<(vk::Buffer, vk::DeviceMemory)> {
+    fn allocate_buffer(
+        &self, size: vk::DeviceSize, usage: vk::BufferUsageFlags, properties: vk::MemoryPropertyFlags,
+    ) -> VulkanResult<(vk::Buffer, vk::DeviceMemory)> {
         let buffer_ci = vk::BufferCreateInfo::builder()
             .size(size)
             .usage(usage)
@@ -773,10 +775,7 @@ impl VulkanDevice {
         };
 
         let mem_reqs = unsafe { self.device.get_buffer_memory_requirements(buffer) };
-        let mem_type = self.dev_info.find_memory_type(
-            mem_reqs.memory_type_bits,
-            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-        )?;
+        let mem_type = self.dev_info.find_memory_type(mem_reqs.memory_type_bits, properties)?;
 
         let alloc_info = vk::MemoryAllocateInfo::builder()
             .allocation_size(mem_reqs.size)
@@ -796,10 +795,8 @@ impl VulkanDevice {
         Ok((buffer, memory))
     }
 
-    fn create_buffer<T: Copy>(&self, data: &[T], usage: vk::BufferUsageFlags) -> VulkanResult<(vk::Buffer, vk::DeviceMemory)> {
+    fn write_memory<T: Copy>(&self, memory: vk::DeviceMemory, data: &[T]) -> VulkanResult<()> {
         let size = std::mem::size_of_val(data) as _;
-        let (buffer, memory) = self.allocate_buffer(size, usage)?;
-
         unsafe {
             let mapped_ptr = self
                 .device
@@ -808,8 +805,65 @@ impl VulkanDevice {
             std::slice::from_raw_parts_mut(mapped_ptr, data.len() as usize).copy_from_slice(data);
             self.device.unmap_memory(memory);
         };
+        Ok(())
+    }
 
-        Ok((buffer, memory))
+    fn copy_buffer(&self, dst_buffer: vk::Buffer, src_buffer: vk::Buffer, size: vk::DeviceSize, pool: vk::CommandPool) -> VulkanResult<()> {
+        let cmd_buffer = self.create_command_buffers(pool, 1)?;
+        let begin_info = vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+        let copy_region = vk::BufferCopy {
+            src_offset: 0,
+            dst_offset: 0,
+            size,
+        };
+        unsafe {
+            self.device
+                .begin_command_buffer(cmd_buffer[0], &begin_info)
+                .map_err(Error::bind_msg("Failed to begin recording command buffer"))?;
+            self.device.cmd_copy_buffer(cmd_buffer[0], src_buffer, dst_buffer, &[copy_region]);
+            self.device
+                .end_command_buffer(cmd_buffer[0])
+                .map_err(Error::bind_msg("Failed to end recording command buffer"))?;
+        }
+
+        let submit_info = [vk::SubmitInfo::builder().command_buffers(&cmd_buffer).build()];
+        unsafe {
+            self.device
+                .queue_submit(self.graphics_queue, &submit_info, vk::Fence::null())
+                .map_err(Error::bind_msg("Failed to submit queue"))?;
+            self.device
+                .queue_wait_idle(self.graphics_queue)
+                .map_err(Error::bind_msg("Failed to wait queue idle"))?;
+            self.device.free_command_buffers(pool, &cmd_buffer);
+        }
+
+        Ok(())
+    }
+
+    fn create_buffer<T: Copy>(
+        &self, data: &[T], usage: vk::BufferUsageFlags, pool: vk::CommandPool,
+    ) -> VulkanResult<(vk::Buffer, vk::DeviceMemory)> {
+        let size = std::mem::size_of_val(data) as _;
+        let (src_buffer, src_memory) = self.allocate_buffer(
+            size,
+            vk::BufferUsageFlags::TRANSFER_SRC,
+            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+        )?;
+        let (dst_buffer, dst_memory) = self.allocate_buffer(
+            size,
+            vk::BufferUsageFlags::TRANSFER_DST | usage,
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+        )?;
+
+        self.write_memory(src_memory, data)?;
+        self.copy_buffer(dst_buffer, src_buffer, size, pool)?;
+
+        unsafe {
+            self.device.destroy_buffer(src_buffer, None);
+            self.device.free_memory(src_memory, None);
+        }
+
+        Ok((dst_buffer, dst_memory))
     }
 }
 
@@ -859,6 +913,7 @@ pub struct VulkanApp {
     pipeline_layout: vk::PipelineLayout,
     framebuffers: Vec<vk::Framebuffer>,
     command_pool: vk::CommandPool,
+    transfer_pool: vk::CommandPool,
     command_buffers: Vec<vk::CommandBuffer>,
     sync: Vec<FrameSyncState>,
     current_frame: usize,
@@ -877,7 +932,8 @@ impl VulkanApp {
         let framebuffers = vk.create_framebuffers(&swapchain, render_pass)?;
         let (pipeline, pipeline_layout) = vk.create_graphics_pipeline(vert_spv, frag_spv, render_pass)?;
 
-        let command_pool = vk.create_command_pool()?;
+        let command_pool = vk.create_command_pool(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)?;
+        let transfer_pool = vk.create_command_pool(vk::CommandPoolCreateFlags::TRANSIENT)?;
         let command_buffers = vk.create_command_buffers(command_pool, MAX_FRAMES_IN_FLIGHT as u32)?;
         let sync = (0..MAX_FRAMES_IN_FLIGHT)
             .map(|_| FrameSyncState::new(&vk))
@@ -888,7 +944,7 @@ impl VulkanApp {
             ([0.5, 0.5], [0.0, 1.0, 0.0]),
             ([-0.5, 0.5f32], [0.0, 0.0, 1.0f32]),
         ];
-        let (vertex_buffer, vb_memory) = vk.create_buffer(&vertices, vk::BufferUsageFlags::VERTEX_BUFFER)?;
+        let (vertex_buffer, vb_memory) = vk.create_buffer(&vertices, vk::BufferUsageFlags::VERTEX_BUFFER, transfer_pool)?;
 
         Ok(Self {
             device: vk,
@@ -898,6 +954,7 @@ impl VulkanApp {
             pipeline_layout,
             framebuffers,
             command_pool,
+            transfer_pool,
             command_buffers,
             sync,
             current_frame: 0,
@@ -1053,6 +1110,7 @@ impl Drop for VulkanApp {
                 elem.cleanup(&self.device);
             }
             self.device.destroy_command_pool(self.command_pool, None);
+            self.device.destroy_command_pool(self.transfer_pool, None);
             self.device.destroy_pipeline(self.pipeline, None);
             self.device.destroy_pipeline_layout(self.pipeline_layout, None);
             self.device.destroy_render_pass(self.render_pass, None);
