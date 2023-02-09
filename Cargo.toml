@@ -12,3 +12,4 @@ raw-window-handle = "0.5.0"
 cstr = "0.2.11"
 inline-spirv = "0.1.5"
 memoffset = "0.8.0"
+glm = { package = "nalgebra-glm", version = "0.18.0" }

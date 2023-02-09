@@ -187,7 +187,7 @@ impl VulkanDevice {
         Ok(())
     }
 
-    fn allocate_buffer(
+    pub fn allocate_buffer(
         &self, size: vk::DeviceSize, usage: vk::BufferUsageFlags, properties: vk::MemoryPropertyFlags,
     ) -> VulkanResult<(vk::Buffer, vk::DeviceMemory)> {
         let buffer_ci = vk::BufferCreateInfo::builder()
@@ -291,6 +291,30 @@ impl VulkanDevice {
         }
 
         Ok((dst_buffer, dst_memory))
+    }
+
+    pub fn create_descriptor_pool(&self, max_count: u32) -> VulkanResult<vk::DescriptorPool> {
+        let pool_size = [vk::DescriptorPoolSize {
+            ty: vk::DescriptorType::UNIFORM_BUFFER,
+            descriptor_count: max_count,
+        }];
+        let pool_ci = vk::DescriptorPoolCreateInfo::builder().pool_sizes(&pool_size).max_sets(max_count);
+        unsafe {
+            self.device
+                .create_descriptor_pool(&pool_ci, None)
+                .describe_err("Failed to create descriptor pool")
+        }
+    }
+
+    pub fn create_descriptor_sets(
+        &self, pool: vk::DescriptorPool, layouts: &[vk::DescriptorSetLayout],
+    ) -> VulkanResult<Vec<vk::DescriptorSet>> {
+        let alloc_info = vk::DescriptorSetAllocateInfo::builder().descriptor_pool(pool).set_layouts(layouts);
+        unsafe {
+            self.device
+                .allocate_descriptor_sets(&alloc_info)
+                .describe_err("Failed to allocate descriptor sets")
+        }
     }
 }
 
