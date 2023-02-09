@@ -2,6 +2,7 @@ use crate::instance::{DeviceInfo, SurfaceInfo, VulkanInstance};
 use crate::types::*;
 use ash::extensions::khr;
 use ash::vk;
+use std::array;
 use winit::window::Window;
 
 pub struct VulkanDevice {
@@ -127,11 +128,10 @@ impl VulkanDevice {
         swapchain
             .image_views
             .iter()
-            .map(|&imgview| {
-                let attachments = [imgview];
+            .map(|imgview| {
                 let framebuffer_ci = vk::FramebufferCreateInfo::builder()
                     .render_pass(render_pass)
-                    .attachments(&attachments)
+                    .attachments(array::from_ref(imgview))
                     .width(swapchain.extent.width)
                     .height(swapchain.extent.height)
                     .layers(1);
@@ -236,7 +236,7 @@ impl VulkanDevice {
     }
 
     fn copy_buffer(&self, dst_buffer: vk::Buffer, src_buffer: vk::Buffer, size: vk::DeviceSize, pool: vk::CommandPool) -> VulkanResult<()> {
-        let cmd_buffer = self.create_command_buffers(pool, 1)?;
+        let cmd_buffer = self.create_command_buffers(pool, 1)?[0];
         let begin_info = vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
         let copy_region = vk::BufferCopy {
             src_offset: 0,
@@ -245,23 +245,23 @@ impl VulkanDevice {
         };
         unsafe {
             self.device
-                .begin_command_buffer(cmd_buffer[0], &begin_info)
+                .begin_command_buffer(cmd_buffer, &begin_info)
                 .describe_err("Failed to begin recording command buffer")?;
-            self.device.cmd_copy_buffer(cmd_buffer[0], src_buffer, dst_buffer, &[copy_region]);
+            self.device.cmd_copy_buffer(cmd_buffer, src_buffer, dst_buffer, &[copy_region]);
             self.device
-                .end_command_buffer(cmd_buffer[0])
+                .end_command_buffer(cmd_buffer)
                 .describe_err("Failed to end recording command buffer")?;
         }
 
-        let submit_info = [vk::SubmitInfo::builder().command_buffers(&cmd_buffer).build()];
+        let submit_info = vk::SubmitInfo::builder().command_buffers(array::from_ref(&cmd_buffer)).build();
         unsafe {
             self.device
-                .queue_submit(self.graphics_queue, &submit_info, vk::Fence::null())
+                .queue_submit(self.graphics_queue, array::from_ref(&submit_info), vk::Fence::null())
                 .describe_err("Failed to submit queue")?;
             self.device
                 .queue_wait_idle(self.graphics_queue)
                 .describe_err("Failed to wait queue idle")?;
-            self.device.free_command_buffers(pool, &cmd_buffer);
+            self.device.free_command_buffers(pool, array::from_ref(&cmd_buffer));
         }
 
         Ok(())
@@ -294,11 +294,13 @@ impl VulkanDevice {
     }
 
     pub fn create_descriptor_pool(&self, max_count: u32) -> VulkanResult<vk::DescriptorPool> {
-        let pool_size = [vk::DescriptorPoolSize {
+        let pool_size = vk::DescriptorPoolSize {
             ty: vk::DescriptorType::UNIFORM_BUFFER,
             descriptor_count: max_count,
-        }];
-        let pool_ci = vk::DescriptorPoolCreateInfo::builder().pool_sizes(&pool_size).max_sets(max_count);
+        };
+        let pool_ci = vk::DescriptorPoolCreateInfo::builder()
+            .pool_sizes(array::from_ref(&pool_size))
+            .max_sets(max_count);
         unsafe {
             self.device
                 .create_descriptor_pool(&pool_ci, None)

@@ -4,6 +4,7 @@ use ash::vk;
 use cgmath::{Deg, Matrix4, Point3, Vector3};
 use cstr::cstr;
 use inline_spirv::include_spirv;
+use std::array;
 use std::time::Instant;
 use winit::window::Window;
 
@@ -92,7 +93,7 @@ impl VulkanApp {
     }
 
     fn create_render_pass(device: &VulkanDevice, format: vk::Format) -> VulkanResult<vk::RenderPass> {
-        let color_attach = [vk::AttachmentDescription {
+        let color_attach = vk::AttachmentDescription {
             flags: vk::AttachmentDescriptionFlags::empty(),
             format,
             samples: vk::SampleCountFlags::TYPE_1,
@@ -102,28 +103,30 @@ impl VulkanApp {
             stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
             initial_layout: vk::ImageLayout::UNDEFINED,
             final_layout: vk::ImageLayout::PRESENT_SRC_KHR,
-        }];
+        };
 
-        let attach_ref = [vk::AttachmentReference {
+        let attach_ref = vk::AttachmentReference {
             attachment: 0,
             layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-        }];
+        };
 
-        let subpass = [vk::SubpassDescription::builder().color_attachments(&attach_ref).build()];
+        let subpass = vk::SubpassDescription::builder()
+            .color_attachments(array::from_ref(&attach_ref))
+            .build();
 
-        let dependency = [vk::SubpassDependency::builder()
+        let dependency = vk::SubpassDependency::builder()
             .src_subpass(vk::SUBPASS_EXTERNAL)
             .dst_subpass(0)
             .src_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
             .src_access_mask(vk::AccessFlags::empty())
             .dst_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
             .dst_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
-            .build()];
+            .build();
 
         let render_pass_ci = vk::RenderPassCreateInfo::builder()
-            .attachments(&color_attach)
-            .subpasses(&subpass)
-            .dependencies(&dependency);
+            .attachments(array::from_ref(&color_attach))
+            .subpasses(array::from_ref(&subpass))
+            .dependencies(array::from_ref(&dependency));
 
         unsafe {
             device
@@ -133,14 +136,14 @@ impl VulkanApp {
     }
 
     fn create_descriptor_set_layout(device: &VulkanDevice) -> VulkanResult<vk::DescriptorSetLayout> {
-        let layout_binding = [vk::DescriptorSetLayoutBinding::builder()
+        let layout_binding = vk::DescriptorSetLayoutBinding::builder()
             .binding(0)
             .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
             .descriptor_count(1)
             .stage_flags(vk::ShaderStageFlags::VERTEX)
-            .build()];
+            .build();
 
-        let desc_layout_ci = vk::DescriptorSetLayoutCreateInfo::builder().bindings(&layout_binding);
+        let desc_layout_ci = vk::DescriptorSetLayoutCreateInfo::builder().bindings(array::from_ref(&layout_binding));
 
         unsafe {
             device
@@ -151,20 +154,20 @@ impl VulkanApp {
 
     fn populate_descriptor_sets(&self) {
         for i in 0..MAX_FRAMES_IN_FLIGHT {
-            let buffer_info = [vk::DescriptorBufferInfo::builder()
+            let buffer_info = vk::DescriptorBufferInfo::builder()
                 .buffer(self.uniforms[i].uniform_buffer)
                 .offset(0)
                 .range(std::mem::size_of::<UniformBufferObject>() as _)
-                .build()];
-            let descr_write = [vk::WriteDescriptorSet::builder()
+                .build();
+            let descr_write = vk::WriteDescriptorSet::builder()
                 .dst_set(self.descriptor_sets[i])
                 .dst_binding(0)
                 .dst_array_element(0)
                 .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                .buffer_info(&buffer_info)
-                .build()];
+                .buffer_info(array::from_ref(&buffer_info))
+                .build();
             unsafe {
-                self.device.update_descriptor_sets(&descr_write, &[]);
+                self.device.update_descriptor_sets(array::from_ref(&descr_write), &[]);
             }
         }
     }
@@ -220,7 +223,7 @@ impl VulkanApp {
             .rasterization_samples(vk::SampleCountFlags::TYPE_1)
             .min_sample_shading(1.0);
 
-        let color_attach = [vk::PipelineColorBlendAttachmentState::builder()
+        let color_attach = vk::PipelineColorBlendAttachmentState::builder()
             .color_write_mask(vk::ColorComponentFlags::RGBA)
             .blend_enable(false)
             .src_color_blend_factor(vk::BlendFactor::ONE)
@@ -229,15 +232,14 @@ impl VulkanApp {
             .src_color_blend_factor(vk::BlendFactor::ONE)
             .dst_color_blend_factor(vk::BlendFactor::ZERO)
             .alpha_blend_op(vk::BlendOp::ADD)
-            .build()];
+            .build();
 
         let color_blend_ci = vk::PipelineColorBlendStateCreateInfo::builder()
             .logic_op_enable(false)
             .logic_op(vk::LogicOp::COPY)
-            .attachments(&color_attach);
+            .attachments(array::from_ref(&color_attach));
 
-        let desc_layouts = [descriptor_layout];
-        let pipeline_layout_ci = vk::PipelineLayoutCreateInfo::builder().set_layouts(&desc_layouts);
+        let pipeline_layout_ci = vk::PipelineLayoutCreateInfo::builder().set_layouts(array::from_ref(&descriptor_layout));
 
         let pipeline_layout = unsafe {
             device
@@ -291,17 +293,13 @@ impl VulkanApp {
             .render_area(self.swapchain.extent_rect())
             .clear_values(&clear_color);
 
-        let viewport = [self.swapchain.viewport()];
-        let scissor = [self.swapchain.extent_rect()];
-        let buffers = [self.vertex_buffer];
-        let offsets = [0];
-        let descr_sets = [self.descriptor_sets[self.current_frame]];
         unsafe {
             self.device
                 .cmd_begin_render_pass(cmd_buffer, &renderpass_info, vk::SubpassContents::INLINE);
             self.device
                 .cmd_bind_pipeline(cmd_buffer, vk::PipelineBindPoint::GRAPHICS, self.pipeline);
-            self.device.cmd_bind_vertex_buffers(cmd_buffer, 0, &buffers, &offsets);
+            self.device
+                .cmd_bind_vertex_buffers(cmd_buffer, 0, array::from_ref(&self.vertex_buffer), &[0]);
             self.device
                 .cmd_bind_index_buffer(cmd_buffer, self.index_buffer, 0, vk::IndexType::UINT16);
             self.device.cmd_bind_descriptor_sets(
@@ -309,11 +307,13 @@ impl VulkanApp {
                 vk::PipelineBindPoint::GRAPHICS,
                 self.pipeline_layout,
                 0,
-                &descr_sets,
+                &self.descriptor_sets[self.current_frame..=self.current_frame],
                 &[],
             );
-            self.device.cmd_set_viewport(cmd_buffer, 0, &viewport);
-            self.device.cmd_set_scissor(cmd_buffer, 0, &scissor);
+            self.device
+                .cmd_set_viewport(cmd_buffer, 0, array::from_ref(&self.swapchain.viewport()));
+            self.device
+                .cmd_set_scissor(cmd_buffer, 0, array::from_ref(&self.swapchain.extent_rect()));
             self.device.cmd_draw_indexed(cmd_buffer, 6, 1, 0, 0, 0);
             self.device.cmd_end_render_pass(cmd_buffer);
             self.device
@@ -325,21 +325,21 @@ impl VulkanApp {
     }
 
     pub fn draw_frame(&mut self, window: &Window) -> VulkanResult<()> {
-        let in_flight_fen = [self.sync[self.current_frame].in_flight_fen];
-        let image_avail_sem = [self.sync[self.current_frame].image_avail_sem];
-        let render_finish_sem = [self.sync[self.current_frame].render_finished_sem];
-        let command_buffer = [self.command_buffers[self.current_frame]];
+        let in_flight_fen = self.sync[self.current_frame].in_flight_fen;
+        let image_avail_sem = self.sync[self.current_frame].image_avail_sem;
+        let render_finish_sem = self.sync[self.current_frame].render_finished_sem;
+        let command_buffer = self.command_buffers[self.current_frame];
 
         self.update_uniforms();
 
         let image_idx = unsafe {
             self.device
-                .wait_for_fences(&in_flight_fen, true, u64::MAX)
+                .wait_for_fences(array::from_ref(&in_flight_fen), true, u64::MAX)
                 .describe_err("Failed waiting for error")?;
             let acquire_res =
                 self.device
                     .swapchain_utils
-                    .acquire_next_image(self.swapchain.handle, u64::MAX, image_avail_sem[0], vk::Fence::null());
+                    .acquire_next_image(self.swapchain.handle, u64::MAX, image_avail_sem, vk::Fence::null());
             match acquire_res {
                 Ok((idx, _)) => idx,
                 Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
@@ -352,34 +352,33 @@ impl VulkanApp {
         };
 
         unsafe {
-            self.device.reset_fences(&in_flight_fen).describe_err("Failed resetting fences")?;
             self.device
-                .reset_command_buffer(command_buffer[0], vk::CommandBufferResetFlags::empty())
+                .reset_fences(array::from_ref(&in_flight_fen))
+                .describe_err("Failed resetting fences")?;
+            self.device
+                .reset_command_buffer(command_buffer, vk::CommandBufferResetFlags::empty())
                 .describe_err("Failed to reset command buffer")?;
         }
 
-        self.record_command_buffer(command_buffer[0], image_idx)?;
+        self.record_command_buffer(command_buffer, image_idx)?;
 
-        let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
-        let submit_info = [vk::SubmitInfo::builder()
-            .wait_semaphores(&image_avail_sem)
-            .wait_dst_stage_mask(&wait_stages)
-            .command_buffers(&command_buffer)
-            .signal_semaphores(&render_finish_sem)
-            .build()];
+        let submit_info = vk::SubmitInfo::builder()
+            .wait_semaphores(array::from_ref(&image_avail_sem))
+            .wait_dst_stage_mask(&[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT])
+            .command_buffers(array::from_ref(&command_buffer))
+            .signal_semaphores(array::from_ref(&render_finish_sem))
+            .build();
 
         unsafe {
             self.device
-                .queue_submit(self.device.graphics_queue, &submit_info, in_flight_fen[0])
+                .queue_submit(self.device.graphics_queue, array::from_ref(&submit_info), in_flight_fen)
                 .describe_err("Failed to submit draw command buffer")?
         }
 
-        let swapchains = [self.swapchain.handle];
-        let image_indices = [image_idx];
         let present_info = vk::PresentInfoKHR::builder()
-            .wait_semaphores(&render_finish_sem)
-            .swapchains(&swapchains)
-            .image_indices(&image_indices);
+            .wait_semaphores(array::from_ref(&render_finish_sem))
+            .swapchains(array::from_ref(&self.swapchain.handle))
+            .image_indices(array::from_ref(&image_idx));
 
         let suboptimal = unsafe {
             self.device
