@@ -1,6 +1,7 @@
 use crate::device::{SwapchainInfo, VulkanDevice};
 use crate::types::*;
 use ash::vk;
+use cgmath::{Deg, Matrix4, Point3, Vector3};
 use cstr::cstr;
 use inline_spirv::include_spirv;
 use std::time::Instant;
@@ -401,9 +402,9 @@ impl VulkanApp {
         let time = ((Instant::now() - self.start_time).as_micros() as f64 / 1000000.0) as f32;
         let aspect = self.swapchain.extent.width as f32 / self.swapchain.extent.height as f32;
         let ubo = UniformBufferObject {
-            model: glm::rotate(&glm::Mat4::identity(), time * radians(90.0), &glm::Vec3::z()),
-            view: glm::look_at(&glm::vec3(2.0, 2.0, 2.0), &glm::Vec3::zeros(), &glm::vec3(0.0, 0.0, -1.0)),
-            proj: glm::perspective(aspect, radians(45.0), 0.1, 10.0),
+            model: Matrix4::from_axis_angle(Vector3::unit_z(), Deg(time * 90.0)),
+            view: Matrix4::look_at_rh(Point3::new(2.0, 2.0, 2.0), Point3::new(0.0, 0.0, 0.0), -Vector3::unit_z()),
+            proj: cgmath::perspective(Deg(45.0), aspect, 0.1, 10.0),
         };
         self.uniforms[self.current_frame].write_uniforms(ubo);
     }
@@ -513,13 +514,9 @@ impl UniformData {
 }
 
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 struct UniformBufferObject {
-    model: glm::Mat4,
-    view: glm::Mat4,
-    proj: glm::Mat4,
-}
-
-fn radians(degrees: f32) -> f32 {
-    degrees * std::f32::consts::PI / 180.0
+    model: Matrix4<f32>,
+    view: Matrix4<f32>,
+    proj: Matrix4<f32>,
 }
