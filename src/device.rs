@@ -229,7 +229,7 @@ impl VulkanDevice {
                 .device
                 .map_memory(memory, 0, size, vk::MemoryMapFlags::empty())
                 .describe_err("Failed to map buffer memory")? as *mut T;
-            std::slice::from_raw_parts_mut(mapped_ptr, data.len()).copy_from_slice(data);
+            std::ptr::copy_nonoverlapping(data.as_ptr(), mapped_ptr, data.len());
             self.device.unmap_memory(memory);
         };
         Ok(())
