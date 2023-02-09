@@ -307,17 +307,6 @@ impl VulkanDevice {
                 .describe_err("Failed to create descriptor pool")
         }
     }
-
-    pub fn create_descriptor_sets(
-        &self, pool: vk::DescriptorPool, layouts: &[vk::DescriptorSetLayout],
-    ) -> VulkanResult<Vec<vk::DescriptorSet>> {
-        let alloc_info = vk::DescriptorSetAllocateInfo::builder().descriptor_pool(pool).set_layouts(layouts);
-        unsafe {
-            self.device
-                .allocate_descriptor_sets(&alloc_info)
-                .describe_err("Failed to allocate descriptor sets")
-        }
-    }
 }
 
 impl std::ops::Deref for VulkanDevice {
