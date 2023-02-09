@@ -235,7 +235,7 @@ impl VulkanApp {
             .logic_op(vk::LogicOp::COPY)
             .attachments(&color_attach);
 
-        let desc_layouts = [descriptor_layout; MAX_FRAMES_IN_FLIGHT];
+        let desc_layouts = [descriptor_layout];
         let pipeline_layout_ci = vk::PipelineLayoutCreateInfo::builder().set_layouts(&desc_layouts);
 
         let pipeline_layout = unsafe {
@@ -294,6 +294,7 @@ impl VulkanApp {
         let scissor = [self.swapchain.extent_rect()];
         let buffers = [self.vertex_buffer];
         let offsets = [0];
+        let descr_sets = [self.descriptor_sets[self.current_frame]];
         unsafe {
             self.device
                 .cmd_begin_render_pass(cmd_buffer, &renderpass_info, vk::SubpassContents::INLINE);
@@ -307,7 +308,7 @@ impl VulkanApp {
                 vk::PipelineBindPoint::GRAPHICS,
                 self.pipeline_layout,
                 0,
-                &self.descriptor_sets,
+                &descr_sets,
                 &[],
             );
             self.device.cmd_set_viewport(cmd_buffer, 0, &viewport);
