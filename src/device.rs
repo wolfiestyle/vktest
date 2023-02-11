@@ -168,6 +168,32 @@ impl VulkanDevice {
         }
     }
 
+    pub fn begin_one_time_commands(&self, pool: vk::CommandPool) -> VulkanResult<vk::CommandBuffer> {
+        let cmd_buffer = self.create_command_buffers(pool, 1)?[0];
+        let begin_info = vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+        unsafe {
+            self.device
+                .begin_command_buffer(cmd_buffer, &begin_info)
+                .describe_err("Failed to begin recording command buffer")?;
+        }
+        Ok(cmd_buffer)
+    }
+
+    pub fn end_one_time_commands(&self, pool: vk::CommandPool, cmd_buffer: vk::CommandBuffer, queue: vk::Queue) -> VulkanResult<()> {
+        let submit_info = vk::SubmitInfo::builder().command_buffers(array::from_ref(&cmd_buffer)).build();
+        unsafe {
+            self.device
+                .end_command_buffer(cmd_buffer)
+                .describe_err("Failed to end recording command buffer")?;
+            self.device
+                .queue_submit(queue, array::from_ref(&submit_info), vk::Fence::null())
+                .describe_err("Failed to submit queue")?;
+            self.device.queue_wait_idle(queue).describe_err("Failed to wait queue idle")?;
+            self.device.free_command_buffers(pool, array::from_ref(&cmd_buffer));
+        }
+        Ok(())
+    }
+
     pub fn create_semaphore(&self) -> VulkanResult<vk::Semaphore> {
         let semaphore_ci = vk::SemaphoreCreateInfo::default();
         unsafe {
@@ -236,35 +262,16 @@ impl VulkanDevice {
     }
 
     fn copy_buffer(&self, dst_buffer: vk::Buffer, src_buffer: vk::Buffer, size: vk::DeviceSize, pool: vk::CommandPool) -> VulkanResult<()> {
-        let cmd_buffer = self.create_command_buffers(pool, 1)?[0];
-        let begin_info = vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+        let cmd_buffer = self.begin_one_time_commands(pool)?;
         let copy_region = vk::BufferCopy {
             src_offset: 0,
             dst_offset: 0,
             size,
         };
         unsafe {
-            self.device
-                .begin_command_buffer(cmd_buffer, &begin_info)
-                .describe_err("Failed to begin recording command buffer")?;
             self.device.cmd_copy_buffer(cmd_buffer, src_buffer, dst_buffer, &[copy_region]);
-            self.device
-                .end_command_buffer(cmd_buffer)
-                .describe_err("Failed to end recording command buffer")?;
         }
-
-        let submit_info = vk::SubmitInfo::builder().command_buffers(array::from_ref(&cmd_buffer)).build();
-        unsafe {
-            self.device
-                .queue_submit(self.graphics_queue, array::from_ref(&submit_info), vk::Fence::null())
-                .describe_err("Failed to submit queue")?;
-            self.device
-                .queue_wait_idle(self.graphics_queue)
-                .describe_err("Failed to wait queue idle")?;
-            self.device.free_command_buffers(pool, array::from_ref(&cmd_buffer));
-        }
-
-        Ok(())
+        self.end_one_time_commands(pool, cmd_buffer, self.graphics_queue)
     }
 
     pub fn create_buffer<T: Copy>(
