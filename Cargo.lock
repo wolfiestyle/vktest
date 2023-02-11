@@ -982,6 +982,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "stb_image"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d40a3a511d44640d35f0a371c0069c6a97f4ea5e8fc295120df6b0a00476ae61"
+dependencies = [
+ "cc",
+ "libc",
+]
+
+[[package]]
 name = "strsim"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1089,6 +1099,7 @@ dependencies = [
  "inline-spirv",
  "memoffset 0.8.0",
  "raw-window-handle 0.5.0",
+ "stb_image",
  "winit",
 ]
 

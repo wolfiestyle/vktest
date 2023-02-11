@@ -89,24 +89,8 @@ impl VulkanDevice {
 
         let image_views = images
             .iter()
-            .map(|&image| {
-                let imageview_ci = vk::ImageViewCreateInfo::builder()
-                    .view_type(vk::ImageViewType::TYPE_2D)
-                    .format(surface_format.format)
-                    .components(vk::ComponentMapping::default())
-                    .subresource_range(vk::ImageSubresourceRange {
-                        aspect_mask: vk::ImageAspectFlags::COLOR,
-                        base_mip_level: 0,
-                        level_count: 1,
-                        base_array_layer: 0,
-                        layer_count: 1,
-                    })
-                    .image(image);
-
-                unsafe { self.device.create_image_view(&imageview_ci, None) }
-            })
-            .collect::<Result<_, _>>()
-            .describe_err("Failed to create image views")?;
+            .map(|&image| self.create_image_view(image, surface_format.format))
+            .collect::<Result<_, _>>()?;
 
         Ok(SwapchainInfo {
             handle: swapchain,
@@ -301,18 +285,182 @@ impl VulkanDevice {
         Ok((dst_buffer, dst_memory))
     }
 
-    pub fn create_descriptor_pool(&self, max_count: u32) -> VulkanResult<vk::DescriptorPool> {
-        let pool_size = vk::DescriptorPoolSize {
-            ty: vk::DescriptorType::UNIFORM_BUFFER,
-            descriptor_count: max_count,
+    pub fn allocate_image(
+        &self, width: u32, height: u32, format: vk::Format, tiling: vk::ImageTiling, usage: vk::ImageUsageFlags,
+        properties: vk::MemoryPropertyFlags,
+    ) -> VulkanResult<(vk::Image, vk::DeviceMemory)> {
+        let image_ci = vk::ImageCreateInfo::builder()
+            .image_type(vk::ImageType::TYPE_2D)
+            .extent(vk::Extent3D { width, height, depth: 1 })
+            .mip_levels(1)
+            .array_layers(1)
+            .format(format)
+            .tiling(tiling)
+            .initial_layout(vk::ImageLayout::UNDEFINED)
+            .usage(usage)
+            .samples(vk::SampleCountFlags::TYPE_1)
+            .sharing_mode(vk::SharingMode::EXCLUSIVE);
+
+        let image = unsafe { self.device.create_image(&image_ci, None).describe_err("Failed to create image")? };
+
+        let mem_reqs = unsafe { self.device.get_image_memory_requirements(image) };
+        let mem_type = self.dev_info.find_memory_type(mem_reqs.memory_type_bits, properties)?;
+
+        let alloc_info = vk::MemoryAllocateInfo::builder()
+            .allocation_size(mem_reqs.size)
+            .memory_type_index(mem_type);
+
+        let memory = unsafe {
+            self.device
+                .allocate_memory(&alloc_info, None)
+                .describe_err("Failed to allocate image memory")?
         };
-        let pool_ci = vk::DescriptorPoolCreateInfo::builder()
-            .pool_sizes(array::from_ref(&pool_size))
-            .max_sets(max_count);
         unsafe {
             self.device
-                .create_descriptor_pool(&pool_ci, None)
-                .describe_err("Failed to create descriptor pool")
+                .bind_image_memory(image, memory, 0)
+                .describe_err("Failed to bind image memory")?;
+        }
+
+        Ok((image, memory))
+    }
+
+    fn transition_image_layout(&self, image: vk::Image, old_layout: vk::ImageLayout, new_layout: vk::ImageLayout) -> VulkanResult<()> {
+        let (src_access, dst_access, src_stage, dst_stage) = match (old_layout, new_layout) {
+            (vk::ImageLayout::UNDEFINED, vk::ImageLayout::TRANSFER_DST_OPTIMAL) => (
+                vk::AccessFlags::empty(),
+                vk::AccessFlags::TRANSFER_WRITE,
+                vk::PipelineStageFlags::TOP_OF_PIPE,
+                vk::PipelineStageFlags::TRANSFER,
+            ),
+            (vk::ImageLayout::TRANSFER_DST_OPTIMAL, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL) => (
+                vk::AccessFlags::TRANSFER_WRITE,
+                vk::AccessFlags::SHADER_READ,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::PipelineStageFlags::FRAGMENT_SHADER,
+            ),
+            _ => return Err(VkError::EngineError("Unsupported layout transition")),
+        };
+        let cmd_buffer = self.begin_one_time_commands()?;
+        let barrier = vk::ImageMemoryBarrier::builder()
+            .old_layout(old_layout)
+            .new_layout(new_layout)
+            .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .image(image)
+            .subresource_range(vk::ImageSubresourceRange {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: 0,
+                layer_count: 1,
+            })
+            .src_access_mask(src_access)
+            .dst_access_mask(dst_access)
+            .build();
+        unsafe {
+            self.device
+                .cmd_pipeline_barrier(cmd_buffer, src_stage, dst_stage, vk::DependencyFlags::empty(), &[], &[], &[barrier]);
+        }
+        self.end_one_time_commands(cmd_buffer, self.graphics_queue)?;
+        Ok(())
+    }
+
+    fn copy_buffer_to_image(&self, buffer: vk::Buffer, image: vk::Image, width: u32, height: u32) -> VulkanResult<()> {
+        let cmd_buffer = self.begin_one_time_commands()?;
+        let region = vk::BufferImageCopy::builder()
+            .buffer_offset(0)
+            .buffer_row_length(0)
+            .buffer_image_height(0)
+            .image_subresource(vk::ImageSubresourceLayers {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                mip_level: 0,
+                base_array_layer: 0,
+                layer_count: 1,
+            })
+            .image_offset(Default::default())
+            .image_extent(vk::Extent3D { width, height, depth: 1 })
+            .build();
+        unsafe {
+            self.device
+                .cmd_copy_buffer_to_image(cmd_buffer, buffer, image, vk::ImageLayout::TRANSFER_DST_OPTIMAL, &[region]);
+        }
+        self.end_one_time_commands(cmd_buffer, self.graphics_queue)
+    }
+
+    pub fn create_texture(&self, width: u32, height: u32, data: &[u8]) -> VulkanResult<(vk::Image, vk::DeviceMemory)> {
+        let size = width as vk::DeviceSize * height as vk::DeviceSize * 4;
+        if data.len() != size as usize {
+            return Err(VkError::EngineError("Image size and data length doesn't match"));
+        }
+        let (src_buffer, src_memory) = self.allocate_buffer(
+            size,
+            vk::BufferUsageFlags::TRANSFER_SRC,
+            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+        )?;
+        let (tex_image, tex_memory) = self.allocate_image(
+            width,
+            height,
+            vk::Format::R8G8B8A8_SRGB,
+            vk::ImageTiling::OPTIMAL,
+            vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+        )?;
+
+        self.write_memory(src_memory, data)?;
+        self.transition_image_layout(tex_image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::TRANSFER_DST_OPTIMAL)?;
+        self.copy_buffer_to_image(src_buffer, tex_image, width, height)?;
+        self.transition_image_layout(
+            tex_image,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+        )?;
+
+        unsafe {
+            self.device.destroy_buffer(src_buffer, None);
+            self.device.free_memory(src_memory, None);
+        }
+
+        Ok((tex_image, tex_memory))
+    }
+
+    pub fn create_image_view(&self, image: vk::Image, format: vk::Format) -> VulkanResult<vk::ImageView> {
+        let imageview_ci = vk::ImageViewCreateInfo::builder()
+            .image(image)
+            .view_type(vk::ImageViewType::TYPE_2D)
+            .format(format)
+            .subresource_range(vk::ImageSubresourceRange {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: 0,
+                layer_count: 1,
+            });
+
+        unsafe {
+            self.device
+                .create_image_view(&imageview_ci, None)
+                .describe_err("Failed to create image view")
+        }
+    }
+
+    pub fn create_texture_sampler(&self, addr_mode: vk::SamplerAddressMode) -> VulkanResult<vk::Sampler> {
+        let sampler_ci = vk::SamplerCreateInfo::builder()
+            .mag_filter(vk::Filter::LINEAR)
+            .min_filter(vk::Filter::LINEAR)
+            .address_mode_u(addr_mode)
+            .address_mode_v(addr_mode)
+            .address_mode_w(addr_mode)
+            .anisotropy_enable(false)
+            .max_anisotropy(1.0)
+            .border_color(vk::BorderColor::INT_OPAQUE_BLACK)
+            .unnormalized_coordinates(false)
+            .compare_enable(false)
+            .compare_op(vk::CompareOp::ALWAYS)
+            .mipmap_mode(vk::SamplerMipmapMode::NEAREST);
+        unsafe {
+            self.device
+                .create_sampler(&sampler_ci, None)
+                .describe_err("Failed to create texture sampler")
         }
     }
 }

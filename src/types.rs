@@ -8,6 +8,7 @@ pub enum VkError {
     LoadingFailed(ash::LoadingError),
     Vulkan(vk::Result),
     VulkanMsg(&'static str, vk::Result),
+    Image(&'static str, String),
     EngineError(&'static str),
     UnsuitableDevice, // used internally
 }
@@ -18,6 +19,7 @@ impl std::fmt::Display for VkError {
             Self::LoadingFailed(err) => write!(f, "Failed to load Vulkan library: {err}"),
             Self::Vulkan(err) => write!(f, "Vulkan error: {err}"),
             Self::VulkanMsg(msg, err) => write!(f, "{msg}: {err}"),
+            Self::Image(msg, err) => write!(f, "{msg}: {err}"),
             Self::EngineError(desc) => write!(f, "{desc}"),
             Self::UnsuitableDevice => write!(f, "Unsuitable device"),
         }
@@ -27,8 +29,8 @@ impl std::fmt::Display for VkError {
 impl std::error::Error for VkError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            VkError::LoadingFailed(err) => Some(err),
-            VkError::Vulkan(err) | VkError::VulkanMsg(_, err) => Some(err),
+            Self::LoadingFailed(err) => Some(err),
+            Self::Vulkan(err) | Self::VulkanMsg(_, err) => Some(err),
             _ => None,
         }
     }
@@ -36,13 +38,13 @@ impl std::error::Error for VkError {
 
 impl From<ash::LoadingError> for VkError {
     fn from(err: ash::LoadingError) -> Self {
-        VkError::LoadingFailed(err)
+        Self::LoadingFailed(err)
     }
 }
 
 impl From<vk::Result> for VkError {
     fn from(err: vk::Result) -> Self {
-        VkError::Vulkan(err)
+        Self::Vulkan(err)
     }
 }
 
@@ -57,6 +59,18 @@ impl<T> ErrorDescription<&'static str> for ash::prelude::VkResult<T> {
 
     fn describe_err(self, msg: &'static str) -> VulkanResult<Self::Output> {
         self.map_err(|err| VkError::VulkanMsg(msg, err))
+    }
+}
+
+impl ErrorDescription<&'static str> for stb_image::image::LoadResult {
+    type Output = stb_image::image::Image<u8>;
+
+    fn describe_err(self, msg: &'static str) -> VulkanResult<Self::Output> {
+        match self {
+            Self::ImageU8(img) => Ok(img),
+            Self::ImageF32(_) => Err(VkError::EngineError("Unsuported float image data")), //FIXME: this will have to be supported someday
+            Self::Error(err) => Err(VkError::Image(msg, err)),
+        }
     }
 }
 
