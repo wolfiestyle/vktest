@@ -13,4 +13,4 @@ cstr = "0.2.11"
 inline-spirv = "0.1.5"
 memoffset = "0.8.0"
 cgmath = "0.18.0"
-stb_image = "0.2.4"
+stb = { version = "0.3.2", default_features = false, features = ["stb_image"] }

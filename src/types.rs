@@ -8,7 +8,8 @@ pub enum VkError {
     LoadingFailed(ash::LoadingError),
     Vulkan(vk::Result),
     VulkanMsg(&'static str, vk::Result),
-    Image(&'static str, String),
+    Io(std::io::Error),
+    Image(&'static str),
     EngineError(&'static str),
     UnsuitableDevice, // used internally
 }
@@ -19,7 +20,8 @@ impl std::fmt::Display for VkError {
             Self::LoadingFailed(err) => write!(f, "Failed to load Vulkan library: {err}"),
             Self::Vulkan(err) => write!(f, "Vulkan error: {err}"),
             Self::VulkanMsg(msg, err) => write!(f, "{msg}: {err}"),
-            Self::Image(msg, err) => write!(f, "{msg}: {err}"),
+            Self::Io(err) => write!(f, "IO error: {err}"),
+            Self::Image(msg) => write!(f, "{msg}"),
             Self::EngineError(desc) => write!(f, "{desc}"),
             Self::UnsuitableDevice => write!(f, "Unsuitable device"),
         }
@@ -31,6 +33,7 @@ impl std::error::Error for VkError {
         match self {
             Self::LoadingFailed(err) => Some(err),
             Self::Vulkan(err) | Self::VulkanMsg(_, err) => Some(err),
+            Self::Io(err) => Some(err),
             _ => None,
         }
     }
@@ -48,6 +51,12 @@ impl From<vk::Result> for VkError {
     }
 }
 
+impl From<std::io::Error> for VkError {
+    fn from(err: std::io::Error) -> Self {
+        Self::Io(err)
+    }
+}
+
 pub trait ErrorDescription<M> {
     type Output;
 
@@ -62,15 +71,11 @@ impl<T> ErrorDescription<&'static str> for ash::prelude::VkResult<T> {
     }
 }
 
-impl ErrorDescription<&'static str> for stb_image::image::LoadResult {
-    type Output = stb_image::image::Image<u8>;
+impl<T> ErrorDescription<&'static str> for Option<(stb::image::Info, stb::image::Data<T>)> {
+    type Output = (stb::image::Info, stb::image::Data<T>);
 
     fn describe_err(self, msg: &'static str) -> VulkanResult<Self::Output> {
-        match self {
-            Self::ImageU8(img) => Ok(img),
-            Self::ImageF32(_) => Err(VkError::EngineError("Unsuported float image data")), //FIXME: this will have to be supported someday
-            Self::Error(err) => Err(VkError::Image(msg, err)),
-        }
+        self.ok_or_else(|| VkError::Image(msg))
     }
 }
 
