@@ -13,6 +13,7 @@ pub struct VulkanDevice {
     pub device: ash::Device,
     pub graphics_queue: vk::Queue,
     pub present_queue: vk::Queue,
+    pub graphics_pool: vk::CommandPool,
     pub swapchain_utils: khr::Swapchain,
 }
 
@@ -26,6 +27,7 @@ impl VulkanDevice {
         let device = vk.create_logical_device(&dev_info)?;
         let graphics_queue = unsafe { device.get_device_queue(dev_info.graphics_idx, 0) };
         let present_queue = unsafe { device.get_device_queue(dev_info.present_idx, 0) };
+        let graphics_pool = Self::create_command_pool(&device, dev_info.graphics_idx, vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)?;
         let swapchain_utils = khr::Swapchain::new(&vk.instance, &device);
 
         Ok(Self {
@@ -36,6 +38,7 @@ impl VulkanDevice {
             device,
             graphics_queue,
             present_queue,
+            graphics_pool,
             swapchain_utils,
         })
     }
@@ -145,19 +148,19 @@ impl VulkanDevice {
             .collect()
     }
 
-    pub fn create_command_pool(&self, family_idx: u32, flags: vk::CommandPoolCreateFlags) -> VulkanResult<vk::CommandPool> {
+    fn create_command_pool(device: &ash::Device, family_idx: u32, flags: vk::CommandPoolCreateFlags) -> VulkanResult<vk::CommandPool> {
         let command_pool_ci = vk::CommandPoolCreateInfo::builder().flags(flags).queue_family_index(family_idx);
 
         unsafe {
-            self.device
+            device
                 .create_command_pool(&command_pool_ci, None)
                 .describe_err("Failed to create command pool")
         }
     }
 
-    pub fn create_command_buffers(&self, pool: vk::CommandPool, count: u32) -> VulkanResult<Vec<vk::CommandBuffer>> {
+    pub fn create_command_buffers(&self, count: u32) -> VulkanResult<Vec<vk::CommandBuffer>> {
         let alloc_info = vk::CommandBufferAllocateInfo::builder()
-            .command_pool(pool)
+            .command_pool(self.graphics_pool)
             .level(vk::CommandBufferLevel::PRIMARY)
             .command_buffer_count(count);
 
@@ -168,8 +171,8 @@ impl VulkanDevice {
         }
     }
 
-    pub fn begin_one_time_commands(&self, pool: vk::CommandPool) -> VulkanResult<vk::CommandBuffer> {
-        let cmd_buffer = self.create_command_buffers(pool, 1)?[0];
+    pub fn begin_one_time_commands(&self) -> VulkanResult<vk::CommandBuffer> {
+        let cmd_buffer = self.create_command_buffers(1)?[0];
         let begin_info = vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
         unsafe {
             self.device
@@ -179,7 +182,7 @@ impl VulkanDevice {
         Ok(cmd_buffer)
     }
 
-    pub fn end_one_time_commands(&self, pool: vk::CommandPool, cmd_buffer: vk::CommandBuffer, queue: vk::Queue) -> VulkanResult<()> {
+    pub fn end_one_time_commands(&self, cmd_buffer: vk::CommandBuffer, queue: vk::Queue) -> VulkanResult<()> {
         let submit_info = vk::SubmitInfo::builder().command_buffers(array::from_ref(&cmd_buffer)).build();
         unsafe {
             self.device
@@ -189,7 +192,7 @@ impl VulkanDevice {
                 .queue_submit(queue, array::from_ref(&submit_info), vk::Fence::null())
                 .describe_err("Failed to submit queue")?;
             self.device.queue_wait_idle(queue).describe_err("Failed to wait queue idle")?;
-            self.device.free_command_buffers(pool, array::from_ref(&cmd_buffer));
+            self.device.free_command_buffers(self.graphics_pool, array::from_ref(&cmd_buffer));
         }
         Ok(())
     }
@@ -261,8 +264,8 @@ impl VulkanDevice {
         Ok(())
     }
 
-    fn copy_buffer(&self, dst_buffer: vk::Buffer, src_buffer: vk::Buffer, size: vk::DeviceSize, pool: vk::CommandPool) -> VulkanResult<()> {
-        let cmd_buffer = self.begin_one_time_commands(pool)?;
+    fn copy_buffer(&self, dst_buffer: vk::Buffer, src_buffer: vk::Buffer, size: vk::DeviceSize) -> VulkanResult<()> {
+        let cmd_buffer = self.begin_one_time_commands()?;
         let copy_region = vk::BufferCopy {
             src_offset: 0,
             dst_offset: 0,
@@ -271,12 +274,10 @@ impl VulkanDevice {
         unsafe {
             self.device.cmd_copy_buffer(cmd_buffer, src_buffer, dst_buffer, &[copy_region]);
         }
-        self.end_one_time_commands(pool, cmd_buffer, self.graphics_queue)
+        self.end_one_time_commands(cmd_buffer, self.graphics_queue)
     }
 
-    pub fn create_buffer<T: Copy>(
-        &self, data: &[T], usage: vk::BufferUsageFlags, pool: vk::CommandPool,
-    ) -> VulkanResult<(vk::Buffer, vk::DeviceMemory)> {
+    pub fn create_buffer<T: Copy>(&self, data: &[T], usage: vk::BufferUsageFlags) -> VulkanResult<(vk::Buffer, vk::DeviceMemory)> {
         let size = std::mem::size_of_val(data) as _;
         let (src_buffer, src_memory) = self.allocate_buffer(
             size,
@@ -290,7 +291,7 @@ impl VulkanDevice {
         )?;
 
         self.write_memory(src_memory, data)?;
-        self.copy_buffer(dst_buffer, src_buffer, size, pool)?;
+        self.copy_buffer(dst_buffer, src_buffer, size)?;
 
         unsafe {
             self.device.destroy_buffer(src_buffer, None);
@@ -326,6 +327,7 @@ impl std::ops::Deref for VulkanDevice {
 impl Drop for VulkanDevice {
     fn drop(&mut self) {
         unsafe {
+            self.device.destroy_command_pool(self.graphics_pool, None);
             self.instance.surface_utils.destroy_surface(self.surface, None);
             self.device.destroy_device(None);
         }

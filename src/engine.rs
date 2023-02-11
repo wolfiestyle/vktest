@@ -22,7 +22,6 @@ pub struct VulkanApp {
     descriptor_pool: vk::DescriptorPool,
     descriptor_sets: Vec<vk::DescriptorSet>,
     framebuffers: Vec<vk::Framebuffer>,
-    command_pool: vk::CommandPool,
     command_buffers: Vec<vk::CommandBuffer>,
     sync: Vec<FrameSyncState>,
     current_frame: usize,
@@ -52,8 +51,7 @@ impl VulkanApp {
         let pipeline_layout = Self::create_pipeline_layout(&vk, descriptor_layout)?;
         let pipeline = Self::create_graphics_pipeline(&vk, vert_spv, frag_spv, render_pass, pipeline_layout)?;
 
-        let command_pool = vk.create_command_pool(vk.dev_info.graphics_idx, vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)?;
-        let command_buffers = vk.create_command_buffers(command_pool, MAX_FRAMES_IN_FLIGHT as u32)?;
+        let command_buffers = vk.create_command_buffers(MAX_FRAMES_IN_FLIGHT as u32)?;
         let sync = (0..MAX_FRAMES_IN_FLIGHT)
             .map(|_| FrameSyncState::new(&vk))
             .collect::<Result<_, _>>()?;
@@ -65,8 +63,8 @@ impl VulkanApp {
             ([-0.5, 0.5], [1.0, 1.0, 1.0]),
         ];
         let indices: [u16; 6] = [0, 1, 2, 2, 3, 0];
-        let (vertex_buffer, vb_memory) = vk.create_buffer(&vertices, vk::BufferUsageFlags::VERTEX_BUFFER, command_pool)?;
-        let (index_buffer, ib_memory) = vk.create_buffer(&indices, vk::BufferUsageFlags::INDEX_BUFFER, command_pool)?;
+        let (vertex_buffer, vb_memory) = vk.create_buffer(&vertices, vk::BufferUsageFlags::VERTEX_BUFFER)?;
+        let (index_buffer, ib_memory) = vk.create_buffer(&indices, vk::BufferUsageFlags::INDEX_BUFFER)?;
 
         Ok(Self {
             device: vk,
@@ -78,7 +76,6 @@ impl VulkanApp {
             descriptor_pool,
             descriptor_sets,
             framebuffers,
-            command_pool,
             command_buffers,
             sync,
             current_frame: 0,
@@ -459,7 +456,6 @@ impl Drop for VulkanApp {
             }
             self.device.destroy_descriptor_set_layout(self.descriptor_layout, None);
             self.device.destroy_descriptor_pool(self.descriptor_pool, None);
-            self.device.destroy_command_pool(self.command_pool, None);
             self.device.destroy_pipeline(self.pipeline, None);
             self.device.destroy_pipeline_layout(self.pipeline_layout, None);
             self.device.destroy_render_pass(self.render_pass, None);
