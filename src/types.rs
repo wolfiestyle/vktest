@@ -112,13 +112,13 @@ pub trait VertexBindindDesc {
     fn binding_desc(binding: u32) -> vk::VertexInputBindingDescription;
 }
 
-impl<T> VertexBindindDesc for T {
+impl<T: VertexAttrDesc> VertexBindindDesc for T {
     fn binding_desc(binding: u32) -> vk::VertexInputBindingDescription {
-        vk::VertexInputBindingDescription::builder()
-            .binding(binding)
-            .stride(std::mem::size_of::<Self>() as _)
-            .input_rate(vk::VertexInputRate::VERTEX)
-            .build()
+        vk::VertexInputBindingDescription {
+            binding,
+            stride: std::mem::size_of::<Self>() as _,
+            input_rate: vk::VertexInputRate::VERTEX,
+        }
     }
 }
 
@@ -131,12 +131,12 @@ macro_rules! impl_tuple_desc {
         impl<$($name: TypeFormat),+> VertexAttrDesc for ($($name,)+) {
             fn attr_desc(binding: u32) -> Vec<vk::VertexInputAttributeDescription> {
                 vec![$(
-                    vk::VertexInputAttributeDescription::builder()
-                        .binding(binding)
-                        .location($idx)
-                        .format($name::VK_FORMAT)
-                        .offset(offset_of_tuple!(Self, $idx) as _)
-                        .build()
+                    vk::VertexInputAttributeDescription {
+                        binding,
+                        location: $idx,
+                        format: $name::VK_FORMAT,
+                        offset: offset_of_tuple!(Self, $idx) as _,
+                    }
                 ),+]
             }
         }
