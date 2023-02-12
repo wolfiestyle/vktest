@@ -3,7 +3,6 @@ use crate::types::*;
 use ash::vk;
 use cgmath::{Deg, Matrix4, Point3, Vector3};
 use cstr::cstr;
-use inline_spirv::include_spirv;
 use stb::image;
 use std::array;
 use std::time::Instant;
@@ -28,6 +27,7 @@ pub struct VulkanApp {
     current_frame: usize,
     vertex_buffer: VkBuffer,
     index_buffer: VkBuffer,
+    index_count: u32,
     depth_image: VkImage,
     depth_imgview: vk::ImageView,
     depth_format: vk::Format,
@@ -39,21 +39,10 @@ pub struct VulkanApp {
 }
 
 impl VulkanApp {
-    pub fn new(window: &Window) -> VulkanResult<Self> {
-        let vertices: [Vertex; 8] = [
-            ([-0.5, -0.5, 0.0], [1.0, 0.0, 0.0], [1.0, 0.0]),
-            ([0.5, -0.5, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0]),
-            ([0.5, 0.5, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0]),
-            ([-0.5, 0.5, 0.0], [1.0, 1.0, 1.0], [1.0, 1.0]),
-            ([-0.5, -0.5, -0.5], [1.0, 0.0, 0.0], [1.0, 0.0]),
-            ([0.5, -0.5, -0.5], [0.0, 1.0, 0.0], [0.0, 0.0]),
-            ([0.5, 0.5, -0.5], [0.0, 0.0, 1.0], [0.0, 1.0]),
-            ([-0.5, 0.5, -0.5], [1.0, 1.0, 1.0], [1.0, 1.0]),
-        ];
-        let indices: [u16; 12] = [0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4];
-        let vert_spv = include_spirv!("src/shaders/texture.vert.glsl", vert, glsl);
-        let frag_spv = include_spirv!("src/shaders/texture.frag.glsl", frag, glsl);
-        let (img_info, img_data) = image::stbi_load_from_reader(&mut std::fs::File::open("image.jpg")?, image::Channels::RgbAlpha)
+    pub fn new(
+        window: &Window, vertices: &[Vertex], indices: &[u16], vert_spv: &[u32], frag_spv: &[u32], img_filename: &str,
+    ) -> VulkanResult<Self> {
+        let (img_info, img_data) = image::stbi_load_from_reader(&mut std::fs::File::open(img_filename)?, image::Channels::RgbAlpha)
             .describe_err("Failed to load image")?;
 
         let vk = VulkanDevice::new(window)?;
@@ -73,7 +62,15 @@ impl VulkanApp {
         let descriptor_pool = Self::create_descriptor_pool(&vk, MAX_FRAMES_IN_FLIGHT as u32)?;
         let descriptor_sets = Self::create_descriptor_sets(&vk, descriptor_pool, descriptor_layout, &uniforms, tex_imgview, tex_sampler)?;
         let pipeline_layout = Self::create_pipeline_layout(&vk, descriptor_layout)?;
-        let pipeline = Self::create_graphics_pipeline(&vk, vert_spv, frag_spv, render_pass, pipeline_layout)?;
+        let pipeline = Self::create_graphics_pipeline(
+            &vk,
+            vert_spv,
+            frag_spv,
+            &[Vertex::binding_desc(0)],
+            &Vertex::attr_desc(0),
+            render_pass,
+            pipeline_layout,
+        )?;
 
         let command_buffers = vk.create_command_buffers(MAX_FRAMES_IN_FLIGHT as u32)?;
         let sync = (0..MAX_FRAMES_IN_FLIGHT)
@@ -98,6 +95,7 @@ impl VulkanApp {
             current_frame: 0,
             vertex_buffer,
             index_buffer,
+            index_count: indices.len() as _,
             depth_image,
             depth_imgview,
             depth_format,
@@ -275,8 +273,8 @@ impl VulkanApp {
     }
 
     fn create_graphics_pipeline(
-        device: &VulkanDevice, vert_shader_spv: &[u32], frag_shader_spv: &[u32], render_pass: vk::RenderPass,
-        pipeline_layout: vk::PipelineLayout,
+        device: &VulkanDevice, vert_shader_spv: &[u32], frag_shader_spv: &[u32], binding_desc: &[vk::VertexInputBindingDescription],
+        attr_desc: &[vk::VertexInputAttributeDescription], render_pass: vk::RenderPass, pipeline_layout: vk::PipelineLayout,
     ) -> VulkanResult<vk::Pipeline> {
         let vert_shader = device.create_shader_module(vert_shader_spv)?;
         let frag_shader = device.create_shader_module(frag_shader_spv)?;
@@ -294,9 +292,6 @@ impl VulkanApp {
                 .name(entry_point)
                 .build(),
         ];
-
-        let binding_desc = [Vertex::binding_desc(0)];
-        let attr_desc = Vertex::attr_desc(0);
 
         let vertex_input_ci = vk::PipelineVertexInputStateCreateInfo::builder()
             .vertex_binding_descriptions(&binding_desc)
@@ -422,7 +417,7 @@ impl VulkanApp {
                 .cmd_set_viewport(cmd_buffer, 0, array::from_ref(&self.swapchain.viewport()));
             self.device
                 .cmd_set_scissor(cmd_buffer, 0, array::from_ref(&self.swapchain.extent_rect()));
-            self.device.cmd_draw_indexed(cmd_buffer, 12, 1, 0, 0, 0); //FIXME: count should be external input
+            self.device.cmd_draw_indexed(cmd_buffer, self.index_count, 1, 0, 0, 0);
             self.device.cmd_end_render_pass(cmd_buffer);
             self.device
                 .end_command_buffer(cmd_buffer)
