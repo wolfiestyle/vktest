@@ -89,7 +89,7 @@ impl VulkanDevice {
 
         let image_views = images
             .iter()
-            .map(|&image| self.create_image_view(image, surface_format.format))
+            .map(|&image| self.create_image_view(image, surface_format.format, vk::ImageAspectFlags::COLOR))
             .collect::<Result<_, _>>()?;
 
         Ok(SwapchainInfo {
@@ -111,14 +111,17 @@ impl VulkanDevice {
         }
     }
 
-    pub fn create_framebuffers(&self, swapchain: &SwapchainInfo, render_pass: vk::RenderPass) -> VulkanResult<Vec<vk::Framebuffer>> {
+    pub fn create_framebuffers(
+        &self, swapchain: &SwapchainInfo, render_pass: vk::RenderPass, depth_imgview: vk::ImageView,
+    ) -> VulkanResult<Vec<vk::Framebuffer>> {
         swapchain
             .image_views
             .iter()
-            .map(|imgview| {
+            .map(|&imgview| {
+                let attachments = [imgview, depth_imgview];
                 let framebuffer_ci = vk::FramebufferCreateInfo::builder()
                     .render_pass(render_pass)
-                    .attachments(array::from_ref(imgview))
+                    .attachments(&attachments)
                     .width(swapchain.extent.width)
                     .height(swapchain.extent.height)
                     .layers(1);
@@ -423,13 +426,15 @@ impl VulkanDevice {
         Ok((tex_image, tex_memory))
     }
 
-    pub fn create_image_view(&self, image: vk::Image, format: vk::Format) -> VulkanResult<vk::ImageView> {
+    pub fn create_image_view(
+        &self, image: vk::Image, format: vk::Format, aspect_mask: vk::ImageAspectFlags,
+    ) -> VulkanResult<vk::ImageView> {
         let imageview_ci = vk::ImageViewCreateInfo::builder()
             .image(image)
             .view_type(vk::ImageViewType::TYPE_2D)
             .format(format)
             .subresource_range(vk::ImageSubresourceRange {
-                aspect_mask: vk::ImageAspectFlags::COLOR,
+                aspect_mask,
                 base_mip_level: 0,
                 level_count: 1,
                 base_array_layer: 0,
@@ -462,6 +467,47 @@ impl VulkanDevice {
                 .create_sampler(&sampler_ci, None)
                 .describe_err("Failed to create texture sampler")
         }
+    }
+
+    pub fn find_supported_format(
+        &self, candidates: &[vk::Format], tiling: vk::ImageTiling, features: vk::FormatFeatureFlags,
+    ) -> VulkanResult<vk::Format> {
+        candidates
+            .iter()
+            .cloned()
+            .find(|&fmt| {
+                let props = unsafe {
+                    self.instance
+                        .instance
+                        .get_physical_device_format_properties(self.dev_info.phys_dev, fmt)
+                };
+                (tiling == vk::ImageTiling::LINEAR && props.linear_tiling_features.contains(features))
+                    || (tiling == vk::ImageTiling::OPTIMAL && props.optimal_tiling_features.contains(features))
+            })
+            .ok_or(VkError::EngineError("Failed to find supported image format"))
+    }
+
+    pub fn create_depth_image(
+        &self, width: u32, height: u32, format: Option<vk::Format>,
+    ) -> VulkanResult<(vk::Image, vk::DeviceMemory, vk::Format)> {
+        let formats = format.as_ref().map(std::slice::from_ref).unwrap_or(&[
+            vk::Format::D32_SFLOAT,
+            vk::Format::D32_SFLOAT_S8_UINT,
+            vk::Format::D24_UNORM_S8_UINT,
+            vk::Format::D16_UNORM,
+            vk::Format::D16_UNORM_S8_UINT,
+        ]);
+        let depth_format =
+            self.find_supported_format(formats, vk::ImageTiling::OPTIMAL, vk::FormatFeatureFlags::DEPTH_STENCIL_ATTACHMENT)?;
+        let (depth_img, depth_mem) = self.allocate_image(
+            width,
+            height,
+            depth_format,
+            vk::ImageTiling::OPTIMAL,
+            vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+        )?;
+        Ok((depth_img, depth_mem, depth_format))
     }
 }
 
