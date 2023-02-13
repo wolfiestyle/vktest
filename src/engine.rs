@@ -10,7 +10,8 @@ use winit::window::Window;
 
 const SWAPCHAIN_IMAGE_COUNT: u32 = 3;
 const MAX_FRAMES_IN_FLIGHT: usize = 2;
-type Vertex = ([f32; 3], [f32; 3], [f32; 2]);
+//type Vertex = ([f32; 3], [f32; 3], [f32; 2]);
+type Vertex = obj::TexturedVertex;
 
 pub struct VulkanApp {
     device: VulkanDevice,
@@ -40,7 +41,7 @@ pub struct VulkanApp {
 
 impl VulkanApp {
     pub fn new(
-        window: &Window, vertices: &[Vertex], indices: &[u16], vert_spv: &[u32], frag_spv: &[u32], img_filename: &str,
+        window: &Window, vertices: &[Vertex], indices: &[u32], vert_spv: &[u32], frag_spv: &[u32], img_filename: &str,
     ) -> VulkanResult<Self> {
         let (img_info, img_data) = image::stbi_load_from_reader(&mut std::fs::File::open(img_filename)?, image::Channels::RgbAlpha)
             .describe_err("Failed to load image")?;
@@ -404,7 +405,7 @@ impl VulkanApp {
             self.device
                 .cmd_bind_vertex_buffers(cmd_buffer, 0, array::from_ref(&*self.vertex_buffer), &[0]);
             self.device
-                .cmd_bind_index_buffer(cmd_buffer, *self.index_buffer, 0, vk::IndexType::UINT16);
+                .cmd_bind_index_buffer(cmd_buffer, *self.index_buffer, 0, vk::IndexType::UINT32);
             self.device.cmd_bind_descriptor_sets(
                 cmd_buffer,
                 vk::PipelineBindPoint::GRAPHICS,

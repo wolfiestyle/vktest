@@ -1,5 +1,5 @@
 use ash::vk;
-use memoffset::offset_of_tuple;
+use memoffset::{offset_of, offset_of_tuple};
 
 pub type VulkanResult<T> = Result<T, VkError>;
 
@@ -146,3 +146,36 @@ macro_rules! impl_tuple_desc {
 impl_tuple_desc!(A 0);
 impl_tuple_desc!(A 0, B 1);
 impl_tuple_desc!(A 0, B 1, C 2);
+
+trait LensFormat {
+    fn lens_format<T: TypeFormat, F: for<'a> FnOnce(&'a Self) -> &'a T>(_: F) -> vk::Format {
+        T::VK_FORMAT
+    }
+}
+
+impl<T> LensFormat for T {}
+
+impl VertexAttrDesc for obj::TexturedVertex {
+    fn attr_desc(binding: u32) -> Vec<vk::VertexInputAttributeDescription> {
+        vec![
+            vk::VertexInputAttributeDescription {
+                binding,
+                location: 0,
+                format: Self::lens_format(|v| &v.position),
+                offset: offset_of!(Self, position) as _,
+            },
+            vk::VertexInputAttributeDescription {
+                binding,
+                location: 1,
+                format: Self::lens_format(|v| &v.normal),
+                offset: offset_of!(Self, normal) as _,
+            },
+            vk::VertexInputAttributeDescription {
+                binding,
+                location: 2,
+                format: Self::lens_format(|v| &v.texture),
+                offset: offset_of!(Self, texture) as _,
+            },
+        ]
+    }
+}

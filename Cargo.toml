@@ -14,3 +14,4 @@ inline-spirv = "0.1.5"
 memoffset = "0.8.0"
 cgmath = "0.18.0"
 stb = { version = "0.3.2", default_features = false, features = ["stb_image"] }
+obj-rs = "0.7.0"

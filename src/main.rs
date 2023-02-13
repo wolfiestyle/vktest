@@ -1,10 +1,16 @@
 use inline_spirv::include_spirv;
+use std::fs::File;
+use std::io::BufReader;
 use std::time::{Duration, Instant};
 use vktest::VulkanApp;
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 
 fn main() {
+    let file = BufReader::new(File::open("data/model.obj").unwrap());
+    let model = obj::load_obj(file).unwrap();
+    eprintln!("loaded {} vertices, {} indices", model.vertices.len(), model.indices.len());
+
     let event_loop = EventLoop::new();
     let window = winit::window::WindowBuilder::new()
         .with_title("vulkan test")
@@ -12,21 +18,10 @@ fn main() {
         .build(&event_loop)
         .unwrap();
 
-    let vertices = [
-        ([-0.5, -0.5, 0.0], [1.0, 0.0, 0.0], [1.0, 0.0]),
-        ([0.5, -0.5, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0]),
-        ([0.5, 0.5, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0]),
-        ([-0.5, 0.5, 0.0], [1.0, 1.0, 1.0], [1.0, 1.0]),
-        ([-0.5, -0.5, -0.5], [1.0, 0.0, 0.0], [1.0, 0.0]),
-        ([0.5, -0.5, -0.5], [0.0, 1.0, 0.0], [0.0, 0.0]),
-        ([0.5, 0.5, -0.5], [0.0, 0.0, 1.0], [0.0, 1.0]),
-        ([-0.5, 0.5, -0.5], [1.0, 1.0, 1.0], [1.0, 1.0]),
-    ];
-    let indices = [0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4];
     let vert_spv = include_spirv!("src/shaders/texture.vert.glsl", vert, glsl);
     let frag_spv = include_spirv!("src/shaders/texture.frag.glsl", frag, glsl);
 
-    let mut vk_app = VulkanApp::new(&window, &vertices, &indices, vert_spv, frag_spv, "image.jpg").unwrap();
+    let mut vk_app = VulkanApp::new(&window, &model.vertices, &model.indices, vert_spv, frag_spv, "data/texture.png").unwrap();
     let mut prev_time = Instant::now();
     let mut frame_count = 0;
 
