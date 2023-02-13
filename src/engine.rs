@@ -78,8 +78,8 @@ impl VulkanApp {
             .map(|_| FrameSyncState::new(&vk))
             .collect::<Result<_, _>>()?;
 
-        let vertex_buffer = vk.create_buffer(&vertices, vk::BufferUsageFlags::VERTEX_BUFFER)?;
-        let index_buffer = vk.create_buffer(&indices, vk::BufferUsageFlags::INDEX_BUFFER)?;
+        let vertex_buffer = vk.create_buffer(vertices, vk::BufferUsageFlags::VERTEX_BUFFER)?;
+        let index_buffer = vk.create_buffer(indices, vk::BufferUsageFlags::INDEX_BUFFER)?;
 
         Ok(Self {
             device: vk,
@@ -295,8 +295,8 @@ impl VulkanApp {
         ];
 
         let vertex_input_ci = vk::PipelineVertexInputStateCreateInfo::builder()
-            .vertex_binding_descriptions(&binding_desc)
-            .vertex_attribute_descriptions(&attr_desc);
+            .vertex_binding_descriptions(binding_desc)
+            .vertex_attribute_descriptions(attr_desc);
 
         let input_assembly_ci = vk::PipelineInputAssemblyStateCreateInfo::builder()
             .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
