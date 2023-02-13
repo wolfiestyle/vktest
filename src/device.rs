@@ -1,12 +1,13 @@
-use crate::instance::{DeviceInfo, SurfaceInfo, VulkanInstance};
+use crate::instance::{DeviceInfo, DeviceSelection, SurfaceInfo, VulkanInstance};
 use crate::types::*;
 use ash::extensions::khr;
 use ash::vk;
+use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use std::array;
-use winit::window::Window;
+use std::sync::Arc;
 
 pub struct VulkanDevice {
-    instance: VulkanInstance,
+    instance: Arc<VulkanInstance>,
     surface: vk::SurfaceKHR,
     pub dev_info: DeviceInfo,
     pub surface_info: SurfaceInfo,
@@ -18,20 +19,22 @@ pub struct VulkanDevice {
 }
 
 impl VulkanDevice {
-    pub fn new(window: &Window) -> VulkanResult<Self> {
-        let vk = VulkanInstance::new(window)?;
-        let surface = vk.create_surface(window)?;
-        let dev_info = vk.pick_physical_device(surface)?;
+    pub fn new<W>(window: &W, instance: Arc<VulkanInstance>, selection: DeviceSelection) -> VulkanResult<Self>
+    where
+        W: HasRawDisplayHandle + HasRawWindowHandle,
+    {
+        let surface = instance.create_surface(window)?;
+        let dev_info = instance.pick_physical_device(surface, selection)?;
         eprintln!("Selected device: {:?}", dev_info.name);
-        let surface_info = vk.query_surface_info(dev_info.phys_dev, surface)?;
-        let device = vk.create_logical_device(&dev_info)?;
+        let surface_info = instance.query_surface_info(dev_info.phys_dev, surface)?;
+        let device = instance.create_logical_device(&dev_info)?;
         let graphics_queue = unsafe { device.get_device_queue(dev_info.graphics_idx, 0) };
         let present_queue = unsafe { device.get_device_queue(dev_info.present_idx, 0) };
         let graphics_pool = Self::create_command_pool(&device, dev_info.graphics_idx, vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)?;
-        let swapchain_utils = khr::Swapchain::new(&vk.instance, &device);
+        let swapchain_utils = khr::Swapchain::new(&instance, &device);
 
         Ok(Self {
-            instance: vk,
+            instance,
             surface,
             dev_info,
             surface_info,
@@ -44,11 +47,10 @@ impl VulkanDevice {
     }
 
     pub fn create_swapchain(
-        &self, window: &Window, image_count: u32, old_swapchain: Option<vk::SwapchainKHR>,
+        &self, win_size: WinSize, image_count: u32, old_swapchain: Option<vk::SwapchainKHR>,
     ) -> VulkanResult<SwapchainInfo> {
         let surface_format = self.surface_info.surface_format();
         let present_mode = self.surface_info.present_mode();
-        let win_size = window.inner_size();
         eprintln!("window size: {} x {}", win_size.width, win_size.height);
         let extent = self.surface_info.calc_extent(win_size.width, win_size.height);
         let img_count = self.surface_info.calc_image_count(image_count);
@@ -474,11 +476,7 @@ impl VulkanDevice {
             .iter()
             .cloned()
             .find(|&fmt| {
-                let props = unsafe {
-                    self.instance
-                        .instance
-                        .get_physical_device_format_properties(self.dev_info.phys_dev, fmt)
-                };
+                let props = unsafe { self.instance.get_physical_device_format_properties(self.dev_info.phys_dev, fmt) };
                 (tiling == vk::ImageTiling::LINEAR && props.linear_tiling_features.contains(features))
                     || (tiling == vk::ImageTiling::OPTIMAL && props.optimal_tiling_features.contains(features))
             })

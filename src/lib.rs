@@ -3,4 +3,7 @@ mod engine;
 mod instance;
 mod types;
 
-pub use engine::VulkanApp;
+pub use device::VulkanDevice;
+pub use engine::VulkanEngine;
+pub use instance::{DeviceSelection, DeviceType, VulkanInstance};
+pub use types::{VkError, VulkanResult};

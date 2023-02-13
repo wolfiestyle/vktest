@@ -1,5 +1,6 @@
 use ash::vk;
 use memoffset::{offset_of, offset_of_tuple};
+use winit::dpi::PhysicalSize;
 
 pub type VulkanResult<T> = Result<T, VkError>;
 
@@ -88,6 +89,33 @@ impl<C, T: Cleanup<C>> Cleanup<C> for [T] {
         for item in self {
             item.cleanup(context);
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct WinSize {
+    pub width: u32,
+    pub height: u32,
+}
+
+impl From<[u32; 2]> for WinSize {
+    #[inline]
+    fn from([width, height]: [u32; 2]) -> Self {
+        Self { width, height }
+    }
+}
+
+impl From<(u32, u32)> for WinSize {
+    #[inline]
+    fn from((width, height): (u32, u32)) -> Self {
+        Self { width, height }
+    }
+}
+
+impl From<PhysicalSize<u32>> for WinSize {
+    #[inline]
+    fn from(PhysicalSize { width, height }: PhysicalSize<u32>) -> Self {
+        Self { width, height }
     }
 }
 

@@ -4,27 +4,28 @@ use ash::vk;
 use cstr::cstr;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use std::collections::HashSet;
+use std::convert::identity;
 use std::ffi::{c_char, c_void, CStr, CString};
-use winit::window::Window;
+use std::sync::Arc;
 
 const VALIDATION_LAYER: &CStr = cstr!("VK_LAYER_KHRONOS_validation");
 const REQ_DEVICE_EXTENSIONS: [&CStr; 1] = [khr::Swapchain::name()];
 
 pub struct VulkanInstance {
     entry: ash::Entry,
-    pub instance: ash::Instance,
+    instance: ash::Instance,
     pub debug_utils: Option<ext::DebugUtils>,
     debug_messenger: vk::DebugUtilsMessengerEXT,
     pub surface_utils: khr::Surface,
 }
 
 impl VulkanInstance {
-    pub fn new(window: &Window) -> VulkanResult<Self> {
+    pub fn new<W: HasRawDisplayHandle>(window: &W, app_name: &str) -> VulkanResult<Arc<Self>> {
         let entry = unsafe { ash::Entry::load()? };
         let validation_enabled = cfg!(debug_assertions) && Self::check_validation_support(&entry)?;
-        let app_name = CString::new(env!("CARGO_PKG_NAME")).unwrap();
-        let engine_name = cstr!("Snow3Derg");
-        let instance = Self::create_instance(&entry, window, &app_name, engine_name, validation_enabled)?;
+        let app_name = CString::new(app_name).unwrap();
+        let engine_name = CString::new(env!("CARGO_PKG_NAME")).unwrap();
+        let instance = Self::create_instance(&entry, window, &app_name, &engine_name, validation_enabled)?;
         let (debug_messenger, debug_utils) = if validation_enabled {
             let debug_utils = ext::DebugUtils::new(&entry, &instance);
             (Self::setup_debug_utils(&debug_utils)?, Some(debug_utils))
@@ -33,13 +34,13 @@ impl VulkanInstance {
         };
         let surface_utils = khr::Surface::new(&entry, &instance);
 
-        Ok(Self {
+        Ok(Arc::new(Self {
             entry,
             instance,
             debug_utils,
             debug_messenger,
             surface_utils,
-        })
+        }))
     }
 
     fn check_validation_support(entry: &ash::Entry) -> VulkanResult<bool> {
@@ -70,8 +71,8 @@ impl VulkanInstance {
         Ok(supported)
     }
 
-    fn create_instance(
-        entry: &ash::Entry, window: &Window, app_name: &CStr, engine_name: &CStr, validation_enabled: bool,
+    fn create_instance<W: HasRawDisplayHandle>(
+        entry: &ash::Entry, window: &W, app_name: &CStr, engine_name: &CStr, validation_enabled: bool,
     ) -> VulkanResult<ash::Instance> {
         let mut extension_names = ash_window::enumerate_required_extensions(window.raw_display_handle())
             .describe_err("Unsupported display platform")?
@@ -117,7 +118,10 @@ impl VulkanInstance {
         Ok(messenger)
     }
 
-    pub fn create_surface(&self, window: &Window) -> VulkanResult<vk::SurfaceKHR> {
+    pub fn create_surface<W>(&self, window: &W) -> VulkanResult<vk::SurfaceKHR>
+    where
+        W: HasRawDisplayHandle + HasRawWindowHandle,
+    {
         unsafe {
             ash_window::create_surface(
                 &self.entry,
@@ -130,7 +134,7 @@ impl VulkanInstance {
         }
     }
 
-    pub fn pick_physical_device(&self, surface: vk::SurfaceKHR) -> VulkanResult<DeviceInfo> {
+    pub fn pick_physical_device(&self, surface: vk::SurfaceKHR, selection: DeviceSelection) -> VulkanResult<DeviceInfo> {
         let phys_devices = unsafe {
             self.instance
                 .enumerate_physical_devices()
@@ -143,10 +147,17 @@ impl VulkanInstance {
             .filter(|result| !matches!(result, Err(VkError::UnsuitableDevice)))
             .collect::<Result<Vec<_>, _>>()?;
 
-        dev_infos
-            .into_iter()
-            .max_by(|a, b| a.dev_type.cmp(&b.dev_type))
-            .ok_or(VkError::EngineError("Failed to find a suitable GPU"))
+        if selection.is_empty() {
+            dev_infos
+                .into_iter()
+                .max_by(|a, b| a.dev_type.cmp(&b.dev_type))
+                .ok_or(VkError::EngineError("Failed to find a suitable GPU"))
+        } else {
+            dev_infos
+                .into_iter()
+                .find(|dev| selection.matches(dev))
+                .ok_or(VkError::EngineError("Failed to find a suitable GPU matching the selection"))
+        }
     }
 
     fn query_device_feature_support(&self, phys_dev: vk::PhysicalDevice, surface: vk::SurfaceKHR) -> VulkanResult<DeviceInfo> {
@@ -154,7 +165,7 @@ impl VulkanInstance {
         let properties = unsafe { self.instance.get_physical_device_properties(phys_dev) };
         //let features = unsafe { self.instance.get_physical_device_features(phys_dev) };  //TODO: get limits and stuff
         let dev_type = properties.device_type.into();
-        let name = vk_to_cstr(&properties.device_name).to_owned();
+        let name = vk_to_cstr(&properties.device_name).to_str().unwrap_or("unknown").to_owned();
 
         // queue families
         let queue_families = unsafe { self.instance.get_physical_device_queue_family_properties(phys_dev) };
@@ -282,10 +293,19 @@ impl Drop for VulkanInstance {
     }
 }
 
+impl std::ops::Deref for VulkanInstance {
+    type Target = ash::Instance;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.instance
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct DeviceInfo {
     pub phys_dev: vk::PhysicalDevice,
-    pub name: CString,
+    pub name: String,
     pub dev_type: DeviceType,
     pub graphics_idx: u32,
     pub present_idx: u32,
@@ -374,6 +394,48 @@ impl From<vk::PhysicalDeviceType> for DeviceType {
             vk::PhysicalDeviceType::INTEGRATED_GPU => DeviceType::IntegratedGpu,
             vk::PhysicalDeviceType::CPU => DeviceType::Cpu,
             _ => DeviceType::Other,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+pub struct DeviceSelection<'a> {
+    name: Option<&'a str>,
+    dev_type: Option<DeviceType>,
+}
+
+impl DeviceSelection<'_> {
+    fn is_empty(&self) -> bool {
+        self.name.is_none() && self.dev_type.is_none()
+    }
+
+    fn matches(&self, dev_info: &DeviceInfo) -> bool {
+        [
+            self.name.map(|name| dev_info.name.contains(name)),
+            self.dev_type.map(|ty| dev_info.dev_type == ty),
+        ]
+        .into_iter()
+        .filter_map(identity)
+        .all(identity)
+    }
+}
+
+impl<'a> From<&'a str> for DeviceSelection<'a> {
+    #[inline]
+    fn from(name: &'a str) -> Self {
+        Self {
+            name: Some(name),
+            dev_type: None,
+        }
+    }
+}
+
+impl From<DeviceType> for DeviceSelection<'_> {
+    #[inline]
+    fn from(ty: DeviceType) -> Self {
+        Self {
+            name: None,
+            dev_type: Some(ty),
         }
     }
 }

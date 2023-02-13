@@ -6,15 +6,15 @@ use cstr::cstr;
 use inline_spirv::include_spirv;
 use std::array;
 use std::time::Instant;
-use winit::window::Window;
 
 const SWAPCHAIN_IMAGE_COUNT: u32 = 3;
 const MAX_FRAMES_IN_FLIGHT: usize = 2;
 //type Vertex = ([f32; 3], [f32; 3], [f32; 2]);
 type Vertex = obj::TexturedVertex;
 
-pub struct VulkanApp {
+pub struct VulkanEngine {
     device: VulkanDevice,
+    window_size: WinSize,
     swapchain: SwapchainInfo,
     render_pass: vk::RenderPass,
     pipeline: vk::Pipeline,
@@ -37,17 +37,17 @@ pub struct VulkanApp {
     tex_sampler: vk::Sampler,
     uniforms: Vec<UniformData>,
     start_time: Instant,
+    frame_time: Instant,
 }
 
-impl VulkanApp {
+impl VulkanEngine {
     pub fn new(
-        window: &Window, vertices: &[Vertex], indices: &[u32], img_width: u32, img_height: u32, img_data: &[u8],
+        vk: VulkanDevice, window_size: WinSize, vertices: &[Vertex], indices: &[u32], img_width: u32, img_height: u32, img_data: &[u8],
     ) -> VulkanResult<Self> {
         let vert_spv = include_spirv!("src/shaders/texture.vert.glsl", vert, glsl);
         let frag_spv = include_spirv!("src/shaders/texture.frag.glsl", frag, glsl);
 
-        let vk = VulkanDevice::new(window)?;
-        let swapchain = vk.create_swapchain(window, SWAPCHAIN_IMAGE_COUNT, None)?;
+        let swapchain = vk.create_swapchain(window_size, SWAPCHAIN_IMAGE_COUNT, None)?;
         let (depth_image, depth_format) = vk.create_depth_image(swapchain.extent.width, swapchain.extent.height, None)?;
         let depth_imgview = vk.create_image_view(*depth_image, depth_format, vk::ImageAspectFlags::DEPTH)?;
 
@@ -81,8 +81,11 @@ impl VulkanApp {
         let vertex_buffer = vk.create_buffer(vertices, vk::BufferUsageFlags::VERTEX_BUFFER)?;
         let index_buffer = vk.create_buffer(indices, vk::BufferUsageFlags::INDEX_BUFFER)?;
 
+        let now = Instant::now();
+
         Ok(Self {
             device: vk,
+            window_size,
             swapchain,
             render_pass,
             pipeline,
@@ -104,8 +107,17 @@ impl VulkanApp {
             tex_imgview,
             tex_sampler,
             uniforms,
-            start_time: Instant::now(),
+            start_time: now,
+            frame_time: now,
         })
+    }
+
+    pub fn resize(&mut self, window_size: WinSize) {
+        self.window_size = window_size;
+    }
+
+    pub fn get_frame_time(&self) -> Instant {
+        self.frame_time
     }
 
     fn create_render_pass(device: &VulkanDevice, color_format: vk::Format, depth_format: vk::Format) -> VulkanResult<vk::RenderPass> {
@@ -428,18 +440,17 @@ impl VulkanApp {
         Ok(())
     }
 
-    pub fn draw_frame(&mut self, window: &Window) -> VulkanResult<()> {
+    pub fn draw_frame(&mut self) -> VulkanResult<bool> {
         let in_flight_fen = self.sync[self.current_frame].in_flight_fen;
         let image_avail_sem = self.sync[self.current_frame].image_avail_sem;
         let render_finish_sem = self.sync[self.current_frame].render_finished_sem;
         let command_buffer = self.command_buffers[self.current_frame];
 
-        self.update_uniforms();
-
         let image_idx = unsafe {
             self.device
                 .wait_for_fences(array::from_ref(&in_flight_fen), true, u64::MAX)
-                .describe_err("Failed waiting for error")?;
+                .describe_err("Failed waiting for fence")?;
+            self.frame_time = Instant::now();
             let acquire_res =
                 self.device
                     .swapchain_utils
@@ -448,12 +459,14 @@ impl VulkanApp {
                 Ok((idx, _)) => idx,
                 Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
                     eprintln!("swapchain out of date");
-                    self.recreate_swapchain(window)?;
-                    return Ok(());
+                    self.recreate_swapchain()?;
+                    return Ok(false);
                 }
                 Err(e) => return Err(VkError::VulkanMsg("Failed to acquire swapchain image", e)),
             }
         };
+
+        self.update_uniforms();
 
         unsafe {
             self.device
@@ -495,14 +508,14 @@ impl VulkanApp {
 
         if suboptimal {
             eprintln!("swapchain suboptimal");
-            self.recreate_swapchain(window)?;
+            self.recreate_swapchain()?;
         }
 
-        Ok(())
+        Ok(true)
     }
 
     fn update_uniforms(&mut self) {
-        let time = ((Instant::now() - self.start_time).as_micros() as f64 / 1000000.0) as f32;
+        let time = ((self.frame_time - self.start_time).as_micros() as f64 / 1000000.0) as f32;
         let aspect = self.swapchain.extent.width as f32 / self.swapchain.extent.height as f32;
         let ubo = UniformBufferObject {
             model: Matrix4::from_axis_angle(Vector3::unit_z(), Deg(time * 90.0)),
@@ -521,12 +534,12 @@ impl VulkanApp {
         self.swapchain.cleanup(&self.device);
     }
 
-    fn recreate_swapchain(&mut self, window: &Window) -> VulkanResult<()> {
+    fn recreate_swapchain(&mut self) -> VulkanResult<()> {
         unsafe { self.device.device_wait_idle()? };
         self.device.update_surface_info()?;
         let swapchain = self
             .device
-            .create_swapchain(window, SWAPCHAIN_IMAGE_COUNT, Some(self.swapchain.handle))?;
+            .create_swapchain(self.window_size, SWAPCHAIN_IMAGE_COUNT, Some(self.swapchain.handle))?;
         let (image, format) = self
             .device
             .create_depth_image(swapchain.extent.width, swapchain.extent.height, Some(self.depth_format))?;
@@ -542,7 +555,7 @@ impl VulkanApp {
     }
 }
 
-impl Drop for VulkanApp {
+impl Drop for VulkanEngine {
     fn drop(&mut self) {
         unsafe {
             self.device.device_wait_idle().unwrap();
