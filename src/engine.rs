@@ -3,7 +3,7 @@ use crate::types::*;
 use ash::vk;
 use cgmath::{Deg, Matrix4, Point3, Vector3};
 use cstr::cstr;
-use stb::image;
+use inline_spirv::include_spirv;
 use std::array;
 use std::time::Instant;
 use winit::window::Window;
@@ -41,10 +41,10 @@ pub struct VulkanApp {
 
 impl VulkanApp {
     pub fn new(
-        window: &Window, vertices: &[Vertex], indices: &[u32], vert_spv: &[u32], frag_spv: &[u32], img_filename: &str,
+        window: &Window, vertices: &[Vertex], indices: &[u32], img_width: u32, img_height: u32, img_data: &[u8],
     ) -> VulkanResult<Self> {
-        let (img_info, img_data) = image::stbi_load_from_reader(&mut std::fs::File::open(img_filename)?, image::Channels::RgbAlpha)
-            .describe_err("Failed to load image")?;
+        let vert_spv = include_spirv!("src/shaders/texture.vert.glsl", vert, glsl);
+        let frag_spv = include_spirv!("src/shaders/texture.frag.glsl", frag, glsl);
 
         let vk = VulkanDevice::new(window)?;
         let swapchain = vk.create_swapchain(window, SWAPCHAIN_IMAGE_COUNT, None)?;
@@ -56,7 +56,7 @@ impl VulkanApp {
         let uniforms = (0..MAX_FRAMES_IN_FLIGHT)
             .map(|_| UniformData::new(&vk))
             .collect::<Result<Vec<_>, _>>()?;
-        let texture = vk.create_texture(img_info.width as u32, img_info.height as u32, img_data.as_slice())?;
+        let texture = vk.create_texture(img_width, img_height, img_data)?;
         let tex_imgview = vk.create_image_view(*texture, vk::Format::R8G8B8A8_SRGB, vk::ImageAspectFlags::COLOR)?;
         let tex_sampler = vk.create_texture_sampler(vk::SamplerAddressMode::REPEAT)?;
         let descriptor_layout = Self::create_descriptor_set_layout(&vk)?;

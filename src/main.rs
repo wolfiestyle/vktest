@@ -1,4 +1,4 @@
-use inline_spirv::include_spirv;
+use stb::image;
 use std::fs::File;
 use std::io::BufReader;
 use std::time::{Duration, Instant};
@@ -10,6 +10,9 @@ fn main() {
     let file = BufReader::new(File::open("data/model.obj").unwrap());
     let model = obj::load_obj(file).unwrap();
     eprintln!("loaded {} vertices, {} indices", model.vertices.len(), model.indices.len());
+    let mut file = File::open("data/texture.png").unwrap();
+    let (img_info, img_data) = image::stbi_load_from_reader(&mut file, image::Channels::RgbAlpha).unwrap();
+    drop(file);
 
     let event_loop = EventLoop::new();
     let window = winit::window::WindowBuilder::new()
@@ -18,10 +21,15 @@ fn main() {
         .build(&event_loop)
         .unwrap();
 
-    let vert_spv = include_spirv!("src/shaders/texture.vert.glsl", vert, glsl);
-    let frag_spv = include_spirv!("src/shaders/texture.frag.glsl", frag, glsl);
-
-    let mut vk_app = VulkanApp::new(&window, &model.vertices, &model.indices, vert_spv, frag_spv, "data/texture.png").unwrap();
+    let mut vk_app = VulkanApp::new(
+        &window,
+        &model.vertices,
+        &model.indices,
+        img_info.width as u32,
+        img_info.height as u32,
+        img_data.as_slice(),
+    )
+    .unwrap();
     let mut prev_time = Instant::now();
     let mut frame_count = 0;
 
