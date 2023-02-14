@@ -248,7 +248,7 @@ impl VulkanEngine {
             let buffer_info = vk::DescriptorBufferInfo {
                 buffer: *fstate.uniforms.buffer,
                 offset: 0,
-                range: std::mem::size_of::<UniformBufferObject>() as _,
+                range: fstate.uniforms.buffer_size() as _,
             };
             let image_info = vk::DescriptorImageInfo {
                 image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
@@ -631,6 +631,10 @@ impl<T> UniformData<T> {
         unsafe {
             std::ptr::write_volatile(self.ub_mapped, ubo);
         }
+    }
+
+    const fn buffer_size(&self) -> usize {
+        std::mem::size_of::<T>()
     }
 }
 
