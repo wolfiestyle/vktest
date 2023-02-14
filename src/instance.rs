@@ -415,7 +415,7 @@ impl DeviceSelection<'_> {
             self.dev_type.map(|ty| dev_info.dev_type == ty),
         ]
         .into_iter()
-        .filter_map(identity)
+        .flatten()
         .all(identity)
     }
 }
