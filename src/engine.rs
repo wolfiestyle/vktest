@@ -17,8 +17,8 @@ pub struct VulkanEngine {
     window_size: WinSize,
     window_resized: bool,
     swapchain: SwapchainInfo,
-    depth_image: VkImage,
-    depth_imgview: vk::ImageView,
+    depth_images: Vec<VkImage>,
+    depth_imgviews: Vec<vk::ImageView>,
     depth_format: vk::Format,
     framebuffers: Vec<vk::Framebuffer>,
     render_pass: vk::RenderPass,
@@ -47,10 +47,10 @@ impl VulkanEngine {
         let frag_spv = include_spirv!("src/shaders/texture.frag.glsl", frag, glsl);
 
         let swapchain = vk.create_swapchain(window_size, SWAPCHAIN_IMAGE_COUNT, None)?;
-        let (depth_image, depth_format) = vk.create_depth_image(swapchain.extent.width, swapchain.extent.height, None)?;
-        let depth_imgview = vk.create_image_view(*depth_image, depth_format, vk::ImageAspectFlags::DEPTH)?;
+        let depth_format = vk.find_depth_format()?;
+        let (depth_images, depth_imgviews) = Self::create_depth_images(&vk, swapchain.extent, depth_format, SWAPCHAIN_IMAGE_COUNT)?;
         let render_pass = Self::create_render_pass(&vk, swapchain.format, depth_format)?;
-        let framebuffers = vk.create_framebuffers(&swapchain, render_pass, depth_imgview)?;
+        let framebuffers = vk.create_framebuffers(&swapchain, render_pass, &depth_imgviews)?;
 
         let command_buffers = vk.create_command_buffers(MAX_FRAMES_IN_FLIGHT as u32)?;
         let frame_state = (0..MAX_FRAMES_IN_FLIGHT)
@@ -92,8 +92,8 @@ impl VulkanEngine {
             window_size,
             window_resized: false,
             swapchain,
-            depth_image,
-            depth_imgview,
+            depth_images,
+            depth_imgviews,
             depth_format,
             framebuffers,
             render_pass,
@@ -122,6 +122,28 @@ impl VulkanEngine {
 
     pub fn get_frame_time(&self) -> Instant {
         self.frame_time
+    }
+
+    fn create_depth_images(
+        device: &VulkanDevice, extent: vk::Extent2D, depth_format: vk::Format, count: u32,
+    ) -> VulkanResult<(Vec<VkImage>, Vec<vk::ImageView>)> {
+        let depth_image = (0..count)
+            .map(|_| {
+                device.allocate_image(
+                    extent.width,
+                    extent.height,
+                    depth_format,
+                    vk::ImageTiling::OPTIMAL,
+                    vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+                    vk::MemoryPropertyFlags::DEVICE_LOCAL,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let depth_imgview = depth_image
+            .iter()
+            .map(|image| device.create_image_view(**image, depth_format, vk::ImageAspectFlags::DEPTH))
+            .collect::<Result<_, _>>()?;
+        Ok((depth_image, depth_imgview))
     }
 
     fn create_render_pass(device: &VulkanDevice, color_format: vk::Format, depth_format: vk::Format) -> VulkanResult<vk::RenderPass> {
@@ -535,8 +557,10 @@ impl VulkanEngine {
         for &fb in &self.framebuffers {
             self.device.destroy_framebuffer(fb, None);
         }
-        self.device.destroy_image_view(self.depth_imgview, None);
-        self.depth_image.cleanup(&self.device);
+        for &img in &self.depth_imgviews {
+            self.device.destroy_image_view(img, None);
+        }
+        self.depth_images.cleanup(&self.device);
         self.swapchain.cleanup(&self.device);
     }
 
@@ -546,16 +570,14 @@ impl VulkanEngine {
         let swapchain = self
             .device
             .create_swapchain(self.window_size, SWAPCHAIN_IMAGE_COUNT, Some(*self.swapchain))?;
-        let (image, format) = self
-            .device
-            .create_depth_image(swapchain.extent.width, swapchain.extent.height, Some(self.depth_format))?;
-        let imgview = self.device.create_image_view(*image, format, vk::ImageAspectFlags::DEPTH)?;
-        let framebuffers = self.device.create_framebuffers(&swapchain, self.render_pass, imgview)?;
+        let (depth_images, depth_imgviews) =
+            Self::create_depth_images(&self.device, swapchain.extent, self.depth_format, SWAPCHAIN_IMAGE_COUNT)?;
+        let framebuffers = self.device.create_framebuffers(&swapchain, self.render_pass, &depth_imgviews)?;
         unsafe { self.cleanup_swapchain() };
         self.swapchain = swapchain;
         self.framebuffers = framebuffers;
-        self.depth_image = image;
-        self.depth_imgview = imgview;
+        self.depth_images = depth_images;
+        self.depth_imgviews = depth_imgviews;
 
         Ok(())
     }

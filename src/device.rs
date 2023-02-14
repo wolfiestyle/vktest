@@ -114,12 +114,14 @@ impl VulkanDevice {
     }
 
     pub fn create_framebuffers(
-        &self, swapchain: &SwapchainInfo, render_pass: vk::RenderPass, depth_imgview: vk::ImageView,
+        &self, swapchain: &SwapchainInfo, render_pass: vk::RenderPass, depth_imgviews: &[vk::ImageView],
     ) -> VulkanResult<Vec<vk::Framebuffer>> {
+        assert_eq!(swapchain.image_views.len(), depth_imgviews.len());
         swapchain
             .image_views
             .iter()
-            .map(|&imgview| {
+            .zip(depth_imgviews)
+            .map(|(&imgview, &depth_imgview)| {
                 let attachments = [imgview, depth_imgview];
                 let framebuffer_ci = vk::FramebufferCreateInfo::builder()
                     .render_pass(render_pass)
@@ -481,6 +483,17 @@ impl VulkanDevice {
                     || (tiling == vk::ImageTiling::OPTIMAL && props.optimal_tiling_features.contains(features))
             })
             .ok_or(VkError::EngineError("Failed to find supported image format"))
+    }
+
+    pub fn find_depth_format(&self) -> VulkanResult<vk::Format> {
+        let formats = [
+            vk::Format::D32_SFLOAT,
+            vk::Format::D32_SFLOAT_S8_UINT,
+            vk::Format::D24_UNORM_S8_UINT,
+            vk::Format::D16_UNORM,
+            vk::Format::D16_UNORM_S8_UINT,
+        ];
+        self.find_supported_format(&formats, vk::ImageTiling::OPTIMAL, vk::FormatFeatureFlags::DEPTH_STENCIL_ATTACHMENT)
     }
 
     pub fn create_depth_image(&self, width: u32, height: u32, format: Option<vk::Format>) -> VulkanResult<(VkImage, vk::Format)> {
