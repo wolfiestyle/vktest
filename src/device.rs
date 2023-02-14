@@ -551,6 +551,15 @@ impl SwapchainInfo {
     }
 }
 
+impl std::ops::Deref for SwapchainInfo {
+    type Target = vk::SwapchainKHR;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.handle
+    }
+}
+
 impl Cleanup<VulkanDevice> for SwapchainInfo {
     unsafe fn cleanup(&mut self, device: &VulkanDevice) {
         for &imgview in &self.image_views {

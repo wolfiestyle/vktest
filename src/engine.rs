@@ -17,21 +17,21 @@ pub struct VulkanEngine {
     window_size: WinSize,
     window_resized: bool,
     swapchain: SwapchainInfo,
+    depth_image: VkImage,
+    depth_imgview: vk::ImageView,
+    depth_format: vk::Format,
+    framebuffers: Vec<vk::Framebuffer>,
     render_pass: vk::RenderPass,
     pipeline: vk::Pipeline,
     pipeline_layout: vk::PipelineLayout,
     descriptor_layout: vk::DescriptorSetLayout,
     descriptor_pool: vk::DescriptorPool,
     descriptor_sets: Vec<vk::DescriptorSet>,
-    framebuffers: Vec<vk::Framebuffer>,
     frame_state: Vec<FrameState>,
     current_frame: usize,
     vertex_buffer: VkBuffer,
     index_buffer: VkBuffer,
     index_count: u32,
-    depth_image: VkImage,
-    depth_imgview: vk::ImageView,
-    depth_format: vk::Format,
     texture: VkImage,
     tex_imgview: vk::ImageView,
     tex_sampler: vk::Sampler,
@@ -92,21 +92,21 @@ impl VulkanEngine {
             window_size,
             window_resized: false,
             swapchain,
+            depth_image,
+            depth_imgview,
+            depth_format,
+            framebuffers,
             render_pass,
             pipeline,
             pipeline_layout,
             descriptor_layout,
             descriptor_pool,
             descriptor_sets,
-            framebuffers,
             frame_state,
             current_frame: 0,
             vertex_buffer,
             index_buffer,
             index_count: indices.len() as _,
-            depth_image,
-            depth_imgview,
-            depth_format,
             texture,
             tex_imgview,
             tex_sampler,
@@ -456,10 +456,10 @@ impl VulkanEngine {
                 .wait_for_fences(array::from_ref(&in_flight_fen), true, u64::MAX)
                 .describe_err("Failed waiting for fence")?;
             self.frame_time = Instant::now();
-            let acquire_res =
-                self.device
-                    .swapchain_utils
-                    .acquire_next_image(self.swapchain.handle, u64::MAX, image_avail_sem, vk::Fence::null());
+            let acquire_res = self
+                .device
+                .swapchain_utils
+                .acquire_next_image(*self.swapchain, u64::MAX, image_avail_sem, vk::Fence::null());
             match acquire_res {
                 Ok((idx, _)) => idx,
                 Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
@@ -499,7 +499,7 @@ impl VulkanEngine {
 
         let present_info = vk::PresentInfoKHR::builder()
             .wait_semaphores(array::from_ref(&render_finish_sem))
-            .swapchains(array::from_ref(&self.swapchain.handle))
+            .swapchains(array::from_ref(&*self.swapchain))
             .image_indices(array::from_ref(&image_idx));
 
         let suboptimal = unsafe {
@@ -545,7 +545,7 @@ impl VulkanEngine {
         self.device.update_surface_info()?;
         let swapchain = self
             .device
-            .create_swapchain(self.window_size, SWAPCHAIN_IMAGE_COUNT, Some(self.swapchain.handle))?;
+            .create_swapchain(self.window_size, SWAPCHAIN_IMAGE_COUNT, Some(*self.swapchain))?;
         let (image, format) = self
             .device
             .create_depth_image(swapchain.extent.width, swapchain.extent.height, Some(self.depth_format))?;
