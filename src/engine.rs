@@ -15,6 +15,7 @@ type Vertex = obj::TexturedVertex;
 pub struct VulkanEngine {
     device: VulkanDevice,
     window_size: WinSize,
+    window_resized: bool,
     swapchain: SwapchainInfo,
     render_pass: vk::RenderPass,
     pipeline: vk::Pipeline,
@@ -86,6 +87,7 @@ impl VulkanEngine {
         Ok(Self {
             device: vk,
             window_size,
+            window_resized: false,
             swapchain,
             render_pass,
             pipeline,
@@ -114,6 +116,7 @@ impl VulkanEngine {
 
     pub fn resize(&mut self, window_size: WinSize) {
         self.window_size = window_size;
+        self.window_resized = true;
     }
 
     pub fn get_frame_time(&self) -> Instant {
@@ -506,9 +509,10 @@ impl VulkanEngine {
 
         self.current_frame = (self.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
 
-        if suboptimal {
+        if suboptimal || self.window_resized {
             eprintln!("swapchain suboptimal");
             self.recreate_swapchain()?;
+            self.window_resized = false;
         }
 
         Ok(true)
