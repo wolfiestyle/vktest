@@ -245,7 +245,7 @@ impl VulkanDevice {
         unsafe {
             let mapped_ptr = self
                 .device
-                .map_memory(memory, 0, size, vk::MemoryMapFlags::empty())
+                .map_memory(memory, 0, size, Default::default())
                 .describe_err("Failed to map buffer memory")? as *mut T;
             std::ptr::copy_nonoverlapping(data.as_ptr(), mapped_ptr, data.len());
             self.device.unmap_memory(memory);
@@ -363,7 +363,7 @@ impl VulkanDevice {
             .build();
         unsafe {
             self.device
-                .cmd_pipeline_barrier(cmd_buffer, src_stage, dst_stage, vk::DependencyFlags::empty(), &[], &[], &[barrier]);
+                .cmd_pipeline_barrier(cmd_buffer, src_stage, dst_stage, Default::default(), &[], &[], &[barrier]);
         }
         self.end_one_time_commands(cmd_buffer, self.graphics_queue)?;
         Ok(())

@@ -124,7 +124,7 @@ impl VulkanEngine {
         eprintln!("color_format: {color_format:?}, depth_format: {depth_format:?}");
         let attachments = [
             vk::AttachmentDescription {
-                flags: vk::AttachmentDescriptionFlags::empty(),
+                flags: Default::default(),
                 format: color_format,
                 samples: vk::SampleCountFlags::TYPE_1,
                 load_op: vk::AttachmentLoadOp::CLEAR,
@@ -135,7 +135,7 @@ impl VulkanEngine {
                 final_layout: vk::ImageLayout::PRESENT_SRC_KHR,
             },
             vk::AttachmentDescription {
-                flags: vk::AttachmentDescriptionFlags::empty(),
+                flags: Default::default(),
                 format: depth_format,
                 samples: vk::SampleCountFlags::TYPE_1,
                 load_op: vk::AttachmentLoadOp::CLEAR,
@@ -473,7 +473,7 @@ impl VulkanEngine {
                 .reset_fences(array::from_ref(&in_flight_fen))
                 .describe_err("Failed resetting fences")?;
             self.device
-                .reset_command_buffer(command_buffer, vk::CommandBufferResetFlags::empty())
+                .reset_command_buffer(command_buffer, Default::default())
                 .describe_err("Failed to reset command buffer")?;
         }
 
