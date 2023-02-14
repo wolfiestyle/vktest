@@ -1,16 +1,28 @@
 use stb::image;
 use std::fs::File;
 use std::io::BufReader;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
+use structopt::StructOpt;
 use vktest::{VulkanDevice, VulkanEngine, VulkanInstance, VulkanResult};
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 
+#[derive(StructOpt)]
+struct Arguments {
+    #[structopt(short, long, parse(from_os_str), help = "OBJ model file")]
+    model: Option<PathBuf>,
+    #[structopt(short, long, parse(from_os_str), help = "Texture for the model")]
+    texture: Option<PathBuf>,
+}
+
 fn main() -> VulkanResult<()> {
-    let file = BufReader::new(File::open("data/model.obj")?);
+    let args = Arguments::from_args();
+
+    let file = BufReader::new(File::open(args.model.unwrap_or_else(|| "model.obj".into()))?);
     let model = obj::load_obj(file).unwrap();
     eprintln!("loaded {} vertices, {} indices", model.vertices.len(), model.indices.len());
-    let mut file = File::open("data/texture.png")?;
+    let mut file = File::open(args.texture.unwrap_or_else(|| "texture.png".into()))?;
     let (img_info, img_data) = image::stbi_load_from_reader(&mut file, image::Channels::RgbAlpha).unwrap();
     drop(file);
 
