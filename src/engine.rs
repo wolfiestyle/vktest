@@ -24,8 +24,7 @@ pub struct VulkanEngine {
     descriptor_pool: vk::DescriptorPool,
     descriptor_sets: Vec<vk::DescriptorSet>,
     framebuffers: Vec<vk::Framebuffer>,
-    command_buffers: Vec<vk::CommandBuffer>,
-    sync: Vec<FrameSyncState>,
+    frame_state: Vec<FrameState>,
     current_frame: usize,
     vertex_buffer: VkBuffer,
     index_buffer: VkBuffer,
@@ -36,7 +35,6 @@ pub struct VulkanEngine {
     texture: VkImage,
     tex_imgview: vk::ImageView,
     tex_sampler: vk::Sampler,
-    uniforms: Vec<UniformData>,
     start_time: Instant,
     frame_time: Instant,
 }
@@ -51,18 +49,28 @@ impl VulkanEngine {
         let swapchain = vk.create_swapchain(window_size, SWAPCHAIN_IMAGE_COUNT, None)?;
         let (depth_image, depth_format) = vk.create_depth_image(swapchain.extent.width, swapchain.extent.height, None)?;
         let depth_imgview = vk.create_image_view(*depth_image, depth_format, vk::ImageAspectFlags::DEPTH)?;
-
         let render_pass = Self::create_render_pass(&vk, swapchain.format, depth_format)?;
         let framebuffers = vk.create_framebuffers(&swapchain, render_pass, depth_imgview)?;
-        let uniforms = (0..MAX_FRAMES_IN_FLIGHT)
-            .map(|_| UniformData::new(&vk))
+
+        let command_buffers = vk.create_command_buffers(MAX_FRAMES_IN_FLIGHT as u32)?;
+        let frame_state = (0..MAX_FRAMES_IN_FLIGHT)
+            .map(|i| FrameState::new(&vk, command_buffers[i]))
             .collect::<Result<Vec<_>, _>>()?;
+
         let texture = vk.create_texture(img_width, img_height, img_data)?;
         let tex_imgview = vk.create_image_view(*texture, vk::Format::R8G8B8A8_SRGB, vk::ImageAspectFlags::COLOR)?;
         let tex_sampler = vk.create_texture_sampler(vk::SamplerAddressMode::REPEAT)?;
+
         let descriptor_layout = Self::create_descriptor_set_layout(&vk)?;
         let descriptor_pool = Self::create_descriptor_pool(&vk, MAX_FRAMES_IN_FLIGHT as u32)?;
-        let descriptor_sets = Self::create_descriptor_sets(&vk, descriptor_pool, descriptor_layout, &uniforms, tex_imgview, tex_sampler)?;
+        let descriptor_sets = Self::create_descriptor_sets(
+            &vk,
+            descriptor_pool,
+            &[descriptor_layout; MAX_FRAMES_IN_FLIGHT],
+            &frame_state,
+            tex_imgview,
+            tex_sampler,
+        )?;
         let pipeline_layout = Self::create_pipeline_layout(&vk, descriptor_layout)?;
         let pipeline = Self::create_graphics_pipeline(
             &vk,
@@ -73,11 +81,6 @@ impl VulkanEngine {
             render_pass,
             pipeline_layout,
         )?;
-
-        let command_buffers = vk.create_command_buffers(MAX_FRAMES_IN_FLIGHT as u32)?;
-        let sync = (0..MAX_FRAMES_IN_FLIGHT)
-            .map(|_| FrameSyncState::new(&vk))
-            .collect::<Result<_, _>>()?;
 
         let vertex_buffer = vk.create_buffer(vertices, vk::BufferUsageFlags::VERTEX_BUFFER)?;
         let index_buffer = vk.create_buffer(indices, vk::BufferUsageFlags::INDEX_BUFFER)?;
@@ -96,8 +99,7 @@ impl VulkanEngine {
             descriptor_pool,
             descriptor_sets,
             framebuffers,
-            command_buffers,
-            sync,
+            frame_state,
             current_frame: 0,
             vertex_buffer,
             index_buffer,
@@ -108,7 +110,6 @@ impl VulkanEngine {
             texture,
             tex_imgview,
             tex_sampler,
-            uniforms,
             start_time: now,
             frame_time: now,
         })
@@ -232,10 +233,10 @@ impl VulkanEngine {
     }
 
     fn create_descriptor_sets(
-        device: &VulkanDevice, pool: vk::DescriptorPool, desc_set_layout: vk::DescriptorSetLayout, uniforms: &[UniformData],
+        device: &VulkanDevice, pool: vk::DescriptorPool, layouts: &[vk::DescriptorSetLayout], frame_state: &[FrameState],
         image_view: vk::ImageView, sampler: vk::Sampler,
     ) -> VulkanResult<Vec<vk::DescriptorSet>> {
-        let layouts = [desc_set_layout; MAX_FRAMES_IN_FLIGHT];
+        assert_eq!(layouts.len(), frame_state.len());
         let alloc_info = vk::DescriptorSetAllocateInfo::builder().descriptor_pool(pool).set_layouts(&layouts);
         let desc_sets = unsafe {
             device
@@ -243,9 +244,9 @@ impl VulkanEngine {
                 .describe_err("Failed to allocate descriptor sets")?
         };
 
-        for i in 0..MAX_FRAMES_IN_FLIGHT {
+        for (&desc_set, fstate) in desc_sets.iter().zip(frame_state) {
             let buffer_info = vk::DescriptorBufferInfo {
-                buffer: *uniforms[i].uniform_buffer,
+                buffer: *fstate.uniforms.buffer,
                 offset: 0,
                 range: std::mem::size_of::<UniformBufferObject>() as _,
             };
@@ -256,14 +257,14 @@ impl VulkanEngine {
             };
             let descr_write = [
                 vk::WriteDescriptorSet::builder()
-                    .dst_set(desc_sets[i])
+                    .dst_set(desc_set)
                     .dst_binding(0)
                     .dst_array_element(0)
                     .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
                     .buffer_info(array::from_ref(&buffer_info))
                     .build(),
                 vk::WriteDescriptorSet::builder()
-                    .dst_set(desc_sets[i])
+                    .dst_set(desc_set)
                     .dst_binding(1)
                     .dst_array_element(0)
                     .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
@@ -444,10 +445,11 @@ impl VulkanEngine {
     }
 
     pub fn draw_frame(&mut self) -> VulkanResult<bool> {
-        let in_flight_fen = self.sync[self.current_frame].in_flight_fen;
-        let image_avail_sem = self.sync[self.current_frame].image_avail_sem;
-        let render_finish_sem = self.sync[self.current_frame].render_finished_sem;
-        let command_buffer = self.command_buffers[self.current_frame];
+        let frame = &self.frame_state[self.current_frame];
+        let in_flight_fen = frame.in_flight_fen;
+        let image_avail_sem = frame.image_avail_sem;
+        let render_finish_sem = frame.render_finished_sem;
+        let command_buffer = frame.command_buffer;
 
         let image_idx = unsafe {
             self.device
@@ -526,7 +528,7 @@ impl VulkanEngine {
             view: Matrix4::look_at_rh(Point3::new(2.0, 2.0, 2.0), Point3::new(0.0, 0.0, 0.0), -Vector3::unit_z()),
             proj: cgmath::perspective(Deg(45.0), aspect, 0.1, 10.0),
         };
-        self.uniforms[self.current_frame].write_uniforms(ubo);
+        self.frame_state[self.current_frame].uniforms.write_uniforms(ubo);
     }
 
     unsafe fn cleanup_swapchain(&mut self) {
@@ -568,8 +570,7 @@ impl Drop for VulkanEngine {
             self.device.destroy_sampler(self.tex_sampler, None);
             self.device.destroy_image_view(self.tex_imgview, None);
             self.texture.cleanup(&self.device);
-            self.sync.cleanup(&self.device);
-            self.uniforms.cleanup(&self.device);
+            self.frame_state.cleanup(&self.device);
             self.device.destroy_descriptor_set_layout(self.descriptor_layout, None);
             self.device.destroy_descriptor_pool(self.descriptor_pool, None);
             self.device.destroy_pipeline(self.pipeline, None);
@@ -580,59 +581,64 @@ impl Drop for VulkanEngine {
     }
 }
 
-struct FrameSyncState {
+struct FrameState {
     image_avail_sem: vk::Semaphore,
     render_finished_sem: vk::Semaphore,
     in_flight_fen: vk::Fence,
+    uniforms: UniformData<UniformBufferObject>,
+    command_buffer: vk::CommandBuffer,
 }
 
-impl FrameSyncState {
-    fn new(device: &VulkanDevice) -> VulkanResult<Self> {
+impl FrameState {
+    fn new(device: &VulkanDevice, command_buffer: vk::CommandBuffer) -> VulkanResult<Self> {
         Ok(Self {
             image_avail_sem: device.create_semaphore()?,
             render_finished_sem: device.create_semaphore()?,
             in_flight_fen: device.create_fence()?,
+            uniforms: UniformData::new(device)?,
+            command_buffer,
         })
     }
 }
 
-impl Cleanup<ash::Device> for FrameSyncState {
+impl Cleanup<ash::Device> for FrameState {
     unsafe fn cleanup(&mut self, device: &ash::Device) {
         device.destroy_semaphore(self.image_avail_sem, None);
         device.destroy_semaphore(self.render_finished_sem, None);
         device.destroy_fence(self.in_flight_fen, None);
+        self.uniforms.cleanup(device);
     }
 }
 
-struct UniformData {
-    uniform_buffer: VkBuffer,
-    ub_mapped: *mut UniformBufferObject,
+struct UniformData<T> {
+    buffer: VkBuffer,
+    ub_mapped: *mut T,
 }
 
-impl UniformData {
+impl<T> UniformData<T> {
     fn new(device: &VulkanDevice) -> VulkanResult<Self> {
-        let size = std::mem::size_of::<UniformBufferObject>() as _;
-        let uniform_buffer = device.allocate_buffer(
+        let size = std::mem::size_of::<T>() as _;
+        let buffer = device.allocate_buffer(
             size,
             vk::BufferUsageFlags::UNIFORM_BUFFER,
             vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
         )?;
-        let ub_mapped = unsafe { device.map_memory(uniform_buffer.memory, 0, size, Default::default())? as _ };
-        Ok(Self { uniform_buffer, ub_mapped })
+        let ub_mapped = unsafe { device.map_memory(buffer.memory, 0, size, Default::default())? as _ };
+        Ok(Self { buffer, ub_mapped })
     }
 
-    fn write_uniforms(&mut self, ubo: UniformBufferObject) {
+    fn write_uniforms(&mut self, ubo: T) {
         unsafe {
             std::ptr::write_volatile(self.ub_mapped, ubo);
         }
     }
 }
 
-impl Cleanup<ash::Device> for UniformData {
+impl<T> Cleanup<ash::Device> for UniformData<T> {
     unsafe fn cleanup(&mut self, device: &ash::Device) {
-        device.unmap_memory(self.uniform_buffer.memory);
+        device.unmap_memory(self.buffer.memory);
         self.ub_mapped = std::ptr::null_mut();
-        self.uniform_buffer.cleanup(device);
+        self.buffer.cleanup(device);
     }
 }
 
