@@ -80,11 +80,11 @@ impl<T> ErrorDescription<&'static str> for ash::prelude::VkResult<T> {
 }
 
 pub trait Cleanup<C> {
-    unsafe fn cleanup(&mut self, context: &mut C);
+    unsafe fn cleanup(&mut self, context: &C);
 }
 
 impl<C, T: Cleanup<C>> Cleanup<C> for [T] {
-    unsafe fn cleanup(&mut self, context: &mut C) {
+    unsafe fn cleanup(&mut self, context: &C) {
         for item in self {
             item.cleanup(context);
         }

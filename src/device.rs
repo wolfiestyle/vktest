@@ -6,7 +6,7 @@ use gpu_alloc_ash::AshMemoryDevice;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use std::array;
 use std::mem::ManuallyDrop;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 pub struct VulkanDevice {
     instance: Arc<VulkanInstance>,
@@ -18,7 +18,7 @@ pub struct VulkanDevice {
     pub present_queue: vk::Queue,
     pub graphics_pool: vk::CommandPool,
     pub swapchain_utils: khr::Swapchain,
-    allocator: ga::GpuAllocator<vk::DeviceMemory>,
+    allocator: Mutex<ga::GpuAllocator<vk::DeviceMemory>>,
 }
 
 impl VulkanDevice {
@@ -38,7 +38,7 @@ impl VulkanDevice {
 
         let alloc_config = ga::Config::i_am_prototyping();
         let dev_props = unsafe { gpu_alloc_ash::device_properties(&instance, 0, dev_info.phys_dev)? };
-        let allocator = ga::GpuAllocator::new(alloc_config, dev_props);
+        let allocator = Mutex::new(ga::GpuAllocator::new(alloc_config, dev_props));
 
         Ok(Self {
             instance,
@@ -216,7 +216,7 @@ impl VulkanDevice {
     }
 
     pub fn allocate_buffer(
-        &mut self, size: vk::DeviceSize, buf_usage: vk::BufferUsageFlags, mem_usage: ga::UsageFlags,
+        &self, size: vk::DeviceSize, buf_usage: vk::BufferUsageFlags, mem_usage: ga::UsageFlags,
     ) -> VulkanResult<VkBuffer> {
         let buffer_ci = vk::BufferCreateInfo::builder()
             .size(size)
@@ -231,7 +231,7 @@ impl VulkanDevice {
 
         let mem_reqs = unsafe { self.device.get_buffer_memory_requirements(buffer) };
         let memory = unsafe {
-            self.allocator.alloc(
+            self.allocator.lock().unwrap().alloc(
                 AshMemoryDevice::wrap(&self.device),
                 ga::Request {
                     size: mem_reqs.size,
@@ -274,7 +274,7 @@ impl VulkanDevice {
         self.end_one_time_commands(cmd_buffer, self.graphics_queue)
     }
 
-    pub fn create_buffer<T: Copy>(&mut self, data: &[T], usage: vk::BufferUsageFlags) -> VulkanResult<VkBuffer> {
+    pub fn create_buffer<T: Copy>(&self, data: &[T], usage: vk::BufferUsageFlags) -> VulkanResult<VkBuffer> {
         let size = std::mem::size_of_val(data) as _;
         let mut src_buffer = self.allocate_buffer(
             size,
@@ -291,7 +291,7 @@ impl VulkanDevice {
         Ok(dst_buffer)
     }
 
-    pub fn create_uniform_buffer<T>(&mut self) -> VulkanResult<UniformBuffer<T>> {
+    pub fn create_uniform_buffer<T>(&self) -> VulkanResult<UniformBuffer<T>> {
         let size = std::mem::size_of::<T>();
         let mut buffer = self.allocate_buffer(size as _, vk::BufferUsageFlags::UNIFORM_BUFFER, ga::UsageFlags::UPLOAD)?;
         let ub_mapped = unsafe { buffer.memory.map(AshMemoryDevice::wrap(self), 0, size)?.cast() };
@@ -302,7 +302,7 @@ impl VulkanDevice {
     }
 
     pub fn allocate_image(
-        &mut self, width: u32, height: u32, format: vk::Format, tiling: vk::ImageTiling, img_usage: vk::ImageUsageFlags,
+        &self, width: u32, height: u32, format: vk::Format, tiling: vk::ImageTiling, img_usage: vk::ImageUsageFlags,
         mem_usage: ga::UsageFlags,
     ) -> VulkanResult<VkImage> {
         let image_ci = vk::ImageCreateInfo::builder()
@@ -321,7 +321,7 @@ impl VulkanDevice {
 
         let mem_reqs = unsafe { self.device.get_image_memory_requirements(image) };
         let memory = unsafe {
-            self.allocator.alloc(
+            self.allocator.lock().unwrap().alloc(
                 AshMemoryDevice::wrap(&self.device),
                 ga::Request {
                     size: mem_reqs.size,
@@ -405,7 +405,7 @@ impl VulkanDevice {
         self.end_one_time_commands(cmd_buffer, self.graphics_queue)
     }
 
-    pub fn create_texture(&mut self, width: u32, height: u32, data: &[u8]) -> VulkanResult<VkImage> {
+    pub fn create_texture(&self, width: u32, height: u32, data: &[u8]) -> VulkanResult<VkImage> {
         let size = width as vk::DeviceSize * height as vk::DeviceSize * 4;
         if data.len() != size as usize {
             return Err(VkError::EngineError("Image size and data length doesn't match"));
@@ -517,7 +517,7 @@ impl std::ops::Deref for VulkanDevice {
 impl Drop for VulkanDevice {
     fn drop(&mut self) {
         unsafe {
-            self.allocator.cleanup(AshMemoryDevice::wrap(&self.device));
+            self.allocator.lock().unwrap().cleanup(AshMemoryDevice::wrap(&self.device));
             self.device.destroy_command_pool(self.graphics_pool, None);
             self.instance.surface_utils.destroy_surface(self.surface, None);
             self.device.destroy_device(None);
@@ -564,7 +564,7 @@ impl std::ops::Deref for SwapchainInfo {
 }
 
 impl Cleanup<VulkanDevice> for SwapchainInfo {
-    unsafe fn cleanup(&mut self, device: &mut VulkanDevice) {
+    unsafe fn cleanup(&mut self, device: &VulkanDevice) {
         for &imgview in &self.image_views {
             device.destroy_image_view(imgview, None);
         }
@@ -590,9 +590,11 @@ impl<T> MemoryObject<T> {
         }
     }
 
-    unsafe fn free_memory(&mut self, device: &mut VulkanDevice) {
+    unsafe fn free_memory(&mut self, device: &VulkanDevice) {
         device
             .allocator
+            .lock()
+            .unwrap()
             .dealloc(AshMemoryDevice::wrap(&device.device), ManuallyDrop::take(&mut self.memory));
     }
 }
@@ -605,14 +607,14 @@ impl<T> std::ops::Deref for MemoryObject<T> {
 }
 
 impl Cleanup<VulkanDevice> for MemoryObject<vk::Buffer> {
-    unsafe fn cleanup(&mut self, device: &mut VulkanDevice) {
+    unsafe fn cleanup(&mut self, device: &VulkanDevice) {
         device.destroy_buffer(self.handle, None);
         self.free_memory(device);
     }
 }
 
 impl Cleanup<VulkanDevice> for MemoryObject<vk::Image> {
-    unsafe fn cleanup(&mut self, device: &mut VulkanDevice) {
+    unsafe fn cleanup(&mut self, device: &VulkanDevice) {
         device.destroy_image(self.handle, None);
         self.free_memory(device);
     }
@@ -636,7 +638,7 @@ impl<T> UniformBuffer<T> {
 }
 
 impl<T> Cleanup<VulkanDevice> for UniformBuffer<T> {
-    unsafe fn cleanup(&mut self, device: &mut VulkanDevice) {
+    unsafe fn cleanup(&mut self, device: &VulkanDevice) {
         self.ub_mapped = None;
         self.buffer.memory.unmap(AshMemoryDevice::wrap(device));
         self.buffer.cleanup(device);
