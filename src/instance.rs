@@ -209,9 +209,6 @@ impl VulkanInstance {
             return Err(VkError::UnsuitableDevice);
         }
 
-        // memory properties
-        let mem_props = unsafe { self.instance.get_physical_device_memory_properties(phys_dev) };
-
         Ok(DeviceInfo {
             phys_dev,
             dev_type,
@@ -219,7 +216,6 @@ impl VulkanInstance {
             graphics_idx: graphics_idx.unwrap(),
             present_idx: present_idx.unwrap(),
             extensions,
-            mem_props,
         })
     }
 
@@ -310,7 +306,6 @@ pub struct DeviceInfo {
     pub graphics_idx: u32,
     pub present_idx: u32,
     pub extensions: HashSet<CString>,
-    pub mem_props: vk::PhysicalDeviceMemoryProperties,
 }
 
 impl DeviceInfo {
@@ -320,15 +315,6 @@ impl DeviceInfo {
         } else {
             vec![self.graphics_idx, self.present_idx]
         }
-    }
-
-    pub fn find_memory_type(&self, type_filter: u32, prop_flags: vk::MemoryPropertyFlags) -> VulkanResult<u32> {
-        for i in 0..self.mem_props.memory_type_count {
-            if type_filter & (1 << i) != 0 && self.mem_props.memory_types[i as usize].property_flags.contains(prop_flags) {
-                return Ok(i);
-            }
-        }
-        Err(VkError::EngineError("Failed to find suitable memory type"))
     }
 }
 
