@@ -11,8 +11,6 @@ pub enum VkError {
     VulkanMsg(&'static str, vk::Result),
     MemoryAlloc(ga::AllocationError),
     MemoryMap(ga::MapError),
-    Io(std::io::Error),
-    Image(&'static str),
     EngineError(&'static str),
     UnsuitableDevice, // used internally
 }
@@ -25,8 +23,6 @@ impl std::fmt::Display for VkError {
             Self::VulkanMsg(msg, err) => write!(f, "{msg}: {err}"),
             Self::MemoryAlloc(err) => write!(f, "Memory allocation error: {err}"),
             Self::MemoryMap(err) => write!(f, "Failed to map memory: {err}"),
-            Self::Io(err) => write!(f, "IO error: {err}"),
-            Self::Image(msg) => write!(f, "{msg}"),
             Self::EngineError(desc) => write!(f, "{desc}"),
             Self::UnsuitableDevice => write!(f, "Unsuitable device"),
         }
@@ -40,7 +36,6 @@ impl std::error::Error for VkError {
             Self::Vulkan(err) | Self::VulkanMsg(_, err) => Some(err),
             Self::MemoryAlloc(err) => Some(err),
             Self::MemoryMap(err) => Some(err),
-            Self::Io(err) => Some(err),
             _ => None,
         }
     }
@@ -70,12 +65,6 @@ impl From<ga::MapError> for VkError {
     }
 }
 
-impl From<std::io::Error> for VkError {
-    fn from(err: std::io::Error) -> Self {
-        Self::Io(err)
-    }
-}
-
 pub trait ErrorDescription<M> {
     type Output;
 
@@ -87,14 +76,6 @@ impl<T> ErrorDescription<&'static str> for ash::prelude::VkResult<T> {
 
     fn describe_err(self, msg: &'static str) -> VulkanResult<Self::Output> {
         self.map_err(|err| VkError::VulkanMsg(msg, err))
-    }
-}
-
-impl<T> ErrorDescription<&'static str> for Option<(stb::image::Info, stb::image::Data<T>)> {
-    type Output = (stb::image::Info, stb::image::Data<T>);
-
-    fn describe_err(self, msg: &'static str) -> VulkanResult<Self::Output> {
-        self.ok_or_else(|| VkError::Image(msg))
     }
 }
 

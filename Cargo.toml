@@ -13,7 +13,7 @@ cstr = "0.2.11"
 inline-spirv = "0.1.5"
 memoffset = "0.8.0"
 cgmath = "0.18.0"
-stb = { version = "0.3.2", default_features = false, features = ["stb_image"] }
+image = "0.24.5"
 obj-rs = "0.7.0"
 structopt = "0.3.26"
 ga = { package = "gpu-alloc", version = "0.5.3" }

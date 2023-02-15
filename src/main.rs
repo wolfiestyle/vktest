@@ -1,4 +1,3 @@
-use stb::image;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
@@ -19,12 +18,13 @@ struct Arguments {
 fn main() -> VulkanResult<()> {
     let args = Arguments::from_args();
 
-    let file = BufReader::new(File::open(args.model.unwrap_or_else(|| "model.obj".into()))?);
+    let file = BufReader::new(File::open(args.model.unwrap_or_else(|| "model.obj".into())).unwrap());
     let model = obj::load_obj(file).unwrap();
     eprintln!("loaded {} vertices, {} indices", model.vertices.len(), model.indices.len());
-    let mut file = File::open(args.texture.unwrap_or_else(|| "texture.png".into()))?;
-    let (img_info, img_data) = image::stbi_load_from_reader(&mut file, image::Channels::RgbAlpha).unwrap();
-    drop(file);
+    let image = image::open(args.texture.unwrap_or_else(|| "texture.png".into()))
+        .unwrap()
+        .into_rgba8();
+    eprintln!("loaded image: {} x {}", image.width(), image.height());
 
     let event_loop = EventLoop::new();
     let win_size = winit::dpi::PhysicalSize::new(1024, 768);
@@ -41,9 +41,9 @@ fn main() -> VulkanResult<()> {
         win_size.into(),
         &model.vertices,
         &model.indices,
-        img_info.width as u32,
-        img_info.height as u32,
-        img_data.as_slice(),
+        image.width(),
+        image.height(),
+        image.as_raw(),
     )?;
     let mut prev_time = Instant::now();
     let mut frame_count = 0u32;
