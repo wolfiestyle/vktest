@@ -552,6 +552,10 @@ impl SwapchainInfo {
             extent: self.extent,
         }
     }
+
+    pub fn aspect(&self) -> f32 {
+        self.extent.width as f32 / self.extent.height as f32
+    }
 }
 
 impl std::ops::Deref for SwapchainInfo {

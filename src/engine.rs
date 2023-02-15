@@ -37,6 +37,7 @@ pub struct VulkanEngine {
     tex_sampler: vk::Sampler,
     start_time: Instant,
     frame_time: Instant,
+    view: Matrix4<f32>,
 }
 
 impl VulkanEngine {
@@ -85,6 +86,8 @@ impl VulkanEngine {
         let vertex_buffer = vk.create_buffer(vertices, vk::BufferUsageFlags::VERTEX_BUFFER)?;
         let index_buffer = vk.create_buffer(indices, vk::BufferUsageFlags::INDEX_BUFFER)?;
 
+        let view = Matrix4::look_at_rh(Point3::new(2.0, 2.0, 2.0), Point3::new(0.0, 0.0, 0.0), -Vector3::unit_z());
+
         let now = Instant::now();
 
         Ok(Self {
@@ -112,6 +115,7 @@ impl VulkanEngine {
             tex_sampler,
             start_time: now,
             frame_time: now,
+            view,
         })
     }
 
@@ -546,11 +550,10 @@ impl VulkanEngine {
 
     fn update_uniforms(&mut self) {
         let time = ((self.frame_time - self.start_time).as_micros() as f64 / 1000000.0) as f32;
-        let aspect = self.swapchain.extent.width as f32 / self.swapchain.extent.height as f32;
+        let model = Matrix4::from_axis_angle(Vector3::unit_z(), Deg(time * 90.0));
+        let proj = cgmath::perspective(Deg(45.0), self.swapchain.aspect(), 0.1, 10.0);
         let ubo = UniformBufferObject {
-            model: Matrix4::from_axis_angle(Vector3::unit_z(), Deg(time * 90.0)),
-            view: Matrix4::look_at_rh(Point3::new(2.0, 2.0, 2.0), Point3::new(0.0, 0.0, 0.0), -Vector3::unit_z()),
-            proj: cgmath::perspective(Deg(45.0), aspect, 0.1, 10.0),
+            mvp: proj * self.view * model,
         };
         self.frame_state[self.current_frame].uniforms.write_uniforms(ubo);
     }
@@ -637,7 +640,5 @@ impl Cleanup<VulkanDevice> for FrameState {
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 struct UniformBufferObject {
-    model: Matrix4<f32>,
-    view: Matrix4<f32>,
-    proj: Matrix4<f32>,
+    mvp: Matrix4<f32>,
 }
