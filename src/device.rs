@@ -235,7 +235,7 @@ impl VulkanDevice {
                 AshMemoryDevice::wrap(&self.device),
                 ga::Request {
                     size: mem_reqs.size,
-                    align_mask: mem_reqs.alignment,
+                    align_mask: mem_reqs.alignment - 1,
                     usage: mem_usage,
                     memory_types: mem_reqs.memory_type_bits,
                 },
@@ -325,7 +325,7 @@ impl VulkanDevice {
                 AshMemoryDevice::wrap(&self.device),
                 ga::Request {
                     size: mem_reqs.size,
-                    align_mask: mem_reqs.alignment,
+                    align_mask: mem_reqs.alignment - 1,
                     usage: mem_usage,
                     memory_types: mem_reqs.memory_type_bits,
                 },
