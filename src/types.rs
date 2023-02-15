@@ -139,20 +139,22 @@ impl From<PhysicalSize<u32>> for WinSize {
 
 pub trait TypeFormat {
     const VK_FORMAT: vk::Format;
+    const VK_WIDTH: u32;
 }
 
 macro_rules! impl_format {
-    ($type:ty, $val:expr) => {
+    ($type:ty, $width:expr, $val:expr) => {
         impl TypeFormat for $type {
             const VK_FORMAT: vk::Format = $val;
+            const VK_WIDTH: u32 = $width;
         }
     };
 }
 
-impl_format!([f32; 1], vk::Format::R32_SFLOAT);
-impl_format!([f32; 2], vk::Format::R32G32_SFLOAT);
-impl_format!([f32; 3], vk::Format::R32G32B32_SFLOAT);
-impl_format!([f32; 4], vk::Format::R32G32B32A32_SFLOAT);
+impl_format!([f32; 1], 1, vk::Format::R32_SFLOAT);
+impl_format!([f32; 2], 1, vk::Format::R32G32_SFLOAT);
+impl_format!([f32; 3], 1, vk::Format::R32G32B32_SFLOAT);
+impl_format!([f32; 4], 1, vk::Format::R32G32B32A32_SFLOAT);
 
 pub trait VertexBindindDesc {
     fn binding_desc(binding: u32) -> vk::VertexInputBindingDescription;
@@ -172,56 +174,56 @@ pub trait VertexAttrDesc {
     fn attr_desc(binding: u32) -> Vec<vk::VertexInputAttributeDescription>;
 }
 
-macro_rules! impl_tuple_desc {
-    ($($name:ident $idx:tt),+) => {
+macro_rules! impl_vertex {
+    (tuple : $($name:ident $idx:tt),+) => {
         impl<$($name: TypeFormat),+> VertexAttrDesc for ($($name,)+) {
+            #[allow(unused_assignments)]
             fn attr_desc(binding: u32) -> Vec<vk::VertexInputAttributeDescription> {
-                vec![$(
+                let mut i = 0;
+                vec![$({
+                    let location = i;
+                    i += $name::VK_WIDTH;
                     vk::VertexInputAttributeDescription {
                         binding,
-                        location: $idx,
+                        location,
                         format: $name::VK_FORMAT,
                         offset: offset_of_tuple!(Self, $idx) as _,
                     }
-                ),+]
+                }),+]
             }
         }
     };
+    (struct $name:ty : $($field:ident),+) => {
+        impl VertexAttrDesc for $name {
+            #[allow(unused_assignments)]
+            fn attr_desc(binding: u32) -> Vec<vk::VertexInputAttributeDescription> {
+                let mut i = 0;
+                vec![$({
+                    let (format, width) = Self::lens_format(|v| &v.$field);
+                    let location = i;
+                    i += width;
+                    vk::VertexInputAttributeDescription {
+                        binding,
+                        location,
+                        format,
+                        offset: offset_of!(Self, $field) as _,
+                    }
+                }),+]
+            }
+        }
+    }
 }
 
-impl_tuple_desc!(A 0);
-impl_tuple_desc!(A 0, B 1);
-impl_tuple_desc!(A 0, B 1, C 2);
+impl_vertex!(tuple: A 0);
+impl_vertex!(tuple: A 0, B 1);
+impl_vertex!(tuple: A 0, B 1, C 2);
+impl_vertex!(struct obj::TexturedVertex: position, normal, texture);
 
 trait LensFormat {
-    fn lens_format<T: TypeFormat, F: for<'a> FnOnce(&'a Self) -> &'a T>(_: F) -> vk::Format {
-        T::VK_FORMAT
+    #[inline(always)]
+    fn lens_format<T: TypeFormat, F: for<'a> FnOnce(&'a Self) -> &'a T>(_: F) -> (vk::Format, u32) {
+        (T::VK_FORMAT, T::VK_WIDTH)
     }
 }
 
 impl<T> LensFormat for T {}
-
-impl VertexAttrDesc for obj::TexturedVertex {
-    fn attr_desc(binding: u32) -> Vec<vk::VertexInputAttributeDescription> {
-        vec![
-            vk::VertexInputAttributeDescription {
-                binding,
-                location: 0,
-                format: Self::lens_format(|v| &v.position),
-                offset: offset_of!(Self, position) as _,
-            },
-            vk::VertexInputAttributeDescription {
-                binding,
-                location: 1,
-                format: Self::lens_format(|v| &v.normal),
-                offset: offset_of!(Self, normal) as _,
-            },
-            vk::VertexInputAttributeDescription {
-                binding,
-                location: 2,
-                format: Self::lens_format(|v| &v.texture),
-                offset: offset_of!(Self, texture) as _,
-            },
-        ]
-    }
-}
