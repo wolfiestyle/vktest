@@ -116,8 +116,10 @@ impl VulkanEngine {
     }
 
     pub fn resize(&mut self, window_size: WinSize) {
-        self.window_size = window_size;
-        self.window_resized = true;
+        if window_size != self.window_size {
+            self.window_size = window_size;
+            self.window_resized = true;
+        }
     }
 
     pub fn get_frame_time(&self) -> Instant {
