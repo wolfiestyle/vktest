@@ -2,8 +2,10 @@ use crate::instance::{DeviceInfo, DeviceSelection, SurfaceInfo, VulkanInstance};
 use crate::types::*;
 use ash::extensions::khr;
 use ash::vk;
+use gpu_alloc_ash::AshMemoryDevice;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use std::array;
+use std::mem::ManuallyDrop;
 use std::sync::Arc;
 
 pub struct VulkanDevice {
@@ -16,6 +18,7 @@ pub struct VulkanDevice {
     pub present_queue: vk::Queue,
     pub graphics_pool: vk::CommandPool,
     pub swapchain_utils: khr::Swapchain,
+    allocator: ga::GpuAllocator<vk::DeviceMemory>,
 }
 
 impl VulkanDevice {
@@ -33,6 +36,10 @@ impl VulkanDevice {
         let graphics_pool = Self::create_command_pool(&device, dev_info.graphics_idx, vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)?;
         let swapchain_utils = khr::Swapchain::new(&instance, &device);
 
+        let alloc_config = ga::Config::i_am_prototyping();
+        let dev_props = unsafe { gpu_alloc_ash::device_properties(&instance, 0, dev_info.phys_dev)? };
+        let allocator = ga::GpuAllocator::new(alloc_config, dev_props);
+
         Ok(Self {
             instance,
             surface,
@@ -43,6 +50,7 @@ impl VulkanDevice {
             present_queue,
             graphics_pool,
             swapchain_utils,
+            allocator,
         })
     }
 
@@ -208,11 +216,11 @@ impl VulkanDevice {
     }
 
     pub fn allocate_buffer(
-        &self, size: vk::DeviceSize, usage: vk::BufferUsageFlags, properties: vk::MemoryPropertyFlags,
+        &mut self, size: vk::DeviceSize, buf_usage: vk::BufferUsageFlags, mem_usage: ga::UsageFlags,
     ) -> VulkanResult<VkBuffer> {
         let buffer_ci = vk::BufferCreateInfo::builder()
             .size(size)
-            .usage(usage)
+            .usage(buf_usage)
             .sharing_mode(vk::SharingMode::EXCLUSIVE);
 
         let buffer = unsafe {
@@ -222,36 +230,34 @@ impl VulkanDevice {
         };
 
         let mem_reqs = unsafe { self.device.get_buffer_memory_requirements(buffer) };
-        let mem_type = self.dev_info.find_memory_type(mem_reqs.memory_type_bits, properties)?;
-
-        let alloc_info = vk::MemoryAllocateInfo::builder()
-            .allocation_size(mem_reqs.size)
-            .memory_type_index(mem_type);
-
         let memory = unsafe {
-            self.device
-                .allocate_memory(&alloc_info, None)
-                .describe_err("Failed to allocate buffer memory")?
+            self.allocator.alloc(
+                AshMemoryDevice::wrap(&self.device),
+                ga::Request {
+                    size: mem_reqs.size,
+                    align_mask: mem_reqs.alignment,
+                    usage: mem_usage,
+                    memory_types: mem_reqs.memory_type_bits,
+                },
+            )?
         };
+        //eprintln!("buffer alloc: usage = {buf_usage:?}\n{memory:#?}");
+
         unsafe {
             self.device
-                .bind_buffer_memory(buffer, memory, 0)
+                .bind_buffer_memory(buffer, *memory.memory(), memory.offset())
                 .describe_err("Failed to bind buffer memory")?
         };
 
         Ok(VkBuffer::new(buffer, memory))
     }
 
-    fn write_memory<T: Copy>(&self, memory: vk::DeviceMemory, data: &[T]) -> VulkanResult<()> {
-        let size = std::mem::size_of_val(data) as _;
+    fn write_memory_slice<T: Copy>(&self, memory: &mut MemoryBlock, data: &[T]) -> VulkanResult<()> {
         unsafe {
-            let mapped_ptr = self
-                .device
-                .map_memory(memory, 0, size, Default::default())
-                .describe_err("Failed to map buffer memory")? as *mut T;
-            std::ptr::copy_nonoverlapping(data.as_ptr(), mapped_ptr, data.len());
-            self.device.unmap_memory(memory);
-        };
+            let (prefix, bytes, suffix) = data.align_to();
+            assert!(prefix.is_empty() && suffix.is_empty());
+            memory.write_bytes(AshMemoryDevice::wrap(&self.device), 0, bytes)?;
+        }
         Ok(())
     }
 
@@ -268,32 +274,36 @@ impl VulkanDevice {
         self.end_one_time_commands(cmd_buffer, self.graphics_queue)
     }
 
-    pub fn create_buffer<T: Copy>(&self, data: &[T], usage: vk::BufferUsageFlags) -> VulkanResult<VkBuffer> {
+    pub fn create_buffer<T: Copy>(&mut self, data: &[T], usage: vk::BufferUsageFlags) -> VulkanResult<VkBuffer> {
         let size = std::mem::size_of_val(data) as _;
         let mut src_buffer = self.allocate_buffer(
             size,
             vk::BufferUsageFlags::TRANSFER_SRC,
-            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+            ga::UsageFlags::UPLOAD | ga::UsageFlags::TRANSIENT,
         )?;
-        let dst_buffer = self.allocate_buffer(
-            size,
-            vk::BufferUsageFlags::TRANSFER_DST | usage,
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
-        )?;
+        let dst_buffer = self.allocate_buffer(size, vk::BufferUsageFlags::TRANSFER_DST | usage, ga::UsageFlags::FAST_DEVICE_ACCESS)?;
 
-        self.write_memory(src_buffer.memory, data)?;
+        self.write_memory_slice(&mut src_buffer.memory, data)?;
         self.copy_buffer(*dst_buffer, *src_buffer, size)?;
 
-        unsafe {
-            src_buffer.cleanup(&self.device);
-        }
+        unsafe { src_buffer.cleanup(self) };
 
         Ok(dst_buffer)
     }
 
+    pub fn create_uniform_buffer<T>(&mut self) -> VulkanResult<UniformBuffer<T>> {
+        let size = std::mem::size_of::<T>();
+        let mut buffer = self.allocate_buffer(size as _, vk::BufferUsageFlags::UNIFORM_BUFFER, ga::UsageFlags::UPLOAD)?;
+        let ub_mapped = unsafe { buffer.memory.map(AshMemoryDevice::wrap(self), 0, size)?.cast() };
+        Ok(UniformBuffer {
+            buffer,
+            ub_mapped: Some(ub_mapped),
+        })
+    }
+
     pub fn allocate_image(
-        &self, width: u32, height: u32, format: vk::Format, tiling: vk::ImageTiling, usage: vk::ImageUsageFlags,
-        properties: vk::MemoryPropertyFlags,
+        &mut self, width: u32, height: u32, format: vk::Format, tiling: vk::ImageTiling, img_usage: vk::ImageUsageFlags,
+        mem_usage: ga::UsageFlags,
     ) -> VulkanResult<VkImage> {
         let image_ci = vk::ImageCreateInfo::builder()
             .image_type(vk::ImageType::TYPE_2D)
@@ -303,27 +313,29 @@ impl VulkanDevice {
             .format(format)
             .tiling(tiling)
             .initial_layout(vk::ImageLayout::UNDEFINED)
-            .usage(usage)
+            .usage(img_usage)
             .samples(vk::SampleCountFlags::TYPE_1)
             .sharing_mode(vk::SharingMode::EXCLUSIVE);
 
         let image = unsafe { self.device.create_image(&image_ci, None).describe_err("Failed to create image")? };
 
         let mem_reqs = unsafe { self.device.get_image_memory_requirements(image) };
-        let mem_type = self.dev_info.find_memory_type(mem_reqs.memory_type_bits, properties)?;
-
-        let alloc_info = vk::MemoryAllocateInfo::builder()
-            .allocation_size(mem_reqs.size)
-            .memory_type_index(mem_type);
-
         let memory = unsafe {
-            self.device
-                .allocate_memory(&alloc_info, None)
-                .describe_err("Failed to allocate image memory")?
+            self.allocator.alloc(
+                AshMemoryDevice::wrap(&self.device),
+                ga::Request {
+                    size: mem_reqs.size,
+                    align_mask: mem_reqs.alignment,
+                    usage: mem_usage,
+                    memory_types: mem_reqs.memory_type_bits,
+                },
+            )?
         };
+        //eprintln!("image alloc: usage = {img_usage:?}\n{memory:#?}");
+
         unsafe {
             self.device
-                .bind_image_memory(image, memory, 0)
+                .bind_image_memory(image, *memory.memory(), memory.offset())
                 .describe_err("Failed to bind image memory")?;
         }
 
@@ -393,7 +405,7 @@ impl VulkanDevice {
         self.end_one_time_commands(cmd_buffer, self.graphics_queue)
     }
 
-    pub fn create_texture(&self, width: u32, height: u32, data: &[u8]) -> VulkanResult<VkImage> {
+    pub fn create_texture(&mut self, width: u32, height: u32, data: &[u8]) -> VulkanResult<VkImage> {
         let size = width as vk::DeviceSize * height as vk::DeviceSize * 4;
         if data.len() != size as usize {
             return Err(VkError::EngineError("Image size and data length doesn't match"));
@@ -401,7 +413,7 @@ impl VulkanDevice {
         let mut src_buffer = self.allocate_buffer(
             size,
             vk::BufferUsageFlags::TRANSFER_SRC,
-            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+            ga::UsageFlags::UPLOAD | ga::UsageFlags::TRANSIENT,
         )?;
         let tex_image = self.allocate_image(
             width,
@@ -409,10 +421,10 @@ impl VulkanDevice {
             vk::Format::R8G8B8A8_SRGB,
             vk::ImageTiling::OPTIMAL,
             vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            ga::UsageFlags::FAST_DEVICE_ACCESS,
         )?;
 
-        self.write_memory(src_buffer.memory, data)?;
+        self.write_memory_slice(&mut src_buffer.memory, data)?;
         self.transition_image_layout(*tex_image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::TRANSFER_DST_OPTIMAL)?;
         self.copy_buffer_to_image(*src_buffer, *tex_image, width, height)?;
         self.transition_image_layout(
@@ -421,9 +433,7 @@ impl VulkanDevice {
             vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
         )?;
 
-        unsafe {
-            src_buffer.cleanup(&self.device);
-        }
+        unsafe { src_buffer.cleanup(self) };
 
         Ok(tex_image)
     }
@@ -495,27 +505,6 @@ impl VulkanDevice {
         ];
         self.find_supported_format(&formats, vk::ImageTiling::OPTIMAL, vk::FormatFeatureFlags::DEPTH_STENCIL_ATTACHMENT)
     }
-
-    pub fn create_depth_image(&self, width: u32, height: u32, format: Option<vk::Format>) -> VulkanResult<(VkImage, vk::Format)> {
-        let formats = format.as_ref().map(std::slice::from_ref).unwrap_or(&[
-            vk::Format::D32_SFLOAT,
-            vk::Format::D32_SFLOAT_S8_UINT,
-            vk::Format::D24_UNORM_S8_UINT,
-            vk::Format::D16_UNORM,
-            vk::Format::D16_UNORM_S8_UINT,
-        ]);
-        let depth_format =
-            self.find_supported_format(formats, vk::ImageTiling::OPTIMAL, vk::FormatFeatureFlags::DEPTH_STENCIL_ATTACHMENT)?;
-        let depth_img = self.allocate_image(
-            width,
-            height,
-            depth_format,
-            vk::ImageTiling::OPTIMAL,
-            vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
-        )?;
-        Ok((depth_img, depth_format))
-    }
 }
 
 impl std::ops::Deref for VulkanDevice {
@@ -528,6 +517,7 @@ impl std::ops::Deref for VulkanDevice {
 impl Drop for VulkanDevice {
     fn drop(&mut self) {
         unsafe {
+            self.allocator.cleanup(AshMemoryDevice::wrap(&self.device));
             self.device.destroy_command_pool(self.graphics_pool, None);
             self.instance.surface_utils.destroy_surface(self.surface, None);
             self.device.destroy_device(None);
@@ -574,7 +564,7 @@ impl std::ops::Deref for SwapchainInfo {
 }
 
 impl Cleanup<VulkanDevice> for SwapchainInfo {
-    unsafe fn cleanup(&mut self, device: &VulkanDevice) {
+    unsafe fn cleanup(&mut self, device: &mut VulkanDevice) {
         for &imgview in &self.image_views {
             device.destroy_image_view(imgview, None);
         }
@@ -582,18 +572,28 @@ impl Cleanup<VulkanDevice> for SwapchainInfo {
     }
 }
 
+pub type MemoryBlock = ga::MemoryBlock<vk::DeviceMemory>;
 pub type VkBuffer = MemoryObject<vk::Buffer>;
 pub type VkImage = MemoryObject<vk::Image>;
 
 #[derive(Debug)]
 pub struct MemoryObject<T> {
     pub handle: T,
-    pub memory: vk::DeviceMemory,
+    pub memory: ManuallyDrop<MemoryBlock>,
 }
 
 impl<T> MemoryObject<T> {
-    fn new(handle: T, memory: vk::DeviceMemory) -> Self {
-        Self { handle, memory }
+    fn new(handle: T, memory: MemoryBlock) -> Self {
+        Self {
+            handle,
+            memory: ManuallyDrop::new(memory),
+        }
+    }
+
+    unsafe fn free_memory(&mut self, device: &mut VulkanDevice) {
+        device
+            .allocator
+            .dealloc(AshMemoryDevice::wrap(&device.device), ManuallyDrop::take(&mut self.memory));
     }
 }
 
@@ -604,16 +604,41 @@ impl<T> std::ops::Deref for MemoryObject<T> {
     }
 }
 
-impl Cleanup<ash::Device> for MemoryObject<vk::Buffer> {
-    unsafe fn cleanup(&mut self, device: &ash::Device) {
+impl Cleanup<VulkanDevice> for MemoryObject<vk::Buffer> {
+    unsafe fn cleanup(&mut self, device: &mut VulkanDevice) {
         device.destroy_buffer(self.handle, None);
-        device.free_memory(self.memory, None);
+        self.free_memory(device);
     }
 }
 
-impl Cleanup<ash::Device> for MemoryObject<vk::Image> {
-    unsafe fn cleanup(&mut self, device: &ash::Device) {
+impl Cleanup<VulkanDevice> for MemoryObject<vk::Image> {
+    unsafe fn cleanup(&mut self, device: &mut VulkanDevice) {
         device.destroy_image(self.handle, None);
-        device.free_memory(self.memory, None);
+        self.free_memory(device);
+    }
+}
+
+pub struct UniformBuffer<T> {
+    pub buffer: VkBuffer,
+    ub_mapped: Option<std::ptr::NonNull<T>>,
+}
+
+impl<T> UniformBuffer<T> {
+    pub fn write_uniforms(&mut self, ubo: T) {
+        unsafe {
+            std::ptr::write_volatile(self.ub_mapped.expect("use after free").as_ptr(), ubo);
+        }
+    }
+
+    pub const fn buffer_size(&self) -> usize {
+        std::mem::size_of::<T>()
+    }
+}
+
+impl<T> Cleanup<VulkanDevice> for UniformBuffer<T> {
+    unsafe fn cleanup(&mut self, device: &mut VulkanDevice) {
+        self.ub_mapped = None;
+        self.buffer.memory.unmap(AshMemoryDevice::wrap(device));
+        self.buffer.cleanup(device);
     }
 }

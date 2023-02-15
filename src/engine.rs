@@ -1,4 +1,4 @@
-use crate::device::{SwapchainInfo, VkBuffer, VkImage, VulkanDevice};
+use crate::device::{SwapchainInfo, UniformBuffer, VkBuffer, VkImage, VulkanDevice};
 use crate::types::*;
 use ash::vk;
 use cgmath::{Deg, Matrix4, Point3, Vector3};
@@ -41,20 +41,20 @@ pub struct VulkanEngine {
 
 impl VulkanEngine {
     pub fn new(
-        vk: VulkanDevice, window_size: WinSize, vertices: &[Vertex], indices: &[u32], img_width: u32, img_height: u32, img_data: &[u8],
+        mut vk: VulkanDevice, window_size: WinSize, vertices: &[Vertex], indices: &[u32], img_width: u32, img_height: u32, img_data: &[u8],
     ) -> VulkanResult<Self> {
         let vert_spv = include_spirv!("src/shaders/texture.vert.glsl", vert, glsl);
         let frag_spv = include_spirv!("src/shaders/texture.frag.glsl", frag, glsl);
 
         let swapchain = vk.create_swapchain(window_size, SWAPCHAIN_IMAGE_COUNT, None)?;
         let depth_format = vk.find_depth_format()?;
-        let (depth_images, depth_imgviews) = Self::create_depth_images(&vk, swapchain.extent, depth_format, SWAPCHAIN_IMAGE_COUNT)?;
+        let (depth_images, depth_imgviews) = Self::create_depth_images(&mut vk, swapchain.extent, depth_format, SWAPCHAIN_IMAGE_COUNT)?;
         let render_pass = Self::create_render_pass(&vk, swapchain.format, depth_format)?;
         let framebuffers = vk.create_framebuffers(&swapchain, render_pass, &depth_imgviews)?;
 
         let command_buffers = vk.create_command_buffers(MAX_FRAMES_IN_FLIGHT as u32)?;
         let frame_state = (0..MAX_FRAMES_IN_FLIGHT)
-            .map(|i| FrameState::new(&vk, command_buffers[i]))
+            .map(|i| FrameState::new(&mut vk, command_buffers[i]))
             .collect::<Result<Vec<_>, _>>()?;
 
         let texture = vk.create_texture(img_width, img_height, img_data)?;
@@ -125,7 +125,7 @@ impl VulkanEngine {
     }
 
     fn create_depth_images(
-        device: &VulkanDevice, extent: vk::Extent2D, depth_format: vk::Format, count: u32,
+        device: &mut VulkanDevice, extent: vk::Extent2D, depth_format: vk::Format, count: u32,
     ) -> VulkanResult<(Vec<VkImage>, Vec<vk::ImageView>)> {
         let depth_image = (0..count)
             .map(|_| {
@@ -135,7 +135,7 @@ impl VulkanEngine {
                     depth_format,
                     vk::ImageTiling::OPTIMAL,
                     vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-                    vk::MemoryPropertyFlags::DEVICE_LOCAL,
+                    ga::UsageFlags::FAST_DEVICE_ACCESS,
                 )
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -560,8 +560,8 @@ impl VulkanEngine {
         for &img in &self.depth_imgviews {
             self.device.destroy_image_view(img, None);
         }
-        self.depth_images.cleanup(&self.device);
-        self.swapchain.cleanup(&self.device);
+        self.depth_images.cleanup(&mut self.device);
+        self.swapchain.cleanup(&mut self.device);
     }
 
     fn recreate_swapchain(&mut self) -> VulkanResult<()> {
@@ -571,7 +571,7 @@ impl VulkanEngine {
             .device
             .create_swapchain(self.window_size, SWAPCHAIN_IMAGE_COUNT, Some(*self.swapchain))?;
         let (depth_images, depth_imgviews) =
-            Self::create_depth_images(&self.device, swapchain.extent, self.depth_format, SWAPCHAIN_IMAGE_COUNT)?;
+            Self::create_depth_images(&mut self.device, swapchain.extent, self.depth_format, SWAPCHAIN_IMAGE_COUNT)?;
         let framebuffers = self.device.create_framebuffers(&swapchain, self.render_pass, &depth_imgviews)?;
         unsafe { self.cleanup_swapchain() };
         self.swapchain = swapchain;
@@ -587,12 +587,12 @@ impl Drop for VulkanEngine {
     fn drop(&mut self) {
         unsafe {
             self.device.device_wait_idle().unwrap();
-            self.vertex_buffer.cleanup(&self.device);
-            self.index_buffer.cleanup(&self.device);
+            self.vertex_buffer.cleanup(&mut self.device);
+            self.index_buffer.cleanup(&mut self.device);
             self.device.destroy_sampler(self.tex_sampler, None);
             self.device.destroy_image_view(self.tex_imgview, None);
-            self.texture.cleanup(&self.device);
-            self.frame_state.cleanup(&self.device);
+            self.texture.cleanup(&mut self.device);
+            self.frame_state.cleanup(&mut self.device);
             self.device.destroy_descriptor_set_layout(self.descriptor_layout, None);
             self.device.destroy_descriptor_pool(self.descriptor_pool, None);
             self.device.destroy_pipeline(self.pipeline, None);
@@ -607,64 +607,28 @@ struct FrameState {
     image_avail_sem: vk::Semaphore,
     render_finished_sem: vk::Semaphore,
     in_flight_fen: vk::Fence,
-    uniforms: UniformData<UniformBufferObject>,
+    uniforms: UniformBuffer<UniformBufferObject>,
     command_buffer: vk::CommandBuffer,
 }
 
 impl FrameState {
-    fn new(device: &VulkanDevice, command_buffer: vk::CommandBuffer) -> VulkanResult<Self> {
+    fn new(device: &mut VulkanDevice, command_buffer: vk::CommandBuffer) -> VulkanResult<Self> {
         Ok(Self {
             image_avail_sem: device.create_semaphore()?,
             render_finished_sem: device.create_semaphore()?,
             in_flight_fen: device.create_fence()?,
-            uniforms: UniformData::new(device)?,
+            uniforms: device.create_uniform_buffer()?,
             command_buffer,
         })
     }
 }
 
-impl Cleanup<ash::Device> for FrameState {
-    unsafe fn cleanup(&mut self, device: &ash::Device) {
+impl Cleanup<VulkanDevice> for FrameState {
+    unsafe fn cleanup(&mut self, device: &mut VulkanDevice) {
         device.destroy_semaphore(self.image_avail_sem, None);
         device.destroy_semaphore(self.render_finished_sem, None);
         device.destroy_fence(self.in_flight_fen, None);
         self.uniforms.cleanup(device);
-    }
-}
-
-struct UniformData<T> {
-    buffer: VkBuffer,
-    ub_mapped: *mut T,
-}
-
-impl<T> UniformData<T> {
-    fn new(device: &VulkanDevice) -> VulkanResult<Self> {
-        let size = std::mem::size_of::<T>() as _;
-        let buffer = device.allocate_buffer(
-            size,
-            vk::BufferUsageFlags::UNIFORM_BUFFER,
-            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-        )?;
-        let ub_mapped = unsafe { device.map_memory(buffer.memory, 0, size, Default::default())? as _ };
-        Ok(Self { buffer, ub_mapped })
-    }
-
-    fn write_uniforms(&mut self, ubo: T) {
-        unsafe {
-            std::ptr::write_volatile(self.ub_mapped, ubo);
-        }
-    }
-
-    const fn buffer_size(&self) -> usize {
-        std::mem::size_of::<T>()
-    }
-}
-
-impl<T> Cleanup<ash::Device> for UniformData<T> {
-    unsafe fn cleanup(&mut self, device: &ash::Device) {
-        device.unmap_memory(self.buffer.memory);
-        self.ub_mapped = std::ptr::null_mut();
-        self.buffer.cleanup(device);
     }
 }
 

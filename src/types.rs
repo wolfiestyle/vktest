@@ -9,6 +9,8 @@ pub enum VkError {
     LoadingFailed(ash::LoadingError),
     Vulkan(vk::Result),
     VulkanMsg(&'static str, vk::Result),
+    MemoryAlloc(ga::AllocationError),
+    MemoryMap(ga::MapError),
     Io(std::io::Error),
     Image(&'static str),
     EngineError(&'static str),
@@ -21,6 +23,8 @@ impl std::fmt::Display for VkError {
             Self::LoadingFailed(err) => write!(f, "Failed to load Vulkan library: {err}"),
             Self::Vulkan(err) => write!(f, "Vulkan error: {err}"),
             Self::VulkanMsg(msg, err) => write!(f, "{msg}: {err}"),
+            Self::MemoryAlloc(err) => write!(f, "Memory allocation error: {err}"),
+            Self::MemoryMap(err) => write!(f, "Failed to map memory: {err}"),
             Self::Io(err) => write!(f, "IO error: {err}"),
             Self::Image(msg) => write!(f, "{msg}"),
             Self::EngineError(desc) => write!(f, "{desc}"),
@@ -34,6 +38,8 @@ impl std::error::Error for VkError {
         match self {
             Self::LoadingFailed(err) => Some(err),
             Self::Vulkan(err) | Self::VulkanMsg(_, err) => Some(err),
+            Self::MemoryAlloc(err) => Some(err),
+            Self::MemoryMap(err) => Some(err),
             Self::Io(err) => Some(err),
             _ => None,
         }
@@ -49,6 +55,18 @@ impl From<ash::LoadingError> for VkError {
 impl From<vk::Result> for VkError {
     fn from(err: vk::Result) -> Self {
         Self::Vulkan(err)
+    }
+}
+
+impl From<ga::AllocationError> for VkError {
+    fn from(err: ga::AllocationError) -> Self {
+        Self::MemoryAlloc(err)
+    }
+}
+
+impl From<ga::MapError> for VkError {
+    fn from(err: ga::MapError) -> Self {
+        Self::MemoryMap(err)
     }
 }
 
@@ -81,11 +99,11 @@ impl<T> ErrorDescription<&'static str> for Option<(stb::image::Info, stb::image:
 }
 
 pub trait Cleanup<C> {
-    unsafe fn cleanup(&mut self, context: &C);
+    unsafe fn cleanup(&mut self, context: &mut C);
 }
 
 impl<C, T: Cleanup<C>> Cleanup<C> for [T] {
-    unsafe fn cleanup(&mut self, context: &C) {
+    unsafe fn cleanup(&mut self, context: &mut C) {
         for item in self {
             item.cleanup(context);
         }

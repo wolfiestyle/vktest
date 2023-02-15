@@ -16,3 +16,5 @@ cgmath = "0.18.0"
 stb = { version = "0.3.2", default_features = false, features = ["stb_image"] }
 obj-rs = "0.7.0"
 structopt = "0.3.26"
+ga = { package = "gpu-alloc", version = "0.5.3" }
+gpu-alloc-ash = "0.5.0"
