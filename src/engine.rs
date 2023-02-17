@@ -4,7 +4,7 @@ use ash::vk;
 use cgmath::{Deg, Matrix4, Point3, Vector3};
 use cstr::cstr;
 use inline_spirv::include_spirv;
-use std::array;
+use std::slice;
 use std::time::Instant;
 
 const SWAPCHAIN_IMAGE_COUNT: u32 = 3;
@@ -191,9 +191,8 @@ impl VulkanEngine {
 
         let subpass = vk::SubpassDescription::builder()
             .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
-            .color_attachments(array::from_ref(&color_attach_ref))
-            .depth_stencil_attachment(&depth_attach_ref)
-            .build();
+            .color_attachments(slice::from_ref(&color_attach_ref))
+            .depth_stencil_attachment(&depth_attach_ref);
 
         let dependency = vk::SubpassDependency::builder()
             .src_subpass(vk::SUBPASS_EXTERNAL)
@@ -201,13 +200,12 @@ impl VulkanEngine {
             .src_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT | vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS)
             .src_access_mask(vk::AccessFlags::empty())
             .dst_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT | vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS)
-            .dst_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE)
-            .build();
+            .dst_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE);
 
         let render_pass_ci = vk::RenderPassCreateInfo::builder()
             .attachments(&attachments)
-            .subpasses(array::from_ref(&subpass))
-            .dependencies(array::from_ref(&dependency));
+            .subpasses(slice::from_ref(&subpass))
+            .dependencies(slice::from_ref(&dependency));
 
         unsafe {
             device
@@ -289,14 +287,14 @@ impl VulkanEngine {
                     .dst_binding(0)
                     .dst_array_element(0)
                     .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                    .buffer_info(array::from_ref(&buffer_info))
+                    .buffer_info(slice::from_ref(&buffer_info))
                     .build(),
                 vk::WriteDescriptorSet::builder()
                     .dst_set(desc_set)
                     .dst_binding(1)
                     .dst_array_element(0)
                     .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                    .image_info(array::from_ref(&image_info))
+                    .image_info(slice::from_ref(&image_info))
                     .build(),
             ];
             unsafe {
@@ -308,7 +306,7 @@ impl VulkanEngine {
     }
 
     fn create_pipeline_layout(device: &VulkanDevice, desc_set_layout: vk::DescriptorSetLayout) -> VulkanResult<vk::PipelineLayout> {
-        let pipeline_layout_ci = vk::PipelineLayoutCreateInfo::builder().set_layouts(array::from_ref(&desc_set_layout));
+        let pipeline_layout_ci = vk::PipelineLayoutCreateInfo::builder().set_layouts(slice::from_ref(&desc_set_layout));
 
         unsafe {
             device
@@ -373,13 +371,12 @@ impl VulkanEngine {
             .color_blend_op(vk::BlendOp::ADD)
             .src_color_blend_factor(vk::BlendFactor::ONE)
             .dst_color_blend_factor(vk::BlendFactor::ZERO)
-            .alpha_blend_op(vk::BlendOp::ADD)
-            .build();
+            .alpha_blend_op(vk::BlendOp::ADD);
 
         let color_blend_ci = vk::PipelineColorBlendStateCreateInfo::builder()
             .logic_op_enable(false)
             .logic_op(vk::LogicOp::COPY)
-            .attachments(array::from_ref(&color_attach));
+            .attachments(slice::from_ref(&color_attach));
 
         let depth_stencil_ci = vk::PipelineDepthStencilStateCreateInfo::builder()
             .depth_test_enable(true)
@@ -400,12 +397,11 @@ impl VulkanEngine {
             .depth_stencil_state(&depth_stencil_ci)
             .dynamic_state(&dynamic_state_ci)
             .layout(pipeline_layout)
-            .render_pass(render_pass)
-            .build();
+            .render_pass(render_pass);
 
         let pipeline = unsafe {
             device
-                .create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_ci], None)
+                .create_graphics_pipelines(vk::PipelineCache::null(), slice::from_ref(&pipeline_ci), None)
                 .map_err(|(_, err)| VkError::VulkanMsg("Error creating pipeline", err))?
         };
 
@@ -449,7 +445,7 @@ impl VulkanEngine {
             self.device
                 .cmd_bind_pipeline(cmd_buffer, vk::PipelineBindPoint::GRAPHICS, self.pipeline);
             self.device
-                .cmd_bind_vertex_buffers(cmd_buffer, 0, array::from_ref(&*self.vertex_buffer), &[0]);
+                .cmd_bind_vertex_buffers(cmd_buffer, 0, slice::from_ref(&*self.vertex_buffer), &[0]);
             self.device
                 .cmd_bind_index_buffer(cmd_buffer, *self.index_buffer, 0, vk::IndexType::UINT32);
             self.device.cmd_bind_descriptor_sets(
@@ -461,9 +457,9 @@ impl VulkanEngine {
                 &[],
             );
             self.device
-                .cmd_set_viewport(cmd_buffer, 0, array::from_ref(&self.swapchain.viewport()));
+                .cmd_set_viewport(cmd_buffer, 0, slice::from_ref(&self.swapchain.viewport()));
             self.device
-                .cmd_set_scissor(cmd_buffer, 0, array::from_ref(&self.swapchain.extent_rect()));
+                .cmd_set_scissor(cmd_buffer, 0, slice::from_ref(&self.swapchain.extent_rect()));
             self.device.cmd_draw_indexed(cmd_buffer, self.index_count, 1, 0, 0, 0);
             self.device.cmd_end_render_pass(cmd_buffer);
             self.device.debug(|d| d.cmd_end_label(cmd_buffer));
@@ -484,7 +480,7 @@ impl VulkanEngine {
 
         let image_idx = unsafe {
             self.device
-                .wait_for_fences(array::from_ref(&in_flight_fen), true, u64::MAX)
+                .wait_for_fences(slice::from_ref(&in_flight_fen), true, u64::MAX)
                 .describe_err("Failed waiting for fence")?;
             self.frame_time = Instant::now();
             let acquire_res = self
@@ -506,7 +502,7 @@ impl VulkanEngine {
 
         unsafe {
             self.device
-                .reset_fences(array::from_ref(&in_flight_fen))
+                .reset_fences(slice::from_ref(&in_flight_fen))
                 .describe_err("Failed resetting fences")?;
             self.device
                 .reset_command_buffer(command_buffer, Default::default())
@@ -516,22 +512,21 @@ impl VulkanEngine {
         self.record_command_buffer(command_buffer, image_idx)?;
 
         let submit_info = vk::SubmitInfo::builder()
-            .wait_semaphores(array::from_ref(&image_avail_sem))
+            .wait_semaphores(slice::from_ref(&image_avail_sem))
             .wait_dst_stage_mask(&[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT])
-            .command_buffers(array::from_ref(&command_buffer))
-            .signal_semaphores(array::from_ref(&render_finish_sem))
-            .build();
+            .command_buffers(slice::from_ref(&command_buffer))
+            .signal_semaphores(slice::from_ref(&render_finish_sem));
 
         unsafe {
             self.device
-                .queue_submit(self.device.graphics_queue, array::from_ref(&submit_info), in_flight_fen)
+                .queue_submit(self.device.graphics_queue, slice::from_ref(&submit_info), in_flight_fen)
                 .describe_err("Failed to submit draw command buffer")?
         }
 
         let present_info = vk::PresentInfoKHR::builder()
-            .wait_semaphores(array::from_ref(&render_finish_sem))
-            .swapchains(array::from_ref(&*self.swapchain))
-            .image_indices(array::from_ref(&image_idx));
+            .wait_semaphores(slice::from_ref(&render_finish_sem))
+            .swapchains(slice::from_ref(&*self.swapchain))
+            .image_indices(slice::from_ref(&image_idx));
 
         let suboptimal = unsafe {
             self.device

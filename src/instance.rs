@@ -88,13 +88,11 @@ impl VulkanInstance {
         let flags = portability
             .map(|_| vk::InstanceCreateFlags::ENUMERATE_PORTABILITY_KHR)
             .unwrap_or_default();
-
-        let mut layer_names = Vec::with_capacity(1);
         if VALIDATION_ENABLED {
             extension_names.push(ext::DebugUtils::name().as_ptr());
-            layer_names.push(VALIDATION_LAYER.as_ptr());
-            eprintln!("Using instance layer {VALIDATION_LAYER:?}");
         }
+
+        let layer_names = [VALIDATION_LAYER.as_ptr()];
 
         let app_info = vk::ApplicationInfo::builder()
             .application_name(app_name)
@@ -107,10 +105,11 @@ impl VulkanInstance {
         let mut instance_ci = vk::InstanceCreateInfo::builder()
             .flags(flags)
             .application_info(&app_info)
-            .enabled_extension_names(&extension_names)
-            .enabled_layer_names(&layer_names);
+            .enabled_extension_names(&extension_names);
         if VALIDATION_ENABLED {
+            instance_ci = instance_ci.enabled_layer_names(&layer_names);
             instance_ci.p_next = &dbg_messenger_ci as *const _ as _;
+            eprintln!("Using instance layer {VALIDATION_LAYER:?}");
         }
 
         unsafe { entry.create_instance(&instance_ci, None).describe_err("Failed to create instance") }
@@ -197,9 +196,12 @@ impl VulkanInstance {
             }
         }
         if graphics_idx.is_none() || present_idx.is_none() {
-            eprintln!("Device {name:?} has incomplete queues");
+            eprintln!("Device '{name}' has incomplete queues (graphics: {graphics_idx:?}, present: {present_idx:?})",);
             return Err(VkError::UnsuitableDevice);
         }
+        let mut unique_families = vec![graphics_idx.unwrap(), present_idx.unwrap()];
+        unique_families.sort_unstable();
+        unique_families.dedup();
 
         // supported extensions
         let ext_list = unsafe {
@@ -211,7 +213,7 @@ impl VulkanInstance {
         //eprintln!("Supported device extensions: {extensions:#?}");
         let missing_ext = REQ_DEVICE_EXTENSIONS.into_iter().find(|&ext_name| !extensions.contains(ext_name));
         if let Some(ext_name) = missing_ext {
-            eprintln!("Device {name:?} has missing extension {ext_name:?}");
+            eprintln!("Device '{name}' has missing required extension {ext_name:?}");
             return Err(VkError::UnsuitableDevice);
         }
 
@@ -221,6 +223,7 @@ impl VulkanInstance {
             name,
             graphics_idx: graphics_idx.unwrap(),
             present_idx: present_idx.unwrap(),
+            unique_families,
             extensions,
         })
     }
@@ -255,9 +258,9 @@ impl VulkanInstance {
     pub fn create_logical_device(&self, dev_info: &DeviceInfo) -> VulkanResult<ash::Device> {
         let queue_prio = [1.0];
         let queues_ci: Vec<_> = dev_info
-            .unique_families()
-            .into_iter()
-            .map(|idx| {
+            .unique_families
+            .iter()
+            .map(|&idx| {
                 vk::DeviceQueueCreateInfo::builder()
                     .queue_family_index(idx)
                     .queue_priorities(&queue_prio)
@@ -321,17 +324,8 @@ pub struct DeviceInfo {
     pub dev_type: DeviceType,
     pub graphics_idx: u32,
     pub present_idx: u32,
+    pub unique_families: Vec<u32>,
     pub extensions: HashSet<CString>,
-}
-
-impl DeviceInfo {
-    pub fn unique_families(&self) -> Vec<u32> {
-        if self.graphics_idx == self.present_idx {
-            vec![self.graphics_idx]
-        } else {
-            vec![self.graphics_idx, self.present_idx]
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -342,7 +336,7 @@ pub struct SurfaceInfo {
 }
 
 impl SurfaceInfo {
-    pub fn surface_format(&self) -> &vk::SurfaceFormatKHR {
+    pub fn find_surface_format(&self) -> &vk::SurfaceFormatKHR {
         self.formats
             .iter()
             .find(|&fmt| fmt.format == vk::Format::B8G8R8A8_SRGB && fmt.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR)
@@ -350,11 +344,11 @@ impl SurfaceInfo {
             .expect("Empty surface formats")
     }
 
-    pub fn present_mode(&self) -> vk::PresentModeKHR {
+    pub fn find_present_mode(&self, wanted: vk::PresentModeKHR) -> vk::PresentModeKHR {
         self.present_modes
             .iter()
             .cloned()
-            .find(|&mode| mode == vk::PresentModeKHR::IMMEDIATE)
+            .find(|&mode| mode == wanted)
             .unwrap_or(vk::PresentModeKHR::FIFO)
     }
 

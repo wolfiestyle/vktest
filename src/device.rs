@@ -5,8 +5,8 @@ use ash::extensions::khr;
 use ash::vk;
 use gpu_alloc_ash::AshMemoryDevice;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
-use std::array;
 use std::mem::ManuallyDrop;
+use std::slice;
 use std::sync::{Arc, Mutex};
 
 pub struct VulkanDevice {
@@ -58,13 +58,12 @@ impl VulkanDevice {
     pub fn create_swapchain(
         &self, win_size: WinSize, image_count: u32, old_swapchain: Option<vk::SwapchainKHR>,
     ) -> VulkanResult<SwapchainInfo> {
-        let surface_format = self.surface_info.surface_format();
-        let present_mode = self.surface_info.present_mode();
+        let surface_format = self.surface_info.find_surface_format();
+        let present_mode = self.surface_info.find_present_mode(vk::PresentModeKHR::IMMEDIATE);
         eprintln!("window size: {} x {}", win_size.width, win_size.height);
         let extent = self.surface_info.calc_extent(win_size.width, win_size.height);
         let img_count = self.surface_info.calc_image_count(image_count);
-        let que_families = self.dev_info.unique_families();
-        let img_sharing_mode = if que_families.len() > 1 {
+        let img_sharing_mode = if self.dev_info.unique_families.len() > 1 {
             vk::SharingMode::CONCURRENT
         } else {
             vk::SharingMode::EXCLUSIVE
@@ -79,7 +78,7 @@ impl VulkanDevice {
             .image_array_layers(1)
             .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
             .image_sharing_mode(img_sharing_mode)
-            .queue_family_indices(&que_families)
+            .queue_family_indices(&self.dev_info.unique_families)
             .pre_transform(self.surface_info.capabilities.current_transform)
             .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
             .present_mode(present_mode)
@@ -183,16 +182,16 @@ impl VulkanDevice {
     }
 
     pub fn end_one_time_commands(&self, cmd_buffer: vk::CommandBuffer, queue: vk::Queue) -> VulkanResult<()> {
-        let submit_info = vk::SubmitInfo::builder().command_buffers(array::from_ref(&cmd_buffer)).build();
+        let submit_info = vk::SubmitInfo::builder().command_buffers(slice::from_ref(&cmd_buffer));
         unsafe {
             self.device
                 .end_command_buffer(cmd_buffer)
                 .describe_err("Failed to end recording command buffer")?;
             self.device
-                .queue_submit(queue, array::from_ref(&submit_info), vk::Fence::null())
+                .queue_submit(queue, slice::from_ref(&submit_info), vk::Fence::null())
                 .describe_err("Failed to submit queue")?;
             self.device.queue_wait_idle(queue).describe_err("Failed to wait queue idle")?;
-            self.device.free_command_buffers(self.graphics_pool, array::from_ref(&cmd_buffer));
+            self.device.free_command_buffers(self.graphics_pool, slice::from_ref(&cmd_buffer));
         }
         Ok(())
     }
@@ -376,11 +375,17 @@ impl VulkanDevice {
                 layer_count: 1,
             })
             .src_access_mask(src_access)
-            .dst_access_mask(dst_access)
-            .build();
+            .dst_access_mask(dst_access);
         unsafe {
-            self.device
-                .cmd_pipeline_barrier(cmd_buffer, src_stage, dst_stage, Default::default(), &[], &[], &[barrier]);
+            self.device.cmd_pipeline_barrier(
+                cmd_buffer,
+                src_stage,
+                dst_stage,
+                Default::default(),
+                &[],
+                &[],
+                slice::from_ref(&barrier),
+            );
         }
         self.end_one_time_commands(cmd_buffer, self.graphics_queue)?;
         Ok(())
@@ -399,11 +404,15 @@ impl VulkanDevice {
                 layer_count: 1,
             })
             .image_offset(Default::default())
-            .image_extent(vk::Extent3D { width, height, depth: 1 })
-            .build();
+            .image_extent(vk::Extent3D { width, height, depth: 1 });
         unsafe {
-            self.device
-                .cmd_copy_buffer_to_image(cmd_buffer, buffer, image, vk::ImageLayout::TRANSFER_DST_OPTIMAL, &[region]);
+            self.device.cmd_copy_buffer_to_image(
+                cmd_buffer,
+                buffer,
+                image,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                slice::from_ref(&region),
+            );
         }
         self.end_one_time_commands(cmd_buffer, self.graphics_queue)
     }
