@@ -53,17 +53,16 @@ impl VulkanInstance {
             .ok_or(VkError::EngineError("Validation layers requested but not available"))
     }
 
-    fn check_portability_support(entry: &ash::Entry, names_ret: &mut Vec<*const c_char>) -> VulkanResult<bool> {
+    fn check_portability_support(entry: &ash::Entry) -> VulkanResult<Option<*const c_char>> {
         let ext_list = entry
             .enumerate_instance_extension_properties(None)
             .describe_err("Failed to enumerate instance extension properties")?;
-        let supported_exts: Vec<_> = ext_list.iter().map(|ext| vk_to_cstr(&ext.extension_name)).collect();
-        //eprintln!("Supported instance extensions: {supported_exts:#?}");
-        let ext_names = [vk::KhrPortabilityEnumerationFn::name(), khr::GetPhysicalDeviceProperties2::name()];
-        let supported = ext_names.into_iter().all(|ext| supported_exts.contains(&ext));
-        if supported {
-            names_ret.extend(ext_names.map(CStr::as_ptr));
-        }
+        //eprintln!("Supported instance extensions: {ext_list:#?}");
+        let ext_name = vk::KhrPortabilityEnumerationFn::name();
+        let supported = ext_list
+            .iter()
+            .any(|&ext| vk_to_cstr(&ext.extension_name) == ext_name)
+            .then_some(ext_name.as_ptr());
         Ok(supported)
     }
 
@@ -73,8 +72,10 @@ impl VulkanInstance {
         let mut extension_names = ash_window::enumerate_required_extensions(window.raw_display_handle())
             .describe_err("Unsupported display platform")?
             .to_vec();
-        let portability = Self::check_portability_support(entry, &mut extension_names)?
-            .then_some(vk::InstanceCreateFlags::ENUMERATE_PORTABILITY_KHR)
+        let portability = Self::check_portability_support(entry)?;
+        extension_names.extend(portability);
+        let flags = portability
+            .map(|_| vk::InstanceCreateFlags::ENUMERATE_PORTABILITY_KHR)
             .unwrap_or_default();
 
         let mut layer_names = Vec::with_capacity(1);
@@ -89,11 +90,11 @@ impl VulkanInstance {
             .application_version(vk::make_api_version(0, 1, 0, 0))
             .engine_name(engine_name)
             .engine_version(vk::make_api_version(0, 1, 0, 0))
-            .api_version(vk::API_VERSION_1_0);
+            .api_version(vk::API_VERSION_1_1);
 
         let dbg_messenger_ci = DebugUtils::create_debug_messenger_ci();
         let mut instance_ci = vk::InstanceCreateInfo::builder()
-            .flags(portability)
+            .flags(flags)
             .application_info(&app_info)
             .enabled_extension_names(&extension_names)
             .enabled_layer_names(&layer_names);
