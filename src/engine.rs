@@ -59,7 +59,7 @@ impl VulkanEngine {
             .map(|cmd_buf| FrameState::new(&vk, cmd_buf))
             .collect::<Result<Vec<_>, _>>()?;
 
-        let texture = vk.create_texture(img_width, img_height, img_data)?;
+        let texture = vk.create_image_from_data(img_width, img_height, img_data)?;
         let tex_imgview = vk.create_image_view(*texture, vk::Format::R8G8B8A8_SRGB, vk::ImageAspectFlags::COLOR)?;
         let tex_sampler = vk.create_texture_sampler(vk::SamplerAddressMode::REPEAT)?;
 

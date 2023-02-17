@@ -415,7 +415,7 @@ impl VulkanDevice {
         self.end_one_time_commands(cmd_buffer, self.graphics_queue)
     }
 
-    pub fn create_texture(&self, width: u32, height: u32, data: &[u8]) -> VulkanResult<VkImage> {
+    pub fn create_image_from_data(&self, width: u32, height: u32, data: &[u8]) -> VulkanResult<VkImage> {
         let size = width as vk::DeviceSize * height as vk::DeviceSize * 4;
         if data.len() != size as usize {
             return Err(VkError::EngineError("Image size and data length doesn't match"));
