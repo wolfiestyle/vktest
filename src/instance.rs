@@ -1,3 +1,4 @@
+use crate::debug::DebugUtils;
 use crate::types::*;
 use ash::extensions::{ext, khr};
 use ash::vk;
@@ -5,56 +6,51 @@ use cstr::cstr;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use std::collections::HashSet;
 use std::convert::identity;
-use std::ffi::{c_char, c_void, CStr, CString};
+use std::ffi::{c_char, CStr, CString};
 use std::sync::Arc;
 
+const VALIDATION_ENABLED: bool = cfg!(debug_assertions);
 const VALIDATION_LAYER: &CStr = cstr!("VK_LAYER_KHRONOS_validation");
 const REQ_DEVICE_EXTENSIONS: [&CStr; 1] = [khr::Swapchain::name()];
 
 pub struct VulkanInstance {
     entry: ash::Entry,
     instance: ash::Instance,
-    pub debug_utils: Option<ext::DebugUtils>,
-    debug_messenger: vk::DebugUtilsMessengerEXT,
     pub surface_utils: khr::Surface,
+    #[cfg(debug_assertions)]
+    debug_utils: DebugUtils,
 }
 
 impl VulkanInstance {
     pub fn new<W: HasRawDisplayHandle>(window: &W, app_name: &str) -> VulkanResult<Arc<Self>> {
         let entry = unsafe { ash::Entry::load()? };
-        let validation_enabled = cfg!(debug_assertions) && Self::check_validation_support(&entry)?;
+        if VALIDATION_ENABLED {
+            Self::check_validation_support(&entry)?;
+        }
         let app_name = CString::new(app_name).unwrap();
         let engine_name = CString::new(env!("CARGO_PKG_NAME")).unwrap();
-        let instance = Self::create_instance(&entry, window, &app_name, &engine_name, validation_enabled)?;
-        let (debug_messenger, debug_utils) = if validation_enabled {
-            let debug_utils = ext::DebugUtils::new(&entry, &instance);
-            (Self::setup_debug_utils(&debug_utils)?, Some(debug_utils))
-        } else {
-            Default::default()
-        };
+        let instance = Self::create_instance(&entry, window, &app_name, &engine_name)?;
         let surface_utils = khr::Surface::new(&entry, &instance);
 
         Ok(Arc::new(Self {
+            #[cfg(debug_assertions)]
+            debug_utils: DebugUtils::new(&entry, &instance),
             entry,
             instance,
-            debug_utils,
-            debug_messenger,
             surface_utils,
         }))
     }
 
-    fn check_validation_support(entry: &ash::Entry) -> VulkanResult<bool> {
+    fn check_validation_support(entry: &ash::Entry) -> VulkanResult<()> {
         let supported_layers = entry
             .enumerate_instance_layer_properties()
             .describe_err("Failed to enumerate instance layer properties")?;
         //eprintln!("Supported instance layers: {supported_layers:#?}");
-        let validation_supp = supported_layers
+        supported_layers
             .iter()
-            .any(|layer| vk_to_cstr(&layer.layer_name) == VALIDATION_LAYER);
-        if !validation_supp {
-            eprintln!("Validation layers requested but not available");
-        }
-        Ok(validation_supp)
+            .any(|layer| vk_to_cstr(&layer.layer_name) == VALIDATION_LAYER)
+            .then_some(())
+            .ok_or(VkError::EngineError("Validation layers requested but not available"))
     }
 
     fn check_portability_support(entry: &ash::Entry, names_ret: &mut Vec<*const c_char>) -> VulkanResult<bool> {
@@ -72,7 +68,7 @@ impl VulkanInstance {
     }
 
     fn create_instance<W: HasRawDisplayHandle>(
-        entry: &ash::Entry, window: &W, app_name: &CStr, engine_name: &CStr, validation_enabled: bool,
+        entry: &ash::Entry, window: &W, app_name: &CStr, engine_name: &CStr,
     ) -> VulkanResult<ash::Instance> {
         let mut extension_names = ash_window::enumerate_required_extensions(window.raw_display_handle())
             .describe_err("Unsupported display platform")?
@@ -82,7 +78,7 @@ impl VulkanInstance {
             .unwrap_or_default();
 
         let mut layer_names = Vec::with_capacity(1);
-        if validation_enabled {
+        if VALIDATION_ENABLED {
             extension_names.push(ext::DebugUtils::name().as_ptr());
             layer_names.push(VALIDATION_LAYER.as_ptr());
             eprintln!("Using instance layer {VALIDATION_LAYER:?}");
@@ -95,27 +91,17 @@ impl VulkanInstance {
             .engine_version(vk::make_api_version(0, 1, 0, 0))
             .api_version(vk::API_VERSION_1_0);
 
-        let dbg_messenger_ci = create_debug_messenger_ci();
+        let dbg_messenger_ci = DebugUtils::create_debug_messenger_ci();
         let mut instance_ci = vk::InstanceCreateInfo::builder()
             .flags(portability)
             .application_info(&app_info)
             .enabled_extension_names(&extension_names)
             .enabled_layer_names(&layer_names);
-        if validation_enabled {
+        if VALIDATION_ENABLED {
             instance_ci.p_next = &dbg_messenger_ci as *const _ as _;
         }
 
         unsafe { entry.create_instance(&instance_ci, None).describe_err("Failed to create instance") }
-    }
-
-    fn setup_debug_utils(debug_utils: &ext::DebugUtils) -> VulkanResult<vk::DebugUtilsMessengerEXT> {
-        let dbg_messenger_ci = create_debug_messenger_ci();
-        let messenger = unsafe {
-            debug_utils
-                .create_debug_utils_messenger(&dbg_messenger_ci, None)
-                .describe_err("Error creating debug utils callback")?
-        };
-        Ok(messenger)
     }
 
     pub fn create_surface<W>(&self, window: &W) -> VulkanResult<vk::SurfaceKHR>
@@ -276,14 +262,24 @@ impl VulkanInstance {
                 .describe_err("Failed to create logical device")
         }
     }
+
+    #[cfg(debug_assertions)]
+    pub fn debug<F: FnOnce(&DebugUtils)>(&self, debug_f: F) {
+        debug_f(&self.debug_utils)
+    }
+
+    #[cfg(not(debug_assertions))]
+    pub fn debug<F: FnOnce(&DebugUtils)>(&self, _debug_f: F) {}
 }
 
 impl Drop for VulkanInstance {
     fn drop(&mut self) {
         unsafe {
-            if let Some(debug_utils) = &self.debug_utils {
-                debug_utils.destroy_debug_utils_messenger(self.debug_messenger, None);
+            #[cfg(debug_assertions)]
+            {
+                self.debug_utils.cleanup(&());
             }
+
             self.instance.destroy_instance(None);
         }
     }
@@ -429,30 +425,4 @@ impl From<DeviceType> for DeviceSelection<'_> {
 fn vk_to_cstr(raw: &[c_char]) -> &CStr {
     //TODO: replace with `CStr::from_bytes_until_nul` when it's stable
     unsafe { CStr::from_ptr(raw.as_ptr()) }
-}
-
-extern "system" fn vulkan_debug_utils_callback(
-    msg_severity: vk::DebugUtilsMessageSeverityFlagsEXT, msg_type: vk::DebugUtilsMessageTypeFlagsEXT,
-    cb_data: *const vk::DebugUtilsMessengerCallbackDataEXT, _user_data: *mut c_void,
-) -> vk::Bool32 {
-    let message = unsafe { CStr::from_ptr((*cb_data).p_message) }.to_string_lossy();
-    eprintln!("Debug: [{msg_severity:?}][{msg_type:?}] {message}");
-    vk::FALSE
-}
-
-fn create_debug_messenger_ci() -> vk::DebugUtilsMessengerCreateInfoEXT {
-    vk::DebugUtilsMessengerCreateInfoEXT::builder()
-        .message_severity(
-            vk::DebugUtilsMessageSeverityFlagsEXT::ERROR
-            //| vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE
-            //| vk::DebugUtilsMessageSeverityFlagsEXT::INFO
-            | vk::DebugUtilsMessageSeverityFlagsEXT::WARNING,
-        )
-        .message_type(
-            vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
-                | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
-                | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION,
-        )
-        .pfn_user_callback(Some(vulkan_debug_utils_callback))
-        .build()
 }

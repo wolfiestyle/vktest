@@ -1,3 +1,4 @@
+mod debug;
 mod device;
 mod engine;
 mod instance;

@@ -443,6 +443,8 @@ impl VulkanEngine {
 
         unsafe {
             self.device
+                .debug(|d| d.cmd_begin_label(cmd_buffer, "3D object", [0.2, 0.4, 0.6, 1.0]));
+            self.device
                 .cmd_begin_render_pass(cmd_buffer, &renderpass_info, vk::SubpassContents::INLINE);
             self.device
                 .cmd_bind_pipeline(cmd_buffer, vk::PipelineBindPoint::GRAPHICS, self.pipeline);
@@ -464,6 +466,7 @@ impl VulkanEngine {
                 .cmd_set_scissor(cmd_buffer, 0, array::from_ref(&self.swapchain.extent_rect()));
             self.device.cmd_draw_indexed(cmd_buffer, self.index_count, 1, 0, 0, 0);
             self.device.cmd_end_render_pass(cmd_buffer);
+            self.device.debug(|d| d.cmd_end_label(cmd_buffer));
             self.device
                 .end_command_buffer(cmd_buffer)
                 .describe_err("Failed to end recording command buffer")?;

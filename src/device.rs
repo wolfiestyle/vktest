@@ -1,3 +1,4 @@
+use crate::debug::DebugUtils;
 use crate::instance::{DeviceInfo, DeviceSelection, SurfaceInfo, VulkanInstance};
 use crate::types::*;
 use ash::extensions::khr;
@@ -287,6 +288,7 @@ impl VulkanDevice {
         self.copy_buffer(*dst_buffer, *src_buffer, size)?;
 
         unsafe { src_buffer.cleanup(self) };
+        self.debug(|d| d.set_object_name(&self.device, &dst_buffer.handle, "Data buffer"));
 
         Ok(dst_buffer)
     }
@@ -295,6 +297,7 @@ impl VulkanDevice {
         let size = std::mem::size_of::<T>();
         let mut buffer = self.allocate_buffer(size as _, vk::BufferUsageFlags::UNIFORM_BUFFER, ga::UsageFlags::UPLOAD)?;
         let ub_mapped = unsafe { buffer.memory.map(AshMemoryDevice::wrap(self), 0, size)?.cast() };
+        self.debug(|d| d.set_object_name(&self.device, &buffer.handle, "Uniform buffer"));
         Ok(UniformBuffer {
             buffer,
             ub_mapped: Some(ub_mapped),
@@ -434,6 +437,7 @@ impl VulkanDevice {
         )?;
 
         unsafe { src_buffer.cleanup(self) };
+        self.debug(|d| d.set_object_name(&self.device, &tex_image.handle, "Texture image"));
 
         Ok(tex_image)
     }
@@ -504,6 +508,11 @@ impl VulkanDevice {
             vk::Format::D16_UNORM_S8_UINT,
         ];
         self.find_supported_format(&formats, vk::ImageTiling::OPTIMAL, vk::FormatFeatureFlags::DEPTH_STENCIL_ATTACHMENT)
+    }
+
+    #[inline]
+    pub fn debug<F: FnOnce(&DebugUtils)>(&self, debug_f: F) {
+        self.instance.debug(debug_f)
     }
 }
 

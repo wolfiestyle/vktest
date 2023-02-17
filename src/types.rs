@@ -91,6 +91,14 @@ impl<C, T: Cleanup<C>> Cleanup<C> for [T] {
     }
 }
 
+impl<C, T: Cleanup<C>> Cleanup<C> for Option<T> {
+    unsafe fn cleanup(&mut self, context: &C) {
+        if let Some(item) = self {
+            item.cleanup(context);
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WinSize {
     pub width: u32,
@@ -208,3 +216,41 @@ trait LensFormat {
 }
 
 impl<T> LensFormat for T {}
+
+pub trait ObjectType {
+    const VK_OBJECT_TYPE: vk::ObjectType;
+}
+
+macro_rules! impl_object_type {
+    ($type:ty, $val:expr) => {
+        impl ObjectType for $type {
+            const VK_OBJECT_TYPE: vk::ObjectType = $val;
+        }
+    };
+}
+
+impl_object_type!(vk::Instance, vk::ObjectType::INSTANCE);
+impl_object_type!(vk::PhysicalDevice, vk::ObjectType::PHYSICAL_DEVICE);
+impl_object_type!(vk::Device, vk::ObjectType::DEVICE);
+impl_object_type!(vk::Queue, vk::ObjectType::QUEUE);
+impl_object_type!(vk::Semaphore, vk::ObjectType::SEMAPHORE);
+impl_object_type!(vk::CommandBuffer, vk::ObjectType::COMMAND_BUFFER);
+impl_object_type!(vk::Fence, vk::ObjectType::FENCE);
+impl_object_type!(vk::DeviceMemory, vk::ObjectType::DEVICE_MEMORY);
+impl_object_type!(vk::Buffer, vk::ObjectType::BUFFER);
+impl_object_type!(vk::Image, vk::ObjectType::IMAGE);
+impl_object_type!(vk::Event, vk::ObjectType::EVENT);
+impl_object_type!(vk::QueryPool, vk::ObjectType::QUERY_POOL);
+impl_object_type!(vk::BufferView, vk::ObjectType::BUFFER_VIEW);
+impl_object_type!(vk::ImageView, vk::ObjectType::IMAGE_VIEW);
+impl_object_type!(vk::ShaderModule, vk::ObjectType::SHADER_MODULE);
+impl_object_type!(vk::PipelineCache, vk::ObjectType::PIPELINE_CACHE);
+impl_object_type!(vk::PipelineLayout, vk::ObjectType::PIPELINE_LAYOUT);
+impl_object_type!(vk::RenderPass, vk::ObjectType::RENDER_PASS);
+impl_object_type!(vk::Pipeline, vk::ObjectType::PIPELINE);
+impl_object_type!(vk::DescriptorSetLayout, vk::ObjectType::DESCRIPTOR_SET_LAYOUT);
+impl_object_type!(vk::Sampler, vk::ObjectType::SAMPLER);
+impl_object_type!(vk::DescriptorPool, vk::ObjectType::DESCRIPTOR_POOL);
+impl_object_type!(vk::DescriptorSet, vk::ObjectType::DESCRIPTOR_SET);
+impl_object_type!(vk::Framebuffer, vk::ObjectType::FRAMEBUFFER);
+impl_object_type!(vk::CommandPool, vk::ObjectType::COMMAND_POOL);
