@@ -12,6 +12,7 @@ use std::sync::Arc;
 const VALIDATION_ENABLED: bool = cfg!(debug_assertions);
 const VALIDATION_LAYER: &CStr = cstr!("VK_LAYER_KHRONOS_validation");
 const REQ_DEVICE_EXTENSIONS: [&CStr; 1] = [khr::Swapchain::name()];
+const VULKAN_VERSION: u32 = vk::API_VERSION_1_1;
 
 pub struct VulkanInstance {
     entry: ash::Entry,
@@ -69,6 +70,16 @@ impl VulkanInstance {
     fn create_instance<W: HasRawDisplayHandle>(
         entry: &ash::Entry, window: &W, app_name: &CStr, engine_name: &CStr,
     ) -> VulkanResult<ash::Instance> {
+        let version = entry.try_enumerate_instance_version()?.unwrap_or(vk::API_VERSION_1_0);
+        if version < VULKAN_VERSION {
+            eprintln!(
+                "Instance supported Vulkan version {} is lower than required version {}",
+                VkVersion(version),
+                VkVersion(VULKAN_VERSION)
+            );
+            return Err(vk::Result::ERROR_INCOMPATIBLE_DRIVER.into());
+        }
+
         let mut extension_names = ash_window::enumerate_required_extensions(window.raw_display_handle())
             .describe_err("Unsupported display platform")?
             .to_vec();
@@ -90,7 +101,7 @@ impl VulkanInstance {
             .application_version(vk::make_api_version(0, 1, 0, 0))
             .engine_name(engine_name)
             .engine_version(vk::make_api_version(0, 1, 0, 0))
-            .api_version(vk::API_VERSION_1_1);
+            .api_version(VULKAN_VERSION);
 
         let dbg_messenger_ci = DebugUtils::create_debug_messenger_ci();
         let mut instance_ci = vk::InstanceCreateInfo::builder()
@@ -153,6 +164,14 @@ impl VulkanInstance {
         //let features = unsafe { self.instance.get_physical_device_features(phys_dev) };  //TODO: get limits and stuff
         let dev_type = properties.device_type.into();
         let name = vk_to_cstr(&properties.device_name).to_str().unwrap_or("unknown").to_owned();
+        if properties.api_version < VULKAN_VERSION {
+            eprintln!(
+                "Device '{name}' supported Vulkan version {} is lower than required version {}",
+                VkVersion(properties.api_version),
+                VkVersion(VULKAN_VERSION)
+            );
+            return Err(VkError::UnsuitableDevice);
+        }
 
         // queue families
         let queue_families = unsafe { self.instance.get_physical_device_queue_family_properties(phys_dev) };
@@ -426,4 +445,19 @@ impl From<DeviceType> for DeviceSelection<'_> {
 fn vk_to_cstr(raw: &[c_char]) -> &CStr {
     //TODO: replace with `CStr::from_bytes_until_nul` when it's stable
     unsafe { CStr::from_ptr(raw.as_ptr()) }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct VkVersion(u32);
+
+impl std::fmt::Display for VkVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}.{}.{}",
+            vk::api_version_major(self.0),
+            vk::api_version_minor(self.0),
+            vk::api_version_patch(self.0)
+        )
+    }
 }
