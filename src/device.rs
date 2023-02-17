@@ -287,7 +287,6 @@ impl VulkanDevice {
         self.copy_buffer(*dst_buffer, *src_buffer, size)?;
 
         unsafe { src_buffer.cleanup(self) };
-        self.debug(|d| d.set_object_name(&self.device, &dst_buffer.handle, "Data buffer"));
 
         Ok(dst_buffer)
     }
@@ -296,7 +295,6 @@ impl VulkanDevice {
         let size = std::mem::size_of::<T>();
         let mut buffer = self.allocate_buffer(size as _, vk::BufferUsageFlags::UNIFORM_BUFFER, ga::UsageFlags::UPLOAD)?;
         let ub_mapped = unsafe { buffer.memory.map(AshMemoryDevice::wrap(self), 0, size)?.cast() };
-        self.debug(|d| d.set_object_name(&self.device, &buffer.handle, "Uniform buffer"));
         Ok(UniformBuffer {
             buffer,
             ub_mapped: Some(ub_mapped),

@@ -54,8 +54,9 @@ impl VulkanEngine {
         let framebuffers = vk.create_framebuffers(&swapchain, render_pass, &depth_imgviews)?;
 
         let command_buffers = vk.create_command_buffers(MAX_FRAMES_IN_FLIGHT as u32)?;
-        let frame_state = (0..MAX_FRAMES_IN_FLIGHT)
-            .map(|i| FrameState::new(&vk, command_buffers[i]))
+        let frame_state = command_buffers
+            .into_iter()
+            .map(|cmd_buf| FrameState::new(&vk, cmd_buf))
             .collect::<Result<Vec<_>, _>>()?;
 
         let texture = vk.create_texture(img_width, img_height, img_data)?;
@@ -133,7 +134,7 @@ impl VulkanEngine {
     fn create_depth_images(
         device: &VulkanDevice, extent: vk::Extent2D, depth_format: vk::Format, count: u32,
     ) -> VulkanResult<(Vec<VkImage>, Vec<vk::ImageView>)> {
-        let depth_image = (0..count)
+        let depth_images = (0..count)
             .map(|_| {
                 device.allocate_image(
                     extent.width,
@@ -145,11 +146,19 @@ impl VulkanEngine {
                 )
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let depth_imgview = depth_image
+        let depth_imgview = depth_images
             .iter()
             .map(|image| device.create_image_view(**image, depth_format, vk::ImageAspectFlags::DEPTH))
-            .collect::<Result<_, _>>()?;
-        Ok((depth_image, depth_imgview))
+            .collect::<Result<Vec<_>, _>>()?;
+        device.debug(|d| {
+            depth_images
+                .iter()
+                .for_each(|img| d.set_object_name(device, &img.handle, "Depth image"));
+            depth_imgview
+                .iter()
+                .for_each(|view| d.set_object_name(device, view, "Depth image view"));
+        });
+        Ok((depth_images, depth_imgview))
     }
 
     fn create_render_pass(device: &VulkanDevice, color_format: vk::Format, depth_format: vk::Format) -> VulkanResult<vk::RenderPass> {
@@ -616,11 +625,21 @@ struct FrameState {
 
 impl FrameState {
     fn new(device: &VulkanDevice, command_buffer: vk::CommandBuffer) -> VulkanResult<Self> {
+        let image_avail_sem = device.create_semaphore()?;
+        let render_finished_sem = device.create_semaphore()?;
+        let in_flight_fen = device.create_fence()?;
+        let uniforms = device.create_uniform_buffer()?;
+        device.debug(|d| {
+            d.set_object_name(device, &image_avail_sem, "Image available semaphore");
+            d.set_object_name(device, &render_finished_sem, "Render finished semaphore");
+            d.set_object_name(device, &in_flight_fen, "In-flight fence");
+            d.set_object_name(device, &*uniforms.buffer, "Uniform buffer");
+        });
         Ok(Self {
-            image_avail_sem: device.create_semaphore()?,
-            render_finished_sem: device.create_semaphore()?,
-            in_flight_fen: device.create_fence()?,
-            uniforms: device.create_uniform_buffer()?,
+            image_avail_sem,
+            render_finished_sem,
+            in_flight_fen,
+            uniforms,
             command_buffer,
         })
     }
