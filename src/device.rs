@@ -500,8 +500,11 @@ impl VulkanDevice {
             .cloned()
             .find(|&fmt| {
                 let props = unsafe { self.instance.get_physical_device_format_properties(self.dev_info.phys_dev, fmt) };
-                (tiling == vk::ImageTiling::LINEAR && props.linear_tiling_features.contains(features))
-                    || (tiling == vk::ImageTiling::OPTIMAL && props.optimal_tiling_features.contains(features))
+                match tiling {
+                    vk::ImageTiling::LINEAR => props.linear_tiling_features.contains(features),
+                    vk::ImageTiling::OPTIMAL => props.optimal_tiling_features.contains(features),
+                    _ => panic!("Unsupported tiling mode"),
+                }
             })
             .ok_or(VkError::EngineError("Failed to find supported image format"))
     }
