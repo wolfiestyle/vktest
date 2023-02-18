@@ -18,7 +18,7 @@ pub struct VulkanDevice {
     pub graphics_queue: vk::Queue,
     pub present_queue: vk::Queue,
     pub graphics_pool: vk::CommandPool,
-    pub swapchain_utils: khr::Swapchain,
+    pub swapchain_fn: khr::Swapchain,
     pub dynrender_fn: khr::DynamicRendering,
     allocator: Mutex<ga::GpuAllocator<vk::DeviceMemory>>,
 }
@@ -36,7 +36,7 @@ impl VulkanDevice {
         let graphics_queue = unsafe { device.get_device_queue(dev_info.graphics_idx, 0) };
         let present_queue = unsafe { device.get_device_queue(dev_info.present_idx, 0) };
         let graphics_pool = Self::create_command_pool(&device, dev_info.graphics_idx, vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)?;
-        let swapchain_utils = khr::Swapchain::new(&instance, &device);
+        let swapchain_fn = khr::Swapchain::new(&instance, &device);
         let dynrender_fn = khr::DynamicRendering::new(&instance, &device);
 
         let alloc_config = ga::Config::i_am_prototyping();
@@ -52,7 +52,7 @@ impl VulkanDevice {
             graphics_queue,
             present_queue,
             graphics_pool,
-            swapchain_utils,
+            swapchain_fn,
             dynrender_fn,
             allocator,
         })
@@ -89,13 +89,13 @@ impl VulkanDevice {
             .old_swapchain(old_swapchain.map(|sw| sw.handle).unwrap_or_default());
 
         let swapchain = unsafe {
-            self.swapchain_utils
+            self.swapchain_fn
                 .create_swapchain(&swapchain_ci, None)
                 .describe_err("Failed to create swapchain")?
         };
 
         let images = unsafe {
-            self.swapchain_utils
+            self.swapchain_fn
                 .get_swapchain_images(swapchain)
                 .describe_err("Failed to get swapchain images")?
         };
@@ -684,7 +684,7 @@ impl Cleanup<VulkanDevice> for SwapchainInfo {
             device.destroy_image_view(img, None);
         }
         self.depth_images.cleanup(device);
-        device.swapchain_utils.destroy_swapchain(self.handle, None);
+        device.swapchain_fn.destroy_swapchain(self.handle, None);
     }
 }
 

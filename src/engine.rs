@@ -413,7 +413,7 @@ impl VulkanEngine {
             self.frame_time = Instant::now();
             let acquire_res = self
                 .device
-                .swapchain_utils
+                .swapchain_fn
                 .acquire_next_image(*self.swapchain, u64::MAX, image_avail_sem, vk::Fence::null());
             match acquire_res {
                 Ok((idx, _)) => idx,
@@ -458,7 +458,7 @@ impl VulkanEngine {
 
         let suboptimal = unsafe {
             self.device
-                .swapchain_utils
+                .swapchain_fn
                 .queue_present(self.device.present_queue, &present_info)
                 .describe_err("Failed to present queue")?
         };

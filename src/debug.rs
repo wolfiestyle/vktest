@@ -4,7 +4,7 @@ use ash::vk::{self, Handle};
 use std::ffi::{c_void, CStr, CString};
 
 pub struct DebugUtils {
-    utils: ext::DebugUtils,
+    debug_fn: ext::DebugUtils,
     messenger: vk::DebugUtilsMessengerEXT,
 }
 
@@ -17,12 +17,10 @@ impl DebugUtils {
                 .create_debug_utils_messenger(&dbg_messenger_ci, None)
                 .expect("Error creating debug utils callback")
         };
-        Self { utils, messenger }
-    }
-
-    #[inline]
-    pub fn utils(&self) -> &ext::DebugUtils {
-        &self.utils
+        Self {
+            debug_fn: utils,
+            messenger,
+        }
     }
 
     pub fn create_debug_messenger_ci() -> vk::DebugUtilsMessengerCreateInfoEXT {
@@ -52,7 +50,7 @@ impl DebugUtils {
             .object_type(O::VK_OBJECT_TYPE)
             .object_name(&name);
         unsafe {
-            self.utils
+            self.debug_fn
                 .set_debug_utils_object_name(device.handle(), &name_info)
                 .expect("Failed to set DebugUtils object name");
         }
@@ -68,7 +66,7 @@ impl DebugUtils {
             .tag_name(tag_name)
             .tag(tag);
         unsafe {
-            self.utils
+            self.debug_fn
                 .set_debug_utils_object_tag(device.handle(), &tag_info)
                 .expect("Failed to set DebugUtils object tag");
         }
@@ -78,7 +76,7 @@ impl DebugUtils {
         let name = CString::new(name).unwrap();
         let label_info = vk::DebugUtilsLabelEXT::builder().label_name(&name).color(color);
         unsafe {
-            self.utils.cmd_begin_debug_utils_label(cmd_buffer, &label_info);
+            self.debug_fn.cmd_begin_debug_utils_label(cmd_buffer, &label_info);
         }
     }
 
@@ -86,13 +84,13 @@ impl DebugUtils {
         let name = CString::new(name).unwrap();
         let label_info = vk::DebugUtilsLabelEXT::builder().label_name(&name).color(color);
         unsafe {
-            self.utils.cmd_insert_debug_utils_label(cmd_buffer, &label_info);
+            self.debug_fn.cmd_insert_debug_utils_label(cmd_buffer, &label_info);
         }
     }
 
     pub fn cmd_end_label(&self, cmd_buffer: vk::CommandBuffer) {
         unsafe {
-            self.utils.cmd_end_debug_utils_label(cmd_buffer);
+            self.debug_fn.cmd_end_debug_utils_label(cmd_buffer);
         }
     }
 
@@ -100,26 +98,26 @@ impl DebugUtils {
         let name = CString::new(name).unwrap();
         let label_info = vk::DebugUtilsLabelEXT::builder().label_name(&name).color(color);
         unsafe {
-            self.utils.queue_begin_debug_utils_label(queue, &label_info);
+            self.debug_fn.queue_begin_debug_utils_label(queue, &label_info);
         }
     }
 
     pub fn queue_insert_label(&self, queue: vk::Queue, name: &str, color: [f32; 4]) {
         let name = CString::new(name).unwrap();
         let label_info = vk::DebugUtilsLabelEXT::builder().label_name(&name).color(color);
-        unsafe { self.utils.queue_insert_debug_utils_label(queue, &label_info) }
+        unsafe { self.debug_fn.queue_insert_debug_utils_label(queue, &label_info) }
     }
 
     pub fn queue_end_label(&self, queue: vk::Queue) {
         unsafe {
-            self.utils.queue_end_debug_utils_label(queue);
+            self.debug_fn.queue_end_debug_utils_label(queue);
         }
     }
 }
 
 impl Cleanup<()> for DebugUtils {
     unsafe fn cleanup(&mut self, _: &()) {
-        self.utils.destroy_debug_utils_messenger(self.messenger, None);
+        self.debug_fn.destroy_debug_utils_messenger(self.messenger, None);
     }
 }
 
