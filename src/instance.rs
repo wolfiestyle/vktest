@@ -104,14 +104,13 @@ impl VulkanInstance {
             .engine_version(vk::make_api_version(0, 1, 0, 0))
             .api_version(VULKAN_VERSION);
 
-        let dbg_messenger_ci = DebugUtils::create_debug_messenger_ci();
+        let mut dbg_messenger_ci = DebugUtils::create_debug_messenger_ci();
         let mut instance_ci = vk::InstanceCreateInfo::builder()
             .flags(flags)
             .application_info(&app_info)
             .enabled_extension_names(&extension_names);
         if VALIDATION_ENABLED {
-            instance_ci = instance_ci.enabled_layer_names(&layer_names);
-            instance_ci.p_next = &dbg_messenger_ci as *const _ as _;
+            instance_ci = instance_ci.enabled_layer_names(&layer_names).push_next(&mut dbg_messenger_ci);
             eprintln!("Using instance layer {VALIDATION_LAYER:?}");
         }
 
