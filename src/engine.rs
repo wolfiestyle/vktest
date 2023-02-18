@@ -17,8 +17,6 @@ pub struct VulkanEngine {
     window_size: WinSize,
     window_resized: bool,
     swapchain: SwapchainInfo,
-    framebuffers: Vec<vk::Framebuffer>,
-    render_pass: vk::RenderPass,
     pipeline: vk::Pipeline,
     pipeline_layout: vk::PipelineLayout,
     descriptor_layout: vk::DescriptorSetLayout,
@@ -45,8 +43,6 @@ impl VulkanEngine {
         let frag_spv = include_spirv!("src/shaders/texture.frag.glsl", frag, glsl);
 
         let swapchain = vk.create_swapchain(window_size, SWAPCHAIN_IMAGE_COUNT, None)?;
-        let render_pass = Self::create_render_pass(&vk, swapchain.format, swapchain.depth_format)?;
-        let framebuffers = vk.create_framebuffers(&swapchain, render_pass)?;
 
         let command_buffers = vk.create_command_buffers(MAX_FRAMES_IN_FLIGHT as u32)?;
         let frame_state = command_buffers
@@ -75,7 +71,7 @@ impl VulkanEngine {
             frag_spv,
             &[Vertex::binding_desc(0)],
             &Vertex::attr_desc(0),
-            render_pass,
+            &swapchain,
             pipeline_layout,
         )?;
 
@@ -91,8 +87,6 @@ impl VulkanEngine {
             window_size,
             window_resized: false,
             swapchain,
-            framebuffers,
-            render_pass,
             pipeline,
             pipeline_layout,
             descriptor_layout,
@@ -121,68 +115,6 @@ impl VulkanEngine {
 
     pub fn get_frame_time(&self) -> Instant {
         self.frame_time
-    }
-
-    fn create_render_pass(device: &VulkanDevice, color_format: vk::Format, depth_format: vk::Format) -> VulkanResult<vk::RenderPass> {
-        eprintln!("color_format: {color_format:?}, depth_format: {depth_format:?}");
-        let attachments = [
-            vk::AttachmentDescription {
-                flags: Default::default(),
-                format: color_format,
-                samples: vk::SampleCountFlags::TYPE_1,
-                load_op: vk::AttachmentLoadOp::CLEAR,
-                store_op: vk::AttachmentStoreOp::STORE,
-                stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
-                stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
-                initial_layout: vk::ImageLayout::UNDEFINED,
-                final_layout: vk::ImageLayout::PRESENT_SRC_KHR,
-            },
-            vk::AttachmentDescription {
-                flags: Default::default(),
-                format: depth_format,
-                samples: vk::SampleCountFlags::TYPE_1,
-                load_op: vk::AttachmentLoadOp::CLEAR,
-                store_op: vk::AttachmentStoreOp::DONT_CARE,
-                stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
-                stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
-                initial_layout: vk::ImageLayout::UNDEFINED,
-                final_layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            },
-        ];
-
-        let color_attach_ref = vk::AttachmentReference {
-            attachment: 0,
-            layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-        };
-
-        let depth_attach_ref = vk::AttachmentReference {
-            attachment: 1,
-            layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-        };
-
-        let subpass = vk::SubpassDescription::builder()
-            .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
-            .color_attachments(slice::from_ref(&color_attach_ref))
-            .depth_stencil_attachment(&depth_attach_ref);
-
-        let dependency = vk::SubpassDependency::builder()
-            .src_subpass(vk::SUBPASS_EXTERNAL)
-            .dst_subpass(0)
-            .src_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT | vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS)
-            .src_access_mask(vk::AccessFlags::empty())
-            .dst_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT | vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS)
-            .dst_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE);
-
-        let render_pass_ci = vk::RenderPassCreateInfo::builder()
-            .attachments(&attachments)
-            .subpasses(slice::from_ref(&subpass))
-            .dependencies(slice::from_ref(&dependency));
-
-        unsafe {
-            device
-                .create_render_pass(&render_pass_ci, None)
-                .describe_err("Failed to create render pass")
-        }
     }
 
     fn create_descriptor_pool(device: &VulkanDevice, max_count: u32) -> VulkanResult<vk::DescriptorPool> {
@@ -288,7 +220,7 @@ impl VulkanEngine {
 
     fn create_graphics_pipeline(
         device: &VulkanDevice, vert_shader_spv: &[u32], frag_shader_spv: &[u32], binding_desc: &[vk::VertexInputBindingDescription],
-        attr_desc: &[vk::VertexInputAttributeDescription], render_pass: vk::RenderPass, pipeline_layout: vk::PipelineLayout,
+        attr_desc: &[vk::VertexInputAttributeDescription], swapchain: &SwapchainInfo, pipeline_layout: vk::PipelineLayout,
     ) -> VulkanResult<vk::Pipeline> {
         let vert_shader = device.create_shader_module(vert_shader_spv)?;
         let frag_shader = device.create_shader_module(frag_shader_spv)?;
@@ -357,6 +289,10 @@ impl VulkanEngine {
             .min_depth_bounds(0.0)
             .max_depth_bounds(1.0);
 
+        let mut pipeline_rendering_ci = vk::PipelineRenderingCreateInfo::builder()
+            .color_attachment_formats(slice::from_ref(&swapchain.format))
+            .depth_attachment_format(swapchain.depth_format);
+
         let pipeline_ci = vk::GraphicsPipelineCreateInfo::builder()
             .stages(&shader_stages_ci)
             .vertex_input_state(&vertex_input_ci)
@@ -368,7 +304,7 @@ impl VulkanEngine {
             .depth_stencil_state(&depth_stencil_ci)
             .dynamic_state(&dynamic_state_ci)
             .layout(pipeline_layout)
-            .render_pass(render_pass);
+            .push_next(&mut pipeline_rendering_ci);
 
         let pipeline = unsafe {
             device
@@ -384,7 +320,7 @@ impl VulkanEngine {
         Ok(pipeline[0])
     }
 
-    fn record_command_buffer(&self, cmd_buffer: vk::CommandBuffer, image_idx: u32) -> VulkanResult<()> {
+    fn record_command_buffer(&self, cmd_buffer: vk::CommandBuffer, image_idx: usize) -> VulkanResult<()> {
         let begin_info = vk::CommandBufferBeginInfo::default();
         unsafe {
             self.device
@@ -392,27 +328,41 @@ impl VulkanEngine {
                 .describe_err("Failed to begin recording command buffer")?;
         }
 
-        let clear_values = [
-            vk::ClearValue {
+        let color_attach = vk::RenderingAttachmentInfo::builder()
+            .image_view(self.swapchain.image_views[image_idx])
+            .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+            .load_op(vk::AttachmentLoadOp::CLEAR)
+            .store_op(vk::AttachmentStoreOp::STORE)
+            .clear_value(vk::ClearValue {
                 color: vk::ClearColorValue {
                     float32: [0.0, 0.0, 0.0, 1.0],
                 },
-            },
-            vk::ClearValue {
+            });
+        let depth_attach = vk::RenderingAttachmentInfo::builder()
+            .image_view(self.swapchain.depth_imgviews[image_idx])
+            .image_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
+            .load_op(vk::AttachmentLoadOp::CLEAR)
+            .store_op(vk::AttachmentStoreOp::DONT_CARE)
+            .clear_value(vk::ClearValue {
                 depth_stencil: vk::ClearDepthStencilValue { depth: 1.0, stencil: 0 },
-            },
-        ];
-        let renderpass_info = vk::RenderPassBeginInfo::builder()
-            .render_pass(self.render_pass)
-            .framebuffer(self.framebuffers[image_idx as usize])
+            });
+        let render_info = vk::RenderingInfo::builder()
             .render_area(self.swapchain.extent_rect())
-            .clear_values(&clear_values);
+            .layer_count(1)
+            .color_attachments(slice::from_ref(&color_attach))
+            .depth_attachment(&depth_attach);
 
         unsafe {
             self.device
                 .debug(|d| d.cmd_begin_label(cmd_buffer, "3D object", [0.2, 0.4, 0.6, 1.0]));
-            self.device
-                .cmd_begin_render_pass(cmd_buffer, &renderpass_info, vk::SubpassContents::INLINE);
+            self.device.transition_image_layout(
+                cmd_buffer,
+                self.swapchain.images[image_idx],
+                self.swapchain.format,
+                vk::ImageLayout::UNDEFINED,
+                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            );
+            self.device.dynrender_fn.cmd_begin_rendering(cmd_buffer, &render_info);
             self.device
                 .cmd_bind_pipeline(cmd_buffer, vk::PipelineBindPoint::GRAPHICS, self.pipeline);
             self.device
@@ -432,7 +382,14 @@ impl VulkanEngine {
             self.device
                 .cmd_set_scissor(cmd_buffer, 0, slice::from_ref(&self.swapchain.extent_rect()));
             self.device.cmd_draw_indexed(cmd_buffer, self.index_count, 1, 0, 0, 0);
-            self.device.cmd_end_render_pass(cmd_buffer);
+            self.device.dynrender_fn.cmd_end_rendering(cmd_buffer);
+            self.device.transition_image_layout(
+                cmd_buffer,
+                self.swapchain.images[image_idx],
+                self.swapchain.format,
+                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                vk::ImageLayout::PRESENT_SRC_KHR,
+            );
             self.device.debug(|d| d.cmd_end_label(cmd_buffer));
             self.device
                 .end_command_buffer(cmd_buffer)
@@ -480,7 +437,7 @@ impl VulkanEngine {
                 .describe_err("Failed to reset command buffer")?;
         }
 
-        self.record_command_buffer(command_buffer, image_idx)?;
+        self.record_command_buffer(command_buffer, image_idx as _)?;
 
         let submit_info = vk::SubmitInfo::builder()
             .wait_semaphores(slice::from_ref(&image_avail_sem))
@@ -527,23 +484,14 @@ impl VulkanEngine {
         self.frame_state[self.current_frame].uniforms.write_uniforms(ubo);
     }
 
-    unsafe fn cleanup_swapchain(&mut self) {
-        for &fb in &self.framebuffers {
-            self.device.destroy_framebuffer(fb, None);
-        }
-        self.swapchain.cleanup(&self.device);
-    }
-
     fn recreate_swapchain(&mut self) -> VulkanResult<()> {
         unsafe { self.device.device_wait_idle()? };
         self.device.update_surface_info()?;
         let swapchain = self
             .device
             .create_swapchain(self.window_size, SWAPCHAIN_IMAGE_COUNT, Some(&self.swapchain))?;
-        let framebuffers = self.device.create_framebuffers(&swapchain, self.render_pass)?;
-        unsafe { self.cleanup_swapchain() };
+        unsafe { self.swapchain.cleanup(&self.device) };
         self.swapchain = swapchain;
-        self.framebuffers = framebuffers;
 
         Ok(())
     }
@@ -563,8 +511,7 @@ impl Drop for VulkanEngine {
             self.device.destroy_descriptor_pool(self.descriptor_pool, None);
             self.device.destroy_pipeline(self.pipeline, None);
             self.device.destroy_pipeline_layout(self.pipeline_layout, None);
-            self.device.destroy_render_pass(self.render_pass, None);
-            self.cleanup_swapchain();
+            self.swapchain.cleanup(&self.device);
         }
     }
 }

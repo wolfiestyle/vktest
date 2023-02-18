@@ -11,8 +11,12 @@ use std::sync::Arc;
 
 const VALIDATION_ENABLED: bool = cfg!(debug_assertions);
 const VALIDATION_LAYER: &CStr = cstr!("VK_LAYER_KHRONOS_validation");
-const DEVICE_EXTENSIONS: [(&CStr, bool); 2] = [(khr::Swapchain::name(), true), (vk::KhrPortabilitySubsetFn::name(), false)];
-const VULKAN_VERSION: u32 = vk::API_VERSION_1_1;
+const DEVICE_EXTENSIONS: [(&CStr, bool); 3] = [
+    (khr::Swapchain::name(), true),
+    (vk::KhrPortabilitySubsetFn::name(), false),
+    (khr::DynamicRendering::name(), true),
+];
+const VULKAN_VERSION: u32 = vk::API_VERSION_1_2;
 
 pub struct VulkanInstance {
     entry: ash::Entry,
@@ -277,10 +281,13 @@ impl VulkanInstance {
             .map(CStr::as_ptr)
             .collect();
 
+        let mut dyn_render_enable = vk::PhysicalDeviceDynamicRenderingFeatures::builder().dynamic_rendering(true);
+
         let device_ci = vk::DeviceCreateInfo::builder()
             .queue_create_infos(&queues_ci)
             .enabled_features(&features)
-            .enabled_extension_names(&extensions);
+            .enabled_extension_names(&extensions)
+            .push_next(&mut dyn_render_enable);
 
         unsafe {
             self.instance

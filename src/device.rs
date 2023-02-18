@@ -19,6 +19,7 @@ pub struct VulkanDevice {
     pub present_queue: vk::Queue,
     pub graphics_pool: vk::CommandPool,
     pub swapchain_utils: khr::Swapchain,
+    pub dynrender_fn: khr::DynamicRendering,
     allocator: Mutex<ga::GpuAllocator<vk::DeviceMemory>>,
 }
 
@@ -36,6 +37,7 @@ impl VulkanDevice {
         let present_queue = unsafe { device.get_device_queue(dev_info.present_idx, 0) };
         let graphics_pool = Self::create_command_pool(&device, dev_info.graphics_idx, vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)?;
         let swapchain_utils = khr::Swapchain::new(&instance, &device);
+        let dynrender_fn = khr::DynamicRendering::new(&instance, &device);
 
         let alloc_config = ga::Config::i_am_prototyping();
         let dev_props = unsafe { gpu_alloc_ash::device_properties(&instance, 0, dev_info.phys_dev)? };
@@ -51,6 +53,7 @@ impl VulkanDevice {
             present_queue,
             graphics_pool,
             swapchain_utils,
+            dynrender_fn,
             allocator,
         })
     }
@@ -125,6 +128,18 @@ impl VulkanDevice {
             .map(|image| self.create_image_view(**image, depth_format, vk::ImageAspectFlags::DEPTH))
             .collect::<Result<Vec<_>, _>>()?;
 
+        let cmd_buffer = self.begin_one_time_commands()?;
+        for img in &depth_images {
+            self.transition_image_layout(
+                cmd_buffer,
+                img.handle,
+                depth_format,
+                vk::ImageLayout::UNDEFINED,
+                vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            );
+        }
+        self.end_one_time_commands(cmd_buffer, self.graphics_queue)?;
+
         self.debug(|d| {
             depth_images
                 .iter()
@@ -136,7 +151,7 @@ impl VulkanDevice {
 
         Ok(SwapchainInfo {
             handle: swapchain,
-            //images,
+            images,
             image_views,
             depth_images,
             depth_imgviews,
@@ -618,7 +633,7 @@ impl Drop for VulkanDevice {
 #[derive(Debug)]
 pub struct SwapchainInfo {
     pub handle: vk::SwapchainKHR,
-    //images: Vec<vk::Image>,
+    pub images: Vec<vk::Image>,
     pub image_views: Vec<vk::ImageView>,
     pub depth_images: Vec<VkImage>,
     pub depth_imgviews: Vec<vk::ImageView>,
