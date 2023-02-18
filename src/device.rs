@@ -393,7 +393,7 @@ impl VulkanDevice {
                 vk::AccessFlags::empty(),
                 vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
                 vk::PipelineStageFlags::TOP_OF_PIPE,
-                vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS,
+                vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS | vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
             ),
             (vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL, vk::ImageLayout::PRESENT_SRC_KHR) => (
                 vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
@@ -572,6 +572,7 @@ impl VulkanDevice {
         let formats = [
             vk::Format::D32_SFLOAT,
             vk::Format::D32_SFLOAT_S8_UINT,
+            vk::Format::X8_D24_UNORM_PACK32,
             vk::Format::D24_UNORM_S8_UINT,
             vk::Format::D16_UNORM,
             vk::Format::D16_UNORM_S8_UINT,
