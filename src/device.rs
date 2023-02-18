@@ -171,30 +171,6 @@ impl VulkanDevice {
         }
     }
 
-    pub fn create_framebuffers(&self, swapchain: &SwapchainInfo, render_pass: vk::RenderPass) -> VulkanResult<Vec<vk::Framebuffer>> {
-        assert_eq!(swapchain.image_views.len(), swapchain.depth_imgviews.len());
-        swapchain
-            .image_views
-            .iter()
-            .zip(&swapchain.depth_imgviews)
-            .map(|(&imgview, &depth_imgview)| {
-                let attachments = [imgview, depth_imgview];
-                let framebuffer_ci = vk::FramebufferCreateInfo::builder()
-                    .render_pass(render_pass)
-                    .attachments(&attachments)
-                    .width(swapchain.extent.width)
-                    .height(swapchain.extent.height)
-                    .layers(1);
-
-                unsafe {
-                    self.device
-                        .create_framebuffer(&framebuffer_ci, None)
-                        .describe_err("Failed to create framebuffer")
-                }
-            })
-            .collect()
-    }
-
     fn create_command_pool(device: &ash::Device, family_idx: u32, flags: vk::CommandPoolCreateFlags) -> VulkanResult<vk::CommandPool> {
         let command_pool_ci = vk::CommandPoolCreateInfo::builder().flags(flags).queue_family_index(family_idx);
 
