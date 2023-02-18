@@ -404,15 +404,12 @@ impl VulkanDevice {
             _ => panic!("Unsupported layout transition"),
         };
 
-        let aspect_mask = if new_layout == vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL {
-            match format {
-                vk::Format::D16_UNORM_S8_UINT | vk::Format::D24_UNORM_S8_UINT | vk::Format::D32_SFLOAT_S8_UINT => {
-                    vk::ImageAspectFlags::DEPTH | vk::ImageAspectFlags::STENCIL
-                }
-                _ => vk::ImageAspectFlags::DEPTH,
+        let aspect_mask = match format {
+            vk::Format::D16_UNORM_S8_UINT | vk::Format::D24_UNORM_S8_UINT | vk::Format::D32_SFLOAT_S8_UINT => {
+                vk::ImageAspectFlags::DEPTH | vk::ImageAspectFlags::STENCIL
             }
-        } else {
-            vk::ImageAspectFlags::COLOR
+            vk::Format::D16_UNORM | vk::Format::X8_D24_UNORM_PACK32 | vk::Format::D32_SFLOAT => vk::ImageAspectFlags::DEPTH,
+            _ => vk::ImageAspectFlags::COLOR,
         };
 
         let barrier = vk::ImageMemoryBarrier::builder()
