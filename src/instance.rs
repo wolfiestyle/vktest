@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 const VALIDATION_ENABLED: bool = cfg!(debug_assertions);
 const VALIDATION_LAYER: &CStr = cstr!("VK_LAYER_KHRONOS_validation");
-const REQ_DEVICE_EXTENSIONS: [&CStr; 1] = [khr::Swapchain::name()];
+const DEVICE_EXTENSIONS: [(&CStr, bool); 2] = [(khr::Swapchain::name(), true), (vk::KhrPortabilitySubsetFn::name(), false)];
 const VULKAN_VERSION: u32 = vk::API_VERSION_1_1;
 
 pub struct VulkanInstance {
@@ -90,6 +90,9 @@ impl VulkanInstance {
             .unwrap_or_default();
         if VALIDATION_ENABLED {
             extension_names.push(ext::DebugUtils::name().as_ptr());
+        }
+        for &name in &extension_names {
+            eprintln!("Using instance extension: {:?}", unsafe { CStr::from_ptr(name) });
         }
 
         let layer_names = [VALIDATION_LAYER.as_ptr()];
@@ -203,7 +206,10 @@ impl VulkanInstance {
         };
         let extensions: HashSet<_> = ext_list.iter().map(|ext| vk_to_cstr(&ext.extension_name).to_owned()).collect();
         //eprintln!("Supported device extensions: {extensions:#?}");
-        let missing_ext = REQ_DEVICE_EXTENSIONS.into_iter().find(|&ext_name| !extensions.contains(ext_name));
+        let missing_ext = DEVICE_EXTENSIONS
+            .into_iter()
+            .filter_map(|(name, required)| required.then_some(name))
+            .find(|&ext_name| !extensions.contains(ext_name));
         if let Some(ext_name) = missing_ext {
             eprintln!("Device '{name}' has missing required extension {ext_name:?}");
             return Err(VkError::UnsuitableDevice);
@@ -261,10 +267,16 @@ impl VulkanInstance {
             .collect();
 
         let features = vk::PhysicalDeviceFeatures::default();
-        let mut extensions = REQ_DEVICE_EXTENSIONS.map(CStr::as_ptr).to_vec();
-        if dev_info.extensions.contains(vk::KhrPortabilitySubsetFn::name()) {
-            extensions.push(vk::KhrPortabilitySubsetFn::name().as_ptr());
-        }
+        let extensions: Vec<_> = DEVICE_EXTENSIONS
+            .into_iter()
+            .filter_map(|(name, required)| {
+                required
+                    .then_some(name)
+                    .or_else(|| dev_info.extensions.contains(name).then_some(name))
+            })
+            .inspect(|&name| eprintln!("Using device extension {name:?}"))
+            .map(CStr::as_ptr)
+            .collect();
 
         let device_ci = vk::DeviceCreateInfo::builder()
             .queue_create_infos(&queues_ci)
