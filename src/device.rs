@@ -375,7 +375,10 @@ impl VulkanDevice {
         Ok(VkImage::new(image, memory))
     }
 
-    fn transition_image_layout(&self, image: vk::Image, old_layout: vk::ImageLayout, new_layout: vk::ImageLayout) -> VulkanResult<()> {
+    pub fn transition_image_layout(
+        &self, cmd_buffer: vk::CommandBuffer, image: vk::Image, format: vk::Format, old_layout: vk::ImageLayout,
+        new_layout: vk::ImageLayout,
+    ) {
         let (src_access, dst_access, src_stage, dst_stage) = match (old_layout, new_layout) {
             (vk::ImageLayout::UNDEFINED, vk::ImageLayout::TRANSFER_DST_OPTIMAL) => (
                 vk::AccessFlags::empty(),
@@ -389,24 +392,53 @@ impl VulkanDevice {
                 vk::PipelineStageFlags::TRANSFER,
                 vk::PipelineStageFlags::FRAGMENT_SHADER,
             ),
-            _ => return Err(VkError::EngineError("Unsupported layout transition")),
+            (vk::ImageLayout::UNDEFINED, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL) => (
+                vk::AccessFlags::empty(),
+                vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+                vk::PipelineStageFlags::TOP_OF_PIPE,
+                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            ),
+            (vk::ImageLayout::UNDEFINED, vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL) => (
+                vk::AccessFlags::empty(),
+                vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
+                vk::PipelineStageFlags::TOP_OF_PIPE,
+                vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS,
+            ),
+            (vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL, vk::ImageLayout::PRESENT_SRC_KHR) => (
+                vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+                vk::AccessFlags::empty(),
+                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+            ),
+            _ => panic!("Unsupported layout transition"),
         };
-        let cmd_buffer = self.begin_one_time_commands()?;
+
+        let aspect_mask = if new_layout == vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL {
+            match format {
+                vk::Format::D16_UNORM_S8_UINT | vk::Format::D24_UNORM_S8_UINT | vk::Format::D32_SFLOAT_S8_UINT => {
+                    vk::ImageAspectFlags::DEPTH | vk::ImageAspectFlags::STENCIL
+                }
+                _ => vk::ImageAspectFlags::DEPTH,
+            }
+        } else {
+            vk::ImageAspectFlags::COLOR
+        };
+
         let barrier = vk::ImageMemoryBarrier::builder()
+            .image(image)
             .old_layout(old_layout)
             .new_layout(new_layout)
+            .src_access_mask(src_access)
+            .dst_access_mask(dst_access)
             .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
             .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-            .image(image)
             .subresource_range(vk::ImageSubresourceRange {
-                aspect_mask: vk::ImageAspectFlags::COLOR,
+                aspect_mask,
                 base_mip_level: 0,
                 level_count: 1,
                 base_array_layer: 0,
                 layer_count: 1,
-            })
-            .src_access_mask(src_access)
-            .dst_access_mask(dst_access);
+            });
         unsafe {
             self.device.cmd_pipeline_barrier(
                 cmd_buffer,
@@ -418,12 +450,9 @@ impl VulkanDevice {
                 slice::from_ref(&barrier),
             );
         }
-        self.end_one_time_commands(cmd_buffer, self.graphics_queue)?;
-        Ok(())
     }
 
-    fn copy_buffer_to_image(&self, buffer: vk::Buffer, image: vk::Image, width: u32, height: u32) -> VulkanResult<()> {
-        let cmd_buffer = self.begin_one_time_commands()?;
+    fn copy_buffer_to_image(&self, cmd_buffer: vk::CommandBuffer, buffer: vk::Buffer, image: vk::Image, width: u32, height: u32) {
         let region = vk::BufferImageCopy::builder()
             .buffer_offset(0)
             .buffer_row_length(0)
@@ -445,7 +474,6 @@ impl VulkanDevice {
                 slice::from_ref(&region),
             );
         }
-        self.end_one_time_commands(cmd_buffer, self.graphics_queue)
     }
 
     pub fn create_image_from_data(&self, width: u32, height: u32, data: &[u8]) -> VulkanResult<VkImage> {
@@ -468,13 +496,23 @@ impl VulkanDevice {
         )?;
 
         self.write_memory_slice(&mut src_buffer.memory, data)?;
-        self.transition_image_layout(*tex_image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::TRANSFER_DST_OPTIMAL)?;
-        self.copy_buffer_to_image(*src_buffer, *tex_image, width, height)?;
+        let cmd_buffer = self.begin_one_time_commands()?;
         self.transition_image_layout(
+            cmd_buffer,
             *tex_image,
+            vk::Format::R8G8B8A8_SRGB,
+            vk::ImageLayout::UNDEFINED,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+        );
+        self.copy_buffer_to_image(cmd_buffer, *src_buffer, *tex_image, width, height);
+        self.transition_image_layout(
+            cmd_buffer,
+            *tex_image,
+            vk::Format::R8G8B8A8_SRGB,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
             vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-        )?;
+        );
+        self.end_one_time_commands(cmd_buffer, self.graphics_queue)?;
 
         unsafe { src_buffer.cleanup(self) };
         self.debug(|d| d.set_object_name(&self.device, &tex_image.handle, "Texture image"));
