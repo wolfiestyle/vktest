@@ -163,14 +163,6 @@ impl VulkanInstance {
         //let features = unsafe { self.instance.get_physical_device_features(phys_dev) };  //TODO: get limits and stuff
         let dev_type = properties.device_type.into();
         let name = vk_to_cstr(&properties.device_name).to_str().unwrap_or("unknown").to_owned();
-        if properties.api_version < VULKAN_VERSION {
-            eprintln!(
-                "Device '{name}' supported Vulkan version {} is lower than required version {}",
-                VkVersion(properties.api_version),
-                VkVersion(VULKAN_VERSION)
-            );
-            return Err(VkError::UnsuitableDevice);
-        }
 
         // queue families
         let queue_families = unsafe { self.instance.get_physical_device_queue_family_properties(phys_dev) };
