@@ -56,7 +56,7 @@ impl VulkanDevice {
     }
 
     pub fn create_swapchain(
-        &self, win_size: WinSize, image_count: u32, old_swapchain: Option<vk::SwapchainKHR>,
+        &self, win_size: WinSize, image_count: u32, old_swapchain: Option<&SwapchainInfo>,
     ) -> VulkanResult<SwapchainInfo> {
         let surface_format = self.surface_info.find_surface_format();
         let present_mode = self.surface_info.find_present_mode(vk::PresentModeKHR::IMMEDIATE);
@@ -83,7 +83,7 @@ impl VulkanDevice {
             .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
             .present_mode(present_mode)
             .clipped(true)
-            .old_swapchain(old_swapchain.unwrap_or_default());
+            .old_swapchain(old_swapchain.map(|sw| sw.handle).unwrap_or_default());
 
         let swapchain = unsafe {
             self.swapchain_utils
@@ -102,10 +102,45 @@ impl VulkanDevice {
             .map(|&image| self.create_image_view(image, surface_format.format, vk::ImageAspectFlags::COLOR))
             .collect::<Result<_, _>>()?;
 
+        let depth_format = match old_swapchain {
+            Some(sw) => sw.depth_format,
+            None => self.find_depth_format()?,
+        };
+
+        let depth_images = (0..images.len())
+            .map(|_| {
+                self.allocate_image(
+                    extent.width,
+                    extent.height,
+                    depth_format,
+                    vk::ImageTiling::OPTIMAL,
+                    vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+                    ga::UsageFlags::FAST_DEVICE_ACCESS,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let depth_imgviews = depth_images
+            .iter()
+            .map(|image| self.create_image_view(**image, depth_format, vk::ImageAspectFlags::DEPTH))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        self.debug(|d| {
+            depth_images
+                .iter()
+                .for_each(|img| d.set_object_name(self, &img.handle, "Depth image"));
+            depth_imgviews
+                .iter()
+                .for_each(|view| d.set_object_name(self, view, "Depth image view"));
+        });
+
         Ok(SwapchainInfo {
             handle: swapchain,
             //images,
             image_views,
+            depth_images,
+            depth_imgviews,
+            depth_format,
             format: surface_format.format,
             extent,
         })
@@ -121,14 +156,12 @@ impl VulkanDevice {
         }
     }
 
-    pub fn create_framebuffers(
-        &self, swapchain: &SwapchainInfo, render_pass: vk::RenderPass, depth_imgviews: &[vk::ImageView],
-    ) -> VulkanResult<Vec<vk::Framebuffer>> {
-        assert_eq!(swapchain.image_views.len(), depth_imgviews.len());
+    pub fn create_framebuffers(&self, swapchain: &SwapchainInfo, render_pass: vk::RenderPass) -> VulkanResult<Vec<vk::Framebuffer>> {
+        assert_eq!(swapchain.image_views.len(), swapchain.depth_imgviews.len());
         swapchain
             .image_views
             .iter()
-            .zip(depth_imgviews)
+            .zip(&swapchain.depth_imgviews)
             .map(|(&imgview, &depth_imgview)| {
                 let attachments = [imgview, depth_imgview];
                 let framebuffer_ci = vk::FramebufferCreateInfo::builder()
@@ -549,6 +582,9 @@ pub struct SwapchainInfo {
     pub handle: vk::SwapchainKHR,
     //images: Vec<vk::Image>,
     pub image_views: Vec<vk::ImageView>,
+    pub depth_images: Vec<VkImage>,
+    pub depth_imgviews: Vec<vk::ImageView>,
+    pub depth_format: vk::Format,
     pub format: vk::Format,
     pub extent: vk::Extent2D,
 }
@@ -591,6 +627,10 @@ impl Cleanup<VulkanDevice> for SwapchainInfo {
         for &imgview in &self.image_views {
             device.destroy_image_view(imgview, None);
         }
+        for &img in &self.depth_imgviews {
+            device.destroy_image_view(img, None);
+        }
+        self.depth_images.cleanup(device);
         device.swapchain_utils.destroy_swapchain(self.handle, None);
     }
 }
