@@ -43,8 +43,9 @@ impl VulkanEngine {
         let vert_spv = include_spirv!("src/shaders/texture.vert.glsl", vert, glsl);
         let frag_spv = include_spirv!("src/shaders/texture.frag.glsl", frag, glsl);
 
-        let depth_format = vk.find_depth_format()?;
+        let depth_format = vk.find_depth_format(false)?;
         let swapchain = vk.create_swapchain(window_size, SWAPCHAIN_IMAGE_COUNT, depth_format)?;
+        eprintln!("color_format: {:?}, depth_format: {depth_format:?}", swapchain.format);
 
         let command_buffers = vk.create_command_buffers(MAX_FRAMES_IN_FLIGHT as u32)?;
         let frame_state = command_buffers

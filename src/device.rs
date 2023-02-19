@@ -469,16 +469,24 @@ impl VulkanDevice {
             .ok_or(VkError::EngineError("Failed to find supported image format"))
     }
 
-    pub fn find_depth_format(&self) -> VulkanResult<vk::Format> {
-        let formats = [
-            vk::Format::D32_SFLOAT,
-            vk::Format::D32_SFLOAT_S8_UINT,
-            vk::Format::X8_D24_UNORM_PACK32,
-            vk::Format::D24_UNORM_S8_UINT,
-            vk::Format::D16_UNORM,
-            vk::Format::D16_UNORM_S8_UINT,
-        ];
-        self.find_supported_format(&formats, vk::ImageTiling::OPTIMAL, vk::FormatFeatureFlags::DEPTH_STENCIL_ATTACHMENT)
+    pub fn find_depth_format(&self, stencil: bool) -> VulkanResult<vk::Format> {
+        let formats: &[_] = if stencil {
+            &[
+                vk::Format::D32_SFLOAT_S8_UINT,
+                vk::Format::D24_UNORM_S8_UINT,
+                vk::Format::D16_UNORM_S8_UINT,
+            ]
+        } else {
+            &[
+                vk::Format::D32_SFLOAT,
+                vk::Format::D32_SFLOAT_S8_UINT,
+                vk::Format::X8_D24_UNORM_PACK32,
+                vk::Format::D24_UNORM_S8_UINT,
+                vk::Format::D16_UNORM,
+                vk::Format::D16_UNORM_S8_UINT,
+            ]
+        };
+        self.find_supported_format(formats, vk::ImageTiling::OPTIMAL, vk::FormatFeatureFlags::DEPTH_STENCIL_ATTACHMENT)
     }
 
     #[inline]
