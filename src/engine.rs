@@ -1,4 +1,4 @@
-use crate::device::{SwapchainInfo, UniformBuffer, VkBuffer, VkImage, VulkanDevice};
+use crate::device::{Swapchain, UniformBuffer, VkBuffer, VkImage, VulkanDevice};
 use crate::types::*;
 use ash::vk;
 use cstr::cstr;
@@ -17,7 +17,7 @@ pub struct VulkanEngine {
     device: VulkanDevice,
     window_size: WinSize,
     window_resized: bool,
-    swapchain: SwapchainInfo,
+    swapchain: Swapchain,
     pipeline: vk::Pipeline,
     pipeline_layout: vk::PipelineLayout,
     descriptor_layout: vk::DescriptorSetLayout,
@@ -43,7 +43,8 @@ impl VulkanEngine {
         let vert_spv = include_spirv!("src/shaders/texture.vert.glsl", vert, glsl);
         let frag_spv = include_spirv!("src/shaders/texture.frag.glsl", frag, glsl);
 
-        let swapchain = vk.create_swapchain(window_size, SWAPCHAIN_IMAGE_COUNT, None)?;
+        let depth_format = vk.find_depth_format()?;
+        let swapchain = vk.create_swapchain(window_size, SWAPCHAIN_IMAGE_COUNT, depth_format)?;
 
         let command_buffers = vk.create_command_buffers(MAX_FRAMES_IN_FLIGHT as u32)?;
         let frame_state = command_buffers
@@ -108,6 +109,7 @@ impl VulkanEngine {
     }
 
     pub fn resize(&mut self, window_size: WinSize) {
+        eprintln!("window size: {} x {}", window_size.width, window_size.height);
         if window_size != self.window_size {
             self.window_size = window_size;
             self.window_resized = true;
@@ -221,7 +223,7 @@ impl VulkanEngine {
 
     fn create_graphics_pipeline(
         device: &VulkanDevice, vert_shader_spv: &[u32], frag_shader_spv: &[u32], binding_desc: &[vk::VertexInputBindingDescription],
-        attr_desc: &[vk::VertexInputAttributeDescription], swapchain: &SwapchainInfo, pipeline_layout: vk::PipelineLayout,
+        attr_desc: &[vk::VertexInputAttributeDescription], swapchain: &Swapchain, pipeline_layout: vk::PipelineLayout,
     ) -> VulkanResult<vk::Pipeline> {
         let vert_shader = device.create_shader_module(vert_shader_spv)?;
         let frag_shader = device.create_shader_module(frag_shader_spv)?;
@@ -486,14 +488,12 @@ impl VulkanEngine {
     }
 
     fn recreate_swapchain(&mut self) -> VulkanResult<()> {
-        unsafe { self.device.device_wait_idle()? };
-        self.device.update_surface_info()?;
-        let swapchain = self
-            .device
-            .create_swapchain(self.window_size, SWAPCHAIN_IMAGE_COUNT, Some(&self.swapchain))?;
-        unsafe { self.swapchain.cleanup(&self.device) };
-        self.swapchain = swapchain;
-
+        let new_swapchain = self.device.recreate_swapchain(self.window_size, &self.swapchain)?;
+        unsafe {
+            self.device.device_wait_idle()?;
+            self.swapchain.cleanup(&self.device);
+        }
+        self.swapchain = new_swapchain;
         Ok(())
     }
 }

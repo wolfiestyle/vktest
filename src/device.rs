@@ -1,5 +1,5 @@
 use crate::debug::DebugUtils;
-use crate::instance::{DeviceInfo, DeviceSelection, SurfaceInfo, VulkanInstance};
+use crate::instance::{DeviceInfo, DeviceSelection, VulkanInstance};
 use crate::types::*;
 use ash::extensions::khr;
 use ash::vk;
@@ -13,7 +13,6 @@ pub struct VulkanDevice {
     instance: Arc<VulkanInstance>,
     surface: vk::SurfaceKHR,
     pub dev_info: DeviceInfo,
-    pub surface_info: SurfaceInfo,
     pub device: ash::Device,
     pub graphics_queue: vk::Queue,
     pub present_queue: vk::Queue,
@@ -31,7 +30,6 @@ impl VulkanDevice {
         let surface = instance.create_surface(window)?;
         let dev_info = instance.pick_physical_device(surface, selection)?;
         eprintln!("Selected device: {:?}", dev_info.name);
-        let surface_info = instance.query_surface_info(dev_info.phys_dev, surface)?;
         let device = instance.create_logical_device(&dev_info)?;
         let graphics_queue = unsafe { device.get_device_queue(dev_info.graphics_idx, 0) };
         let present_queue = unsafe { device.get_device_queue(dev_info.present_idx, 0) };
@@ -47,7 +45,6 @@ impl VulkanDevice {
             instance,
             surface,
             dev_info,
-            surface_info,
             device,
             graphics_queue,
             present_queue,
@@ -58,107 +55,16 @@ impl VulkanDevice {
         })
     }
 
-    pub fn create_swapchain(
-        &self, win_size: WinSize, image_count: u32, old_swapchain: Option<&SwapchainInfo>,
-    ) -> VulkanResult<SwapchainInfo> {
-        let surface_format = self.surface_info.find_surface_format();
-        let present_mode = self.surface_info.find_present_mode(vk::PresentModeKHR::IMMEDIATE);
-        eprintln!("window size: {} x {}", win_size.width, win_size.height);
-        let extent = self.surface_info.calc_extent(win_size.width, win_size.height);
-        let img_count = self.surface_info.calc_image_count(image_count);
-        let img_sharing_mode = if self.dev_info.unique_families.len() > 1 {
-            vk::SharingMode::CONCURRENT
-        } else {
-            vk::SharingMode::EXCLUSIVE
-        };
+    pub fn create_swapchain(&self, win_size: WinSize, image_count: u32, depth_format: vk::Format) -> VulkanResult<Swapchain> {
+        let mut swapchain = Swapchain::new(self, win_size, image_count, vk::SwapchainKHR::null())?;
+        swapchain.create_depth_attachments(self, depth_format, swapchain.images.len())?;
+        Ok(swapchain)
+    }
 
-        let swapchain_ci = vk::SwapchainCreateInfoKHR::builder()
-            .surface(self.surface)
-            .min_image_count(img_count)
-            .image_format(surface_format.format)
-            .image_color_space(surface_format.color_space)
-            .image_extent(extent)
-            .image_array_layers(1)
-            .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
-            .image_sharing_mode(img_sharing_mode)
-            .queue_family_indices(&self.dev_info.unique_families)
-            .pre_transform(self.surface_info.capabilities.current_transform)
-            .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
-            .present_mode(present_mode)
-            .clipped(true)
-            .old_swapchain(old_swapchain.map(|sw| sw.handle).unwrap_or_default());
-
-        let swapchain = unsafe {
-            self.swapchain_fn
-                .create_swapchain(&swapchain_ci, None)
-                .describe_err("Failed to create swapchain")?
-        };
-
-        let images = unsafe {
-            self.swapchain_fn
-                .get_swapchain_images(swapchain)
-                .describe_err("Failed to get swapchain images")?
-        };
-
-        let image_views = images
-            .iter()
-            .map(|&image| self.create_image_view(image, surface_format.format, vk::ImageAspectFlags::COLOR))
-            .collect::<Result<_, _>>()?;
-
-        let depth_format = match old_swapchain {
-            Some(sw) => sw.depth_format,
-            None => self.find_depth_format()?,
-        };
-
-        let depth_images = (0..images.len())
-            .map(|_| {
-                self.allocate_image(
-                    extent.width,
-                    extent.height,
-                    depth_format,
-                    vk::ImageTiling::OPTIMAL,
-                    vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-                    ga::UsageFlags::FAST_DEVICE_ACCESS,
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let depth_imgviews = depth_images
-            .iter()
-            .map(|image| self.create_image_view(**image, depth_format, vk::ImageAspectFlags::DEPTH))
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let cmd_buffer = self.begin_one_time_commands()?;
-        for img in &depth_images {
-            self.transition_image_layout(
-                cmd_buffer,
-                img.handle,
-                depth_format,
-                vk::ImageLayout::UNDEFINED,
-                vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            );
-        }
-        self.end_one_time_commands(cmd_buffer, self.graphics_queue)?;
-
-        self.debug(|d| {
-            depth_images
-                .iter()
-                .for_each(|img| d.set_object_name(self, &img.handle, "Depth image"));
-            depth_imgviews
-                .iter()
-                .for_each(|view| d.set_object_name(self, view, "Depth image view"));
-        });
-
-        Ok(SwapchainInfo {
-            handle: swapchain,
-            images,
-            image_views,
-            depth_images,
-            depth_imgviews,
-            depth_format,
-            format: surface_format.format,
-            extent,
-        })
+    pub fn recreate_swapchain(&self, win_size: WinSize, old_swapchain: &Swapchain) -> VulkanResult<Swapchain> {
+        let mut swapchain = Swapchain::new(self, win_size, old_swapchain.images.len() as u32, old_swapchain.handle)?;
+        swapchain.create_depth_attachments(self, old_swapchain.depth_format, swapchain.images.len())?;
+        Ok(swapchain)
     }
 
     pub fn create_shader_module(&self, spirv_code: &[u32]) -> VulkanResult<vk::ShaderModule> {
@@ -232,11 +138,6 @@ impl VulkanDevice {
     pub fn create_fence(&self) -> VulkanResult<vk::Fence> {
         let fence_ci = vk::FenceCreateInfo::builder().flags(vk::FenceCreateFlags::SIGNALED);
         unsafe { self.device.create_fence(&fence_ci, None).describe_err("Failed to create fence") }
-    }
-
-    pub fn update_surface_info(&mut self) -> VulkanResult<()> {
-        self.surface_info = self.instance.query_surface_info(self.dev_info.phys_dev, self.surface)?;
-        Ok(())
     }
 
     pub fn allocate_buffer(
@@ -605,18 +506,126 @@ impl Drop for VulkanDevice {
 }
 
 #[derive(Debug)]
-pub struct SwapchainInfo {
+pub struct Swapchain {
     pub handle: vk::SwapchainKHR,
     pub images: Vec<vk::Image>,
     pub image_views: Vec<vk::ImageView>,
+    pub format: vk::Format,
+    pub extent: vk::Extent2D,
     pub depth_images: Vec<VkImage>,
     pub depth_imgviews: Vec<vk::ImageView>,
     pub depth_format: vk::Format,
-    pub format: vk::Format,
-    pub extent: vk::Extent2D,
 }
 
-impl SwapchainInfo {
+impl Swapchain {
+    fn new(device: &VulkanDevice, win_size: WinSize, image_count: u32, old_swapchain: vk::SwapchainKHR) -> VulkanResult<Self> {
+        let surface_info = device.instance.query_surface_info(device.dev_info.phys_dev, device.surface)?;
+        let surface_format = surface_info.find_surface_format();
+        let present_mode = surface_info.find_present_mode(vk::PresentModeKHR::IMMEDIATE);
+        let extent = surface_info.calc_extent(win_size.width, win_size.height);
+        let img_count = surface_info.calc_image_count(image_count);
+        let img_sharing_mode = if device.dev_info.unique_families.len() > 1 {
+            vk::SharingMode::CONCURRENT
+        } else {
+            vk::SharingMode::EXCLUSIVE
+        };
+
+        let swapchain_ci = vk::SwapchainCreateInfoKHR::builder()
+            .surface(device.surface)
+            .min_image_count(img_count)
+            .image_format(surface_format.format)
+            .image_color_space(surface_format.color_space)
+            .image_extent(extent)
+            .image_array_layers(1)
+            .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
+            .image_sharing_mode(img_sharing_mode)
+            .queue_family_indices(&device.dev_info.unique_families)
+            .pre_transform(surface_info.capabilities.current_transform)
+            .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
+            .present_mode(present_mode)
+            .clipped(true)
+            .old_swapchain(old_swapchain);
+
+        let swapchain = unsafe {
+            device
+                .swapchain_fn
+                .create_swapchain(&swapchain_ci, None)
+                .describe_err("Failed to create swapchain")?
+        };
+
+        let images = unsafe {
+            device
+                .swapchain_fn
+                .get_swapchain_images(swapchain)
+                .describe_err("Failed to get swapchain images")?
+        };
+
+        let image_views = images
+            .iter()
+            .map(|&image| device.create_image_view(image, surface_format.format, vk::ImageAspectFlags::COLOR))
+            .collect::<Result<_, _>>()?;
+
+        Ok(Self {
+            handle: swapchain,
+            images,
+            image_views,
+            format: surface_format.format,
+            extent,
+            depth_images: vec![],
+            depth_imgviews: vec![],
+            depth_format: vk::Format::UNDEFINED,
+        })
+    }
+
+    fn create_depth_attachments(&mut self, device: &VulkanDevice, depth_format: vk::Format, image_count: usize) -> VulkanResult<()> {
+        if depth_format == vk::Format::UNDEFINED {
+            return Ok(());
+        }
+        let depth_images = (0..image_count)
+            .map(|_| {
+                device.allocate_image(
+                    self.extent.width,
+                    self.extent.height,
+                    depth_format,
+                    vk::ImageTiling::OPTIMAL,
+                    vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+                    ga::UsageFlags::FAST_DEVICE_ACCESS,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let depth_imgviews = depth_images
+            .iter()
+            .map(|image| device.create_image_view(**image, depth_format, vk::ImageAspectFlags::DEPTH))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let cmd_buffer = device.begin_one_time_commands()?;
+        for img in &depth_images {
+            device.transition_image_layout(
+                cmd_buffer,
+                img.handle,
+                depth_format,
+                vk::ImageLayout::UNDEFINED,
+                vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            );
+        }
+        device.end_one_time_commands(cmd_buffer, device.graphics_queue)?;
+
+        device.debug(|d| {
+            depth_images
+                .iter()
+                .for_each(|img| d.set_object_name(device, &img.handle, "Depth image"));
+            depth_imgviews
+                .iter()
+                .for_each(|view| d.set_object_name(device, view, "Depth image view"));
+        });
+
+        self.depth_images = depth_images;
+        self.depth_imgviews = depth_imgviews;
+        self.depth_format = depth_format;
+        Ok(())
+    }
+
     pub fn viewport(&self) -> vk::Viewport {
         vk::Viewport {
             x: 0.0,
@@ -640,7 +649,7 @@ impl SwapchainInfo {
     }
 }
 
-impl std::ops::Deref for SwapchainInfo {
+impl std::ops::Deref for Swapchain {
     type Target = vk::SwapchainKHR;
 
     #[inline]
@@ -649,7 +658,7 @@ impl std::ops::Deref for SwapchainInfo {
     }
 }
 
-impl Cleanup<VulkanDevice> for SwapchainInfo {
+impl Cleanup<VulkanDevice> for Swapchain {
     unsafe fn cleanup(&mut self, device: &VulkanDevice) {
         for &imgview in &self.image_views {
             device.destroy_image_view(imgview, None);
