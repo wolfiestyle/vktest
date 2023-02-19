@@ -1,14 +1,15 @@
 use crate::device::{SwapchainInfo, UniformBuffer, VkBuffer, VkImage, VulkanDevice};
 use crate::types::*;
 use ash::vk;
-use cgmath::{Deg, Matrix4, Point3, Vector3};
 use cstr::cstr;
+use glam::{Affine3A, Mat4, Vec3};
 use inline_spirv::include_spirv;
 use std::slice;
 use std::time::Instant;
 
 const SWAPCHAIN_IMAGE_COUNT: u32 = 3;
 const MAX_FRAMES_IN_FLIGHT: usize = 2;
+const DEG_TO_RAD: f32 = std::f32::consts::PI / 180.0;
 //type Vertex = ([f32; 3], [f32; 3], [f32; 2]);
 type Vertex = obj::TexturedVertex;
 
@@ -32,7 +33,7 @@ pub struct VulkanEngine {
     tex_sampler: vk::Sampler,
     start_time: Instant,
     frame_time: Instant,
-    view: Matrix4<f32>,
+    view: Affine3A,
 }
 
 impl VulkanEngine {
@@ -78,7 +79,7 @@ impl VulkanEngine {
         let vertex_buffer = vk.create_buffer(vertices, vk::BufferUsageFlags::VERTEX_BUFFER)?;
         let index_buffer = vk.create_buffer(indices, vk::BufferUsageFlags::INDEX_BUFFER)?;
 
-        let view = Matrix4::look_at_rh(Point3::new(2.0, 2.0, 2.0), Point3::new(0.0, 0.0, 0.0), -Vector3::unit_z());
+        let view = Affine3A::look_at_rh(Vec3::splat(2.0), Vec3::ZERO, Vec3::NEG_Z);
 
         let now = Instant::now();
 
@@ -476,8 +477,8 @@ impl VulkanEngine {
 
     fn update_uniforms(&mut self) {
         let time = ((self.frame_time - self.start_time).as_micros() as f64 / 1000000.0) as f32;
-        let model = Matrix4::from_axis_angle(Vector3::unit_z(), Deg(time * 90.0));
-        let proj = cgmath::perspective(Deg(45.0), self.swapchain.aspect(), 0.1, 10.0);
+        let model = Affine3A::from_axis_angle(Vec3::Z, 90.0 * DEG_TO_RAD * time);
+        let proj = Mat4::perspective_rh(45.0 * DEG_TO_RAD, self.swapchain.aspect(), 0.1, 1000.0);
         let ubo = UniformBufferObject {
             mvp: proj * self.view * model,
         };
@@ -558,5 +559,5 @@ impl Cleanup<VulkanDevice> for FrameState {
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 struct UniformBufferObject {
-    mvp: Matrix4<f32>,
+    mvp: Mat4,
 }
