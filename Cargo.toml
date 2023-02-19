@@ -1,20 +1,5 @@
-[package]
-name = "vktest"
-version = "0.1.0"
-authors = ["SnowDerg <slayerbeast@gmail.com>"]
-edition = "2021"
-
-[dependencies]
-winit = "0.27.5"
-ash = "0.37.2"
-ash-window = "0.12.0"
-raw-window-handle = "0.5.0"
-cstr = "0.2.11"
-inline-spirv = "0.1.5"
-memoffset = "0.8.0"
-glam = "0.22.0"
-image = "0.24.5"
-obj-rs = "0.7.0"
-structopt = "0.3.26"
-ga = { package = "gpu-alloc", version = "0.5.3" }
-gpu-alloc-ash = "0.5.0"
+[workspace]
+members = [
+    "vkengine",
+    "vktest",
+]
