@@ -507,6 +507,8 @@ impl VulkanDevice {
 
 impl std::ops::Deref for VulkanDevice {
     type Target = ash::Device;
+
+    #[inline]
     fn deref(&self) -> &Self::Target {
         &self.device
     }

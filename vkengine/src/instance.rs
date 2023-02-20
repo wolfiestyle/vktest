@@ -298,11 +298,13 @@ impl VulkanInstance {
     }
 
     #[cfg(debug_assertions)]
+    #[inline]
     pub fn debug<F: FnOnce(&DebugUtils)>(&self, debug_f: F) {
         debug_f(&self.debug_utils)
     }
 
     #[cfg(not(debug_assertions))]
+    #[inline]
     pub fn debug<F: FnOnce(&DebugUtils)>(&self, _debug_f: F) {}
 }
 
