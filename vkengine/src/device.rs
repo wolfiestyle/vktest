@@ -16,7 +16,7 @@ pub struct VulkanDevice {
     pub device: ash::Device,
     pub graphics_queue: vk::Queue,
     pub present_queue: vk::Queue,
-    pub graphics_pool: vk::CommandPool,
+    transfer_pool: vk::CommandPool,
     pub swapchain_fn: khr::Swapchain,
     pub dynrender_fn: khr::DynamicRendering,
     pub pushdesc_fn: khr::PushDescriptor,
@@ -34,7 +34,6 @@ impl VulkanDevice {
         let device = instance.create_logical_device(&dev_info)?;
         let graphics_queue = unsafe { device.get_device_queue(dev_info.graphics_idx, 0) };
         let present_queue = unsafe { device.get_device_queue(dev_info.present_idx, 0) };
-        let graphics_pool = Self::create_command_pool(&device, dev_info.graphics_idx, vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)?;
         let swapchain_fn = khr::Swapchain::new(&instance, &device);
         let dynrender_fn = khr::DynamicRendering::new(&instance, &device);
         let pushdesc_fn = khr::PushDescriptor::new(&instance, &device);
@@ -43,18 +42,25 @@ impl VulkanDevice {
         let dev_props = unsafe { gpu_alloc_ash::device_properties(&instance, 0, dev_info.phys_dev)? };
         let allocator = Mutex::new(ga::GpuAllocator::new(alloc_config, dev_props));
 
-        Ok(Self {
+        let family = dev_info.graphics_idx;
+
+        let mut this = Self {
             instance,
             surface,
             dev_info,
             device,
             graphics_queue,
             present_queue,
-            graphics_pool,
+            transfer_pool: vk::CommandPool::null(),
             swapchain_fn,
             dynrender_fn,
+            pushdesc_fn,
             allocator,
-        })
+        };
+
+        this.transfer_pool = this.create_command_pool(family, vk::CommandPoolCreateFlags::TRANSIENT)?;
+
+        Ok(this)
     }
 
     pub fn create_swapchain(&self, win_size: WinSize, image_count: u32, depth_format: vk::Format) -> VulkanResult<Swapchain> {
@@ -79,19 +85,19 @@ impl VulkanDevice {
         }
     }
 
-    fn create_command_pool(device: &ash::Device, family_idx: u32, flags: vk::CommandPoolCreateFlags) -> VulkanResult<vk::CommandPool> {
+    pub fn create_command_pool(&self, family_idx: u32, flags: vk::CommandPoolCreateFlags) -> VulkanResult<vk::CommandPool> {
         let command_pool_ci = vk::CommandPoolCreateInfo::builder().flags(flags).queue_family_index(family_idx);
 
         unsafe {
-            device
+            self.device
                 .create_command_pool(&command_pool_ci, None)
                 .describe_err("Failed to create command pool")
         }
     }
 
-    pub fn create_command_buffers(&self, count: u32) -> VulkanResult<Vec<vk::CommandBuffer>> {
+    pub fn create_command_buffers(&self, pool: vk::CommandPool, count: u32) -> VulkanResult<Vec<vk::CommandBuffer>> {
         let alloc_info = vk::CommandBufferAllocateInfo::builder()
-            .command_pool(self.graphics_pool)
+            .command_pool(pool)
             .level(vk::CommandBufferLevel::PRIMARY)
             .command_buffer_count(count);
 
@@ -102,8 +108,8 @@ impl VulkanDevice {
         }
     }
 
-    pub fn begin_one_time_commands(&self) -> VulkanResult<vk::CommandBuffer> {
-        let cmd_buffer = self.create_command_buffers(1)?[0];
+    fn begin_one_time_commands(&self) -> VulkanResult<vk::CommandBuffer> {
+        let cmd_buffer = self.create_command_buffers(self.transfer_pool, 1)?[0];
         let begin_info = vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
         unsafe {
             self.device
@@ -113,17 +119,19 @@ impl VulkanDevice {
         Ok(cmd_buffer)
     }
 
-    pub fn end_one_time_commands(&self, cmd_buffer: vk::CommandBuffer, queue: vk::Queue) -> VulkanResult<()> {
+    fn end_one_time_commands(&self, cmd_buffer: vk::CommandBuffer) -> VulkanResult<()> {
         let submit_info = vk::SubmitInfo::builder().command_buffers(slice::from_ref(&cmd_buffer));
         unsafe {
             self.device
                 .end_command_buffer(cmd_buffer)
                 .describe_err("Failed to end recording command buffer")?;
             self.device
-                .queue_submit(queue, slice::from_ref(&submit_info), vk::Fence::null())
+                .queue_submit(self.graphics_queue, slice::from_ref(&submit_info), vk::Fence::null())
                 .describe_err("Failed to submit queue")?;
-            self.device.queue_wait_idle(queue).describe_err("Failed to wait queue idle")?;
-            self.device.free_command_buffers(self.graphics_pool, slice::from_ref(&cmd_buffer));
+            self.device
+                .queue_wait_idle(self.graphics_queue)
+                .describe_err("Failed to wait queue idle")?;
+            self.device.free_command_buffers(self.transfer_pool, slice::from_ref(&cmd_buffer));
         }
         Ok(())
     }
@@ -198,7 +206,7 @@ impl VulkanDevice {
         unsafe {
             self.device.cmd_copy_buffer(cmd_buffer, src_buffer, dst_buffer, &[copy_region]);
         }
-        self.end_one_time_commands(cmd_buffer, self.graphics_queue)
+        self.end_one_time_commands(cmd_buffer)
     }
 
     pub fn create_buffer<T: Copy>(&self, data: &[T], usage: vk::BufferUsageFlags) -> VulkanResult<VkBuffer> {
@@ -403,7 +411,7 @@ impl VulkanDevice {
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
             vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
         );
-        self.end_one_time_commands(cmd_buffer, self.graphics_queue)?;
+        self.end_one_time_commands(cmd_buffer)?;
 
         unsafe { src_buffer.cleanup(self) };
         self.debug(|d| d.set_object_name(&self.device, &tex_image.handle, "Texture image"));
@@ -508,7 +516,7 @@ impl Drop for VulkanDevice {
     fn drop(&mut self) {
         unsafe {
             self.allocator.lock().unwrap().cleanup(AshMemoryDevice::wrap(&self.device));
-            self.device.destroy_command_pool(self.graphics_pool, None);
+            self.device.destroy_command_pool(self.transfer_pool, None);
             self.instance.surface_utils.destroy_surface(self.surface, None);
             self.device.destroy_device(None);
         }
@@ -619,7 +627,7 @@ impl Swapchain {
                 vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
             );
         }
-        device.end_one_time_commands(cmd_buffer, device.graphics_queue)?;
+        device.end_one_time_commands(cmd_buffer)?;
 
         device.debug(|d| {
             depth_images

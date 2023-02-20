@@ -21,6 +21,8 @@ pub struct VulkanEngine {
     swapchain: Swapchain,
     pipeline: Pipeline<Vertex>,
     descriptor_layout: vk::DescriptorSetLayout,
+    command_pool: vk::CommandPool,
+    command_buffers: Vec<vk::CommandBuffer>,
     frame_state: Vec<FrameState>,
     current_frame: usize,
     vertex_buffer: VkBuffer,
@@ -42,10 +44,10 @@ impl VulkanEngine {
         let swapchain = vk.create_swapchain(window_size, SWAPCHAIN_IMAGE_COUNT, depth_format)?;
         eprintln!("color_format: {:?}, depth_format: {depth_format:?}", swapchain.format);
 
-        let command_buffers = vk.create_command_buffers(MAX_FRAMES_IN_FLIGHT as u32)?;
-        let frame_state = command_buffers
-            .into_iter()
-            .map(|cmd_buf| FrameState::new(&vk, cmd_buf))
+        let command_pool = vk.create_command_pool(vk.dev_info.graphics_idx, vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)?;
+        let command_buffers = vk.create_command_buffers(command_pool, MAX_FRAMES_IN_FLIGHT as u32)?;
+        let frame_state = (0..MAX_FRAMES_IN_FLIGHT)
+            .map(|_| FrameState::new(&vk))
             .collect::<Result<Vec<_>, _>>()?;
 
         let texture = vk.create_image_from_data(img_width, img_height, img_data)?;
@@ -72,6 +74,8 @@ impl VulkanEngine {
             swapchain,
             pipeline,
             descriptor_layout,
+            command_pool,
+            command_buffers,
             frame_state,
             current_frame: 0,
             vertex_buffer,
@@ -236,7 +240,7 @@ impl VulkanEngine {
         let in_flight_fen = frame.in_flight_fen;
         let image_avail_sem = frame.image_avail_sem;
         let render_finish_sem = frame.render_finished_sem;
-        let command_buffer = frame.command_buffer;
+        let command_buffer = self.command_buffers[self.current_frame];
 
         let image_idx = unsafe {
             self.device
@@ -337,6 +341,7 @@ impl Drop for VulkanEngine {
             self.device.destroy_image_view(self.tex_imgview, None);
             self.texture.cleanup(&self.device);
             self.frame_state.cleanup(&self.device);
+            self.device.destroy_command_pool(self.command_pool, None);
             self.device.destroy_descriptor_set_layout(self.descriptor_layout, None);
             self.pipeline.cleanup(&self.device);
             self.swapchain.cleanup(&self.device);
@@ -480,11 +485,10 @@ struct FrameState {
     render_finished_sem: vk::Semaphore,
     in_flight_fen: vk::Fence,
     uniforms: UniformBuffer<UniformBufferObject>,
-    command_buffer: vk::CommandBuffer,
 }
 
 impl FrameState {
-    fn new(device: &VulkanDevice, command_buffer: vk::CommandBuffer) -> VulkanResult<Self> {
+    fn new(device: &VulkanDevice) -> VulkanResult<Self> {
         let image_avail_sem = device.create_semaphore()?;
         let render_finished_sem = device.create_semaphore()?;
         let in_flight_fen = device.create_fence()?;
@@ -500,7 +504,6 @@ impl FrameState {
             render_finished_sem,
             in_flight_fen,
             uniforms,
-            command_buffer,
         })
     }
 }
