@@ -1,5 +1,6 @@
 use ash::vk;
 use memoffset::{offset_of, offset_of_tuple};
+#[cfg(feature = "winit")]
 use winit::dpi::PhysicalSize;
 
 pub type VulkanResult<T> = Result<T, VkError>;
@@ -119,6 +120,7 @@ impl From<(u32, u32)> for WinSize {
     }
 }
 
+#[cfg(feature = "winit")]
 impl From<PhysicalSize<u32>> for WinSize {
     #[inline]
     fn from(PhysicalSize { width, height }: PhysicalSize<u32>) -> Self {

@@ -63,7 +63,7 @@ fn main() -> VulkanResult<()> {
                 *control_flow = ControlFlow::Exit;
             }
             WindowEvent::Resized(size) => {
-                vk_app.resize(size.into());
+                vk_app.resize(size);
             }
             _ => (),
         },

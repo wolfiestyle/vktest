@@ -109,7 +109,8 @@ impl VulkanEngine {
         })
     }
 
-    pub fn resize(&mut self, window_size: WinSize) {
+    pub fn resize(&mut self, window_size: impl Into<WinSize>) {
+        let window_size = window_size.into();
         eprintln!("window size: {} x {}", window_size.width, window_size.height);
         if window_size != self.window_size {
             self.window_size = window_size;
