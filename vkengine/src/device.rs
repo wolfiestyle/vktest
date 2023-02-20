@@ -19,6 +19,7 @@ pub struct VulkanDevice {
     pub graphics_pool: vk::CommandPool,
     pub swapchain_fn: khr::Swapchain,
     pub dynrender_fn: khr::DynamicRendering,
+    pub pushdesc_fn: khr::PushDescriptor,
     allocator: Mutex<ga::GpuAllocator<vk::DeviceMemory>>,
 }
 
@@ -36,6 +37,7 @@ impl VulkanDevice {
         let graphics_pool = Self::create_command_pool(&device, dev_info.graphics_idx, vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)?;
         let swapchain_fn = khr::Swapchain::new(&instance, &device);
         let dynrender_fn = khr::DynamicRendering::new(&instance, &device);
+        let pushdesc_fn = khr::PushDescriptor::new(&instance, &device);
 
         let alloc_config = ga::Config::i_am_prototyping();
         let dev_props = unsafe { gpu_alloc_ash::device_properties(&instance, 0, dev_info.phys_dev)? };

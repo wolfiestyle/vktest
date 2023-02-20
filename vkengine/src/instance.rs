@@ -11,10 +11,11 @@ use std::sync::Arc;
 
 const VALIDATION_ENABLED: bool = cfg!(debug_assertions);
 const VALIDATION_LAYER: &CStr = cstr!("VK_LAYER_KHRONOS_validation");
-const DEVICE_EXTENSIONS: [(&CStr, bool); 3] = [
+const DEVICE_EXTENSIONS: [(&CStr, bool); 4] = [
     (khr::Swapchain::name(), true),
     (vk::KhrPortabilitySubsetFn::name(), false),
     (khr::DynamicRendering::name(), true),
+    (khr::PushDescriptor::name(), true),
 ];
 const VULKAN_VERSION: u32 = vk::API_VERSION_1_2;
 

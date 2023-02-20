@@ -21,8 +21,6 @@ pub struct VulkanEngine {
     swapchain: Swapchain,
     pipeline: Pipeline<Vertex>,
     descriptor_layout: vk::DescriptorSetLayout,
-    descriptor_pool: vk::DescriptorPool,
-    descriptor_sets: Vec<vk::DescriptorSet>,
     frame_state: Vec<FrameState>,
     current_frame: usize,
     vertex_buffer: VkBuffer,
@@ -55,15 +53,6 @@ impl VulkanEngine {
         let tex_sampler = vk.create_texture_sampler(vk::SamplerAddressMode::REPEAT)?;
 
         let descriptor_layout = Self::create_descriptor_set_layout(&vk)?;
-        let descriptor_pool = Self::create_descriptor_pool(&vk, MAX_FRAMES_IN_FLIGHT as u32)?;
-        let descriptor_sets = Self::create_descriptor_sets(
-            &vk,
-            descriptor_pool,
-            &[descriptor_layout; MAX_FRAMES_IN_FLIGHT],
-            &frame_state,
-            tex_imgview,
-            tex_sampler,
-        )?;
 
         let vert_spv = include_spirv!("src/shaders/texture.vert.glsl", vert, glsl);
         let frag_spv = include_spirv!("src/shaders/texture.frag.glsl", frag, glsl);
@@ -83,8 +72,6 @@ impl VulkanEngine {
             swapchain,
             pipeline,
             descriptor_layout,
-            descriptor_pool,
-            descriptor_sets,
             frame_state,
             current_frame: 0,
             vertex_buffer,
@@ -112,25 +99,6 @@ impl VulkanEngine {
         self.frame_time
     }
 
-    fn create_descriptor_pool(device: &VulkanDevice, max_count: u32) -> VulkanResult<vk::DescriptorPool> {
-        let pool_sizes = [
-            vk::DescriptorPoolSize {
-                ty: vk::DescriptorType::UNIFORM_BUFFER,
-                descriptor_count: max_count,
-            },
-            vk::DescriptorPoolSize {
-                ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-                descriptor_count: max_count,
-            },
-        ];
-        let pool_ci = vk::DescriptorPoolCreateInfo::builder().pool_sizes(&pool_sizes).max_sets(max_count);
-        unsafe {
-            device
-                .create_descriptor_pool(&pool_ci, None)
-                .describe_err("Failed to create descriptor pool")
-        }
-    }
-
     fn create_descriptor_set_layout(device: &VulkanDevice) -> VulkanResult<vk::DescriptorSetLayout> {
         let layout_bindings = [
             vk::DescriptorSetLayoutBinding::builder()
@@ -147,60 +115,15 @@ impl VulkanEngine {
                 .build(),
         ];
 
-        let desc_layout_ci = vk::DescriptorSetLayoutCreateInfo::builder().bindings(&layout_bindings);
+        let desc_layout_ci = vk::DescriptorSetLayoutCreateInfo::builder()
+            .flags(vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR)
+            .bindings(&layout_bindings);
 
         unsafe {
             device
                 .create_descriptor_set_layout(&desc_layout_ci, None)
                 .describe_err("Failed to create descriptor set layout")
         }
-    }
-
-    fn create_descriptor_sets(
-        device: &VulkanDevice, pool: vk::DescriptorPool, layouts: &[vk::DescriptorSetLayout], frame_state: &[FrameState],
-        image_view: vk::ImageView, sampler: vk::Sampler,
-    ) -> VulkanResult<Vec<vk::DescriptorSet>> {
-        assert_eq!(layouts.len(), frame_state.len());
-        let alloc_info = vk::DescriptorSetAllocateInfo::builder().descriptor_pool(pool).set_layouts(layouts);
-        let desc_sets = unsafe {
-            device
-                .allocate_descriptor_sets(&alloc_info)
-                .describe_err("Failed to allocate descriptor sets")?
-        };
-
-        for (&desc_set, fstate) in desc_sets.iter().zip(frame_state) {
-            let buffer_info = vk::DescriptorBufferInfo {
-                buffer: *fstate.uniforms.buffer,
-                offset: 0,
-                range: fstate.uniforms.buffer_size() as _,
-            };
-            let image_info = vk::DescriptorImageInfo {
-                image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                image_view,
-                sampler,
-            };
-            let descr_write = [
-                vk::WriteDescriptorSet::builder()
-                    .dst_set(desc_set)
-                    .dst_binding(0)
-                    .dst_array_element(0)
-                    .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                    .buffer_info(slice::from_ref(&buffer_info))
-                    .build(),
-                vk::WriteDescriptorSet::builder()
-                    .dst_set(desc_set)
-                    .dst_binding(1)
-                    .dst_array_element(0)
-                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                    .image_info(slice::from_ref(&image_info))
-                    .build(),
-            ];
-            unsafe {
-                device.update_descriptor_sets(&descr_write, &[]);
-            }
-        }
-
-        Ok(desc_sets)
     }
 
     fn record_command_buffer(&self, cmd_buffer: vk::CommandBuffer, image_idx: usize) -> VulkanResult<()> {
@@ -211,6 +134,7 @@ impl VulkanEngine {
                 .describe_err("Failed to begin recording command buffer")?;
         }
 
+        // render pass
         let color_attach = vk::RenderingAttachmentInfo::builder()
             .image_view(self.swapchain.image_views[image_idx])
             .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
@@ -235,6 +159,32 @@ impl VulkanEngine {
             .color_attachments(slice::from_ref(&color_attach))
             .depth_attachment(&depth_attach);
 
+        // descriptor set
+        let uniforms = &self.frame_state[self.current_frame].uniforms;
+        let buffer_info = vk::DescriptorBufferInfo {
+            buffer: *uniforms.buffer,
+            offset: 0,
+            range: uniforms.buffer_size() as _,
+        };
+        let image_info = vk::DescriptorImageInfo {
+            image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            image_view: self.tex_imgview,
+            sampler: self.tex_sampler,
+        };
+        let desc_writes = [
+            vk::WriteDescriptorSet::builder()
+                .dst_binding(0)
+                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                .buffer_info(slice::from_ref(&buffer_info))
+                .build(),
+            vk::WriteDescriptorSet::builder()
+                .dst_binding(1)
+                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .image_info(slice::from_ref(&image_info))
+                .build(),
+        ];
+
+        // commands
         unsafe {
             self.device
                 .debug(|d| d.cmd_begin_label(cmd_buffer, "3D object", [0.2, 0.4, 0.6, 1.0]));
@@ -252,13 +202,12 @@ impl VulkanEngine {
                 .cmd_bind_vertex_buffers(cmd_buffer, 0, slice::from_ref(&*self.vertex_buffer), &[0]);
             self.device
                 .cmd_bind_index_buffer(cmd_buffer, *self.index_buffer, 0, vk::IndexType::UINT32);
-            self.device.cmd_bind_descriptor_sets(
+            self.device.pushdesc_fn.cmd_push_descriptor_set(
                 cmd_buffer,
                 vk::PipelineBindPoint::GRAPHICS,
                 self.pipeline.layout,
                 0,
-                &self.descriptor_sets[self.current_frame..=self.current_frame],
-                &[],
+                &desc_writes,
             );
             self.device
                 .cmd_set_viewport(cmd_buffer, 0, slice::from_ref(&self.swapchain.viewport()));
@@ -389,7 +338,6 @@ impl Drop for VulkanEngine {
             self.texture.cleanup(&self.device);
             self.frame_state.cleanup(&self.device);
             self.device.destroy_descriptor_set_layout(self.descriptor_layout, None);
-            self.device.destroy_descriptor_pool(self.descriptor_pool, None);
             self.pipeline.cleanup(&self.device);
             self.swapchain.cleanup(&self.device);
         }
