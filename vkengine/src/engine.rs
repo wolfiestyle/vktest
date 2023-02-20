@@ -4,6 +4,7 @@ use ash::vk;
 use cstr::cstr;
 use glam::{Affine3A, Mat4, Vec3};
 use inline_spirv::include_spirv;
+use std::marker::PhantomData;
 use std::slice;
 use std::time::Instant;
 
@@ -18,8 +19,7 @@ pub struct VulkanEngine {
     window_size: WinSize,
     window_resized: bool,
     swapchain: Swapchain,
-    pipeline: vk::Pipeline,
-    pipeline_layout: vk::PipelineLayout,
+    pipeline: Pipeline<Vertex>,
     descriptor_layout: vk::DescriptorSetLayout,
     descriptor_pool: vk::DescriptorPool,
     descriptor_sets: Vec<vk::DescriptorSet>,
@@ -40,9 +40,6 @@ impl VulkanEngine {
     pub fn new(
         vk: VulkanDevice, window_size: WinSize, vertices: &[Vertex], indices: &[u32], img_width: u32, img_height: u32, img_data: &[u8],
     ) -> VulkanResult<Self> {
-        let vert_spv = include_spirv!("src/shaders/texture.vert.glsl", vert, glsl);
-        let frag_spv = include_spirv!("src/shaders/texture.frag.glsl", frag, glsl);
-
         let depth_format = vk.find_depth_format(false)?;
         let swapchain = vk.create_swapchain(window_size, SWAPCHAIN_IMAGE_COUNT, depth_format)?;
         eprintln!("color_format: {:?}, depth_format: {depth_format:?}", swapchain.format);
@@ -67,16 +64,10 @@ impl VulkanEngine {
             tex_imgview,
             tex_sampler,
         )?;
-        let pipeline_layout = Self::create_pipeline_layout(&vk, descriptor_layout)?;
-        let pipeline = Self::create_graphics_pipeline(
-            &vk,
-            vert_spv,
-            frag_spv,
-            &[Vertex::binding_desc(0)],
-            &Vertex::attr_desc(0),
-            &swapchain,
-            pipeline_layout,
-        )?;
+
+        let vert_spv = include_spirv!("src/shaders/texture.vert.glsl", vert, glsl);
+        let frag_spv = include_spirv!("src/shaders/texture.frag.glsl", frag, glsl);
+        let pipeline = Pipeline::new(&vk, vert_spv, frag_spv, &swapchain, descriptor_layout)?;
 
         let vertex_buffer = vk.create_buffer(vertices, vk::BufferUsageFlags::VERTEX_BUFFER)?;
         let index_buffer = vk.create_buffer(indices, vk::BufferUsageFlags::INDEX_BUFFER)?;
@@ -91,7 +82,6 @@ impl VulkanEngine {
             window_resized: false,
             swapchain,
             pipeline,
-            pipeline_layout,
             descriptor_layout,
             descriptor_pool,
             descriptor_sets,
@@ -213,118 +203,6 @@ impl VulkanEngine {
         Ok(desc_sets)
     }
 
-    fn create_pipeline_layout(device: &VulkanDevice, desc_set_layout: vk::DescriptorSetLayout) -> VulkanResult<vk::PipelineLayout> {
-        let pipeline_layout_ci = vk::PipelineLayoutCreateInfo::builder().set_layouts(slice::from_ref(&desc_set_layout));
-
-        unsafe {
-            device
-                .create_pipeline_layout(&pipeline_layout_ci, None)
-                .describe_err("Failed to create pipeline layout")
-        }
-    }
-
-    fn create_graphics_pipeline(
-        device: &VulkanDevice, vert_shader_spv: &[u32], frag_shader_spv: &[u32], binding_desc: &[vk::VertexInputBindingDescription],
-        attr_desc: &[vk::VertexInputAttributeDescription], swapchain: &Swapchain, pipeline_layout: vk::PipelineLayout,
-    ) -> VulkanResult<vk::Pipeline> {
-        let vert_shader = device.create_shader_module(vert_shader_spv)?;
-        let frag_shader = device.create_shader_module(frag_shader_spv)?;
-
-        let entry_point = cstr!("main");
-        let shader_stages_ci = [
-            vk::PipelineShaderStageCreateInfo::builder()
-                .stage(vk::ShaderStageFlags::VERTEX)
-                .module(vert_shader)
-                .name(entry_point)
-                .build(),
-            vk::PipelineShaderStageCreateInfo::builder()
-                .stage(vk::ShaderStageFlags::FRAGMENT)
-                .module(frag_shader)
-                .name(entry_point)
-                .build(),
-        ];
-
-        let vertex_input_ci = vk::PipelineVertexInputStateCreateInfo::builder()
-            .vertex_binding_descriptions(binding_desc)
-            .vertex_attribute_descriptions(attr_desc);
-
-        let input_assembly_ci = vk::PipelineInputAssemblyStateCreateInfo::builder()
-            .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
-            .primitive_restart_enable(false);
-
-        let viewport_state_ci = vk::PipelineViewportStateCreateInfo {
-            viewport_count: 1,
-            scissor_count: 1,
-            ..Default::default()
-        };
-
-        let dynamic_state_ci =
-            vk::PipelineDynamicStateCreateInfo::builder().dynamic_states(&[vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR]);
-
-        let rasterizer_ci = vk::PipelineRasterizationStateCreateInfo::builder()
-            .polygon_mode(vk::PolygonMode::FILL)
-            .line_width(1.0)
-            .cull_mode(vk::CullModeFlags::BACK)
-            .front_face(vk::FrontFace::CLOCKWISE);
-
-        let multisample_ci = vk::PipelineMultisampleStateCreateInfo::builder()
-            .rasterization_samples(vk::SampleCountFlags::TYPE_1)
-            .min_sample_shading(1.0);
-
-        let color_attach = vk::PipelineColorBlendAttachmentState::builder()
-            .color_write_mask(vk::ColorComponentFlags::RGBA)
-            .blend_enable(false)
-            .src_color_blend_factor(vk::BlendFactor::ONE)
-            .dst_color_blend_factor(vk::BlendFactor::ZERO)
-            .color_blend_op(vk::BlendOp::ADD)
-            .src_color_blend_factor(vk::BlendFactor::ONE)
-            .dst_color_blend_factor(vk::BlendFactor::ZERO)
-            .alpha_blend_op(vk::BlendOp::ADD);
-
-        let color_blend_ci = vk::PipelineColorBlendStateCreateInfo::builder()
-            .logic_op_enable(false)
-            .logic_op(vk::LogicOp::COPY)
-            .attachments(slice::from_ref(&color_attach));
-
-        let depth_stencil_ci = vk::PipelineDepthStencilStateCreateInfo::builder()
-            .depth_test_enable(true)
-            .depth_write_enable(true)
-            .depth_compare_op(vk::CompareOp::LESS)
-            .depth_bounds_test_enable(false)
-            .min_depth_bounds(0.0)
-            .max_depth_bounds(1.0);
-
-        let mut pipeline_rendering_ci = vk::PipelineRenderingCreateInfo::builder()
-            .color_attachment_formats(slice::from_ref(&swapchain.format))
-            .depth_attachment_format(swapchain.depth_format);
-
-        let pipeline_ci = vk::GraphicsPipelineCreateInfo::builder()
-            .stages(&shader_stages_ci)
-            .vertex_input_state(&vertex_input_ci)
-            .input_assembly_state(&input_assembly_ci)
-            .viewport_state(&viewport_state_ci)
-            .rasterization_state(&rasterizer_ci)
-            .multisample_state(&multisample_ci)
-            .color_blend_state(&color_blend_ci)
-            .depth_stencil_state(&depth_stencil_ci)
-            .dynamic_state(&dynamic_state_ci)
-            .layout(pipeline_layout)
-            .push_next(&mut pipeline_rendering_ci);
-
-        let pipeline = unsafe {
-            device
-                .create_graphics_pipelines(vk::PipelineCache::null(), slice::from_ref(&pipeline_ci), None)
-                .map_err(|(_, err)| VkError::VulkanMsg("Error creating pipeline", err))?
-        };
-
-        unsafe {
-            device.destroy_shader_module(vert_shader, None);
-            device.destroy_shader_module(frag_shader, None);
-        }
-
-        Ok(pipeline[0])
-    }
-
     fn record_command_buffer(&self, cmd_buffer: vk::CommandBuffer, image_idx: usize) -> VulkanResult<()> {
         let begin_info = vk::CommandBufferBeginInfo::default();
         unsafe {
@@ -369,7 +247,7 @@ impl VulkanEngine {
             );
             self.device.dynrender_fn.cmd_begin_rendering(cmd_buffer, &render_info);
             self.device
-                .cmd_bind_pipeline(cmd_buffer, vk::PipelineBindPoint::GRAPHICS, self.pipeline);
+                .cmd_bind_pipeline(cmd_buffer, vk::PipelineBindPoint::GRAPHICS, self.pipeline.handle);
             self.device
                 .cmd_bind_vertex_buffers(cmd_buffer, 0, slice::from_ref(&*self.vertex_buffer), &[0]);
             self.device
@@ -377,7 +255,7 @@ impl VulkanEngine {
             self.device.cmd_bind_descriptor_sets(
                 cmd_buffer,
                 vk::PipelineBindPoint::GRAPHICS,
-                self.pipeline_layout,
+                self.pipeline.layout,
                 0,
                 &self.descriptor_sets[self.current_frame..=self.current_frame],
                 &[],
@@ -512,10 +390,140 @@ impl Drop for VulkanEngine {
             self.frame_state.cleanup(&self.device);
             self.device.destroy_descriptor_set_layout(self.descriptor_layout, None);
             self.device.destroy_descriptor_pool(self.descriptor_pool, None);
-            self.device.destroy_pipeline(self.pipeline, None);
-            self.device.destroy_pipeline_layout(self.pipeline_layout, None);
+            self.pipeline.cleanup(&self.device);
             self.swapchain.cleanup(&self.device);
         }
+    }
+}
+
+struct Pipeline<Vert> {
+    handle: vk::Pipeline,
+    layout: vk::PipelineLayout,
+    _p: PhantomData<Vert>,
+}
+
+impl<Vert: VertexAttrDesc> Pipeline<Vert> {
+    fn new(
+        device: &VulkanDevice, vert_shader_spv: &[u32], frag_shader_spv: &[u32], swapchain: &Swapchain,
+        desc_set_layout: vk::DescriptorSetLayout,
+    ) -> VulkanResult<Self> {
+        let vert_shader = device.create_shader_module(vert_shader_spv)?;
+        let frag_shader = device.create_shader_module(frag_shader_spv)?;
+
+        let entry_point = cstr!("main");
+        let shader_stages_ci = [
+            vk::PipelineShaderStageCreateInfo::builder()
+                .stage(vk::ShaderStageFlags::VERTEX)
+                .module(vert_shader)
+                .name(entry_point)
+                .build(),
+            vk::PipelineShaderStageCreateInfo::builder()
+                .stage(vk::ShaderStageFlags::FRAGMENT)
+                .module(frag_shader)
+                .name(entry_point)
+                .build(),
+        ];
+
+        let binding_desc = Vert::binding_desc(0);
+        let attr_desc = Vert::attr_desc(0);
+        let vertex_input_ci = vk::PipelineVertexInputStateCreateInfo::builder()
+            .vertex_binding_descriptions(slice::from_ref(&binding_desc))
+            .vertex_attribute_descriptions(&attr_desc);
+
+        let input_assembly_ci = vk::PipelineInputAssemblyStateCreateInfo::builder()
+            .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
+            .primitive_restart_enable(false);
+
+        let viewport_state_ci = vk::PipelineViewportStateCreateInfo {
+            viewport_count: 1,
+            scissor_count: 1,
+            ..Default::default()
+        };
+
+        let dynamic_state_ci =
+            vk::PipelineDynamicStateCreateInfo::builder().dynamic_states(&[vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR]);
+
+        let rasterizer_ci = vk::PipelineRasterizationStateCreateInfo::builder()
+            .polygon_mode(vk::PolygonMode::FILL)
+            .line_width(1.0)
+            .cull_mode(vk::CullModeFlags::BACK)
+            .front_face(vk::FrontFace::CLOCKWISE);
+
+        let multisample_ci = vk::PipelineMultisampleStateCreateInfo::builder()
+            .rasterization_samples(vk::SampleCountFlags::TYPE_1)
+            .min_sample_shading(1.0);
+
+        let color_attach = vk::PipelineColorBlendAttachmentState::builder()
+            .color_write_mask(vk::ColorComponentFlags::RGBA)
+            .blend_enable(false)
+            .src_color_blend_factor(vk::BlendFactor::ONE)
+            .dst_color_blend_factor(vk::BlendFactor::ZERO)
+            .color_blend_op(vk::BlendOp::ADD)
+            .src_color_blend_factor(vk::BlendFactor::ONE)
+            .dst_color_blend_factor(vk::BlendFactor::ZERO)
+            .alpha_blend_op(vk::BlendOp::ADD);
+
+        let color_blend_ci = vk::PipelineColorBlendStateCreateInfo::builder()
+            .logic_op_enable(false)
+            .logic_op(vk::LogicOp::COPY)
+            .attachments(slice::from_ref(&color_attach));
+
+        let depth_stencil_ci = vk::PipelineDepthStencilStateCreateInfo::builder()
+            .depth_test_enable(true)
+            .depth_write_enable(true)
+            .depth_compare_op(vk::CompareOp::LESS)
+            .depth_bounds_test_enable(false)
+            .min_depth_bounds(0.0)
+            .max_depth_bounds(1.0);
+
+        let pipeline_layout_ci = vk::PipelineLayoutCreateInfo::builder().set_layouts(slice::from_ref(&desc_set_layout));
+
+        let pipeline_layout = unsafe {
+            device
+                .create_pipeline_layout(&pipeline_layout_ci, None)
+                .describe_err("Failed to create pipeline layout")?
+        };
+
+        let mut pipeline_rendering_ci = vk::PipelineRenderingCreateInfo::builder()
+            .color_attachment_formats(slice::from_ref(&swapchain.format))
+            .depth_attachment_format(swapchain.depth_format);
+
+        let pipeline_ci = vk::GraphicsPipelineCreateInfo::builder()
+            .stages(&shader_stages_ci)
+            .vertex_input_state(&vertex_input_ci)
+            .input_assembly_state(&input_assembly_ci)
+            .viewport_state(&viewport_state_ci)
+            .rasterization_state(&rasterizer_ci)
+            .multisample_state(&multisample_ci)
+            .color_blend_state(&color_blend_ci)
+            .depth_stencil_state(&depth_stencil_ci)
+            .dynamic_state(&dynamic_state_ci)
+            .layout(pipeline_layout)
+            .push_next(&mut pipeline_rendering_ci);
+
+        let pipeline = unsafe {
+            device
+                .create_graphics_pipelines(vk::PipelineCache::null(), slice::from_ref(&pipeline_ci), None)
+                .map_err(|(_, err)| VkError::VulkanMsg("Error creating pipeline", err))?
+        };
+
+        unsafe {
+            device.destroy_shader_module(vert_shader, None);
+            device.destroy_shader_module(frag_shader, None);
+        }
+
+        Ok(Self {
+            handle: pipeline[0],
+            layout: pipeline_layout,
+            _p: PhantomData,
+        })
+    }
+}
+
+impl<V> Cleanup<VulkanDevice> for Pipeline<V> {
+    unsafe fn cleanup(&mut self, device: &VulkanDevice) {
+        device.destroy_pipeline(self.handle, None);
+        device.destroy_pipeline_layout(self.layout, None);
     }
 }
 
