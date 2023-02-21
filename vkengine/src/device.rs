@@ -441,10 +441,10 @@ impl VulkanDevice {
         }
     }
 
-    pub fn create_texture_sampler(&self, addr_mode: vk::SamplerAddressMode) -> VulkanResult<vk::Sampler> {
+    pub fn create_texture_sampler(&self, filter: vk::Filter, addr_mode: vk::SamplerAddressMode) -> VulkanResult<vk::Sampler> {
         let sampler_ci = vk::SamplerCreateInfo::builder()
-            .mag_filter(vk::Filter::LINEAR)
-            .min_filter(vk::Filter::LINEAR)
+            .mag_filter(filter)
+            .min_filter(filter)
             .address_mode_u(addr_mode)
             .address_mode_v(addr_mode)
             .address_mode_w(addr_mode)

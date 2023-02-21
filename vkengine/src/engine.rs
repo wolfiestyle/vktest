@@ -28,8 +28,7 @@ pub struct VulkanEngine {
     vertex_buffer: VkBuffer,
     index_buffer: VkBuffer,
     index_count: u32,
-    texture: VkImage,
-    tex_imgview: vk::ImageView,
+    texture: Texture,
     tex_sampler: vk::Sampler,
     start_time: Instant,
     frame_time: Instant,
@@ -50,9 +49,8 @@ impl VulkanEngine {
             .map(|_| FrameState::new(&vk))
             .collect::<Result<Vec<_>, _>>()?;
 
-        let texture = vk.create_image_from_data(img_width, img_height, img_data)?;
-        let tex_imgview = vk.create_image_view(*texture, vk::Format::R8G8B8A8_SRGB, vk::ImageAspectFlags::COLOR)?;
-        let tex_sampler = vk.create_texture_sampler(vk::SamplerAddressMode::REPEAT)?;
+        let tex_sampler = vk.create_texture_sampler(vk::Filter::LINEAR, vk::SamplerAddressMode::REPEAT)?;
+        let texture = Texture::new(&vk, img_width, img_height, img_data, tex_sampler)?;
 
         let descriptor_layout = Self::create_descriptor_set_layout(&vk)?;
 
@@ -82,7 +80,6 @@ impl VulkanEngine {
             index_buffer,
             index_count: indices.len() as _,
             texture,
-            tex_imgview,
             tex_sampler,
             start_time: now,
             frame_time: now,
@@ -172,8 +169,8 @@ impl VulkanEngine {
         };
         let image_info = vk::DescriptorImageInfo {
             image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-            image_view: self.tex_imgview,
-            sampler: self.tex_sampler,
+            image_view: self.texture.imgview,
+            sampler: self.texture.sampler,
         };
         let desc_writes = [
             vk::WriteDescriptorSet::builder()
@@ -337,9 +334,8 @@ impl Drop for VulkanEngine {
             self.device.device_wait_idle().unwrap();
             self.vertex_buffer.cleanup(&self.device);
             self.index_buffer.cleanup(&self.device);
-            self.device.destroy_sampler(self.tex_sampler, None);
-            self.device.destroy_image_view(self.tex_imgview, None);
             self.texture.cleanup(&self.device);
+            self.device.destroy_sampler(self.tex_sampler, None);
             self.frame_state.cleanup(&self.device);
             self.device.destroy_command_pool(self.command_pool, None);
             self.device.destroy_descriptor_set_layout(self.descriptor_layout, None);
@@ -521,4 +517,25 @@ impl Cleanup<VulkanDevice> for FrameState {
 #[derive(Debug, Clone, Copy)]
 struct UniformBufferObject {
     mvp: Mat4,
+}
+
+struct Texture {
+    image: VkImage,
+    imgview: vk::ImageView,
+    sampler: vk::Sampler,
+}
+
+impl Texture {
+    fn new(device: &VulkanDevice, width: u32, height: u32, data: &[u8], sampler: vk::Sampler) -> VulkanResult<Self> {
+        let image = device.create_image_from_data(width, height, data)?;
+        let imgview = device.create_image_view(*image, vk::Format::R8G8B8A8_SRGB, vk::ImageAspectFlags::COLOR)?;
+        Ok(Self { image, imgview, sampler })
+    }
+}
+
+impl Cleanup<VulkanDevice> for Texture {
+    unsafe fn cleanup(&mut self, device: &VulkanDevice) {
+        device.destroy_image_view(self.imgview, None);
+        self.image.cleanup(device);
+    }
 }
