@@ -3,7 +3,7 @@ use std::io::BufReader;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use structopt::StructOpt;
-use vkengine::{VulkanDevice, VulkanEngine, VulkanInstance, VulkanResult};
+use vkengine::{CameraController, VulkanDevice, VulkanEngine, VulkanInstance, VulkanResult};
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 
@@ -45,13 +45,20 @@ fn main() -> VulkanResult<()> {
         image.height(),
         image.as_raw(),
     )?;
+    vk_app.camera.position = [2.0, 2.0, 2.0].into();
+    vk_app.camera.look_at([0.0; 3]);
+
     let mut prev_time = Instant::now();
     let mut frame_count = 0u32;
+    let mut controller = CameraController::new();
+    //TODO: compute these from current camera direction
+    controller.yaw = 135.0;
+    controller.pitch = 35.0;
 
     event_loop.run(move |event, _, control_flow| match event {
         Event::WindowEvent { event, .. } => match event {
-            WindowEvent::CloseRequested
-            | WindowEvent::KeyboardInput {
+            WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+            WindowEvent::KeyboardInput {
                 input:
                     KeyboardInput {
                         state: ElementState::Pressed,
@@ -65,17 +72,21 @@ fn main() -> VulkanResult<()> {
             WindowEvent::Resized(size) => {
                 vk_app.resize(size);
             }
-            _ => (),
+            _ => controller.update_from_window_event(&event),
         },
+        Event::DeviceEvent { event, .. } => controller.update_from_device_event(&event),
         Event::MainEventsCleared => {
+            let dt = (vk_app.get_frame_time().as_micros() as f64 / 1e6) as f32;
+            controller.update_camera(&mut vk_app.camera, dt);
+
             window.request_redraw();
         }
         Event::RedrawRequested(_) => {
             vk_app.draw_frame().unwrap();
 
-            let cur_time = vk_app.get_frame_time();
+            let cur_time = vk_app.get_frame_timestamp();
             if cur_time - prev_time > Duration::from_secs(1) {
-                println!("{frame_count} fps");
+                println!("{frame_count} fps, frame time {:?}", vk_app.get_frame_time());
                 prev_time = cur_time;
                 frame_count = 0;
             } else {

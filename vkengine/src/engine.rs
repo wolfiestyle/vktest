@@ -1,16 +1,16 @@
+use crate::camera::Camera;
 use crate::device::{Swapchain, UniformBuffer, VkBuffer, VkImage, VulkanDevice};
 use crate::types::*;
 use ash::vk;
 use cstr::cstr;
-use glam::{Affine3A, Mat4, Vec3};
+use glam::{Affine3A, Mat4};
 use inline_spirv::include_spirv;
 use std::marker::PhantomData;
 use std::slice;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 const SWAPCHAIN_IMAGE_COUNT: u32 = 3;
 const MAX_FRAMES_IN_FLIGHT: usize = 2;
-const DEG_TO_RAD: f32 = std::f32::consts::PI / 180.0;
 //type Vertex = ([f32; 3], [f32; 3], [f32; 2]);
 type Vertex = obj::TexturedVertex;
 
@@ -30,9 +30,10 @@ pub struct VulkanEngine {
     index_count: u32,
     texture: Texture,
     tex_sampler: vk::Sampler,
-    start_time: Instant,
-    frame_time: Instant,
-    view: Affine3A,
+    prev_frame_time: Instant,
+    last_frame_time: Instant,
+    pub camera: Camera,
+    pub model: Affine3A,
 }
 
 impl VulkanEngine {
@@ -61,8 +62,7 @@ impl VulkanEngine {
         let vertex_buffer = vk.create_buffer(vertices, vk::BufferUsageFlags::VERTEX_BUFFER)?;
         let index_buffer = vk.create_buffer(indices, vk::BufferUsageFlags::INDEX_BUFFER)?;
 
-        let view = Affine3A::look_at_rh(Vec3::splat(2.0), Vec3::ZERO, Vec3::NEG_Z);
-
+        let camera = Camera::default();
         let now = Instant::now();
 
         Ok(Self {
@@ -81,9 +81,10 @@ impl VulkanEngine {
             index_count: indices.len() as _,
             texture,
             tex_sampler,
-            start_time: now,
-            frame_time: now,
-            view,
+            prev_frame_time: now,
+            last_frame_time: now,
+            camera,
+            model: Affine3A::IDENTITY,
         })
     }
 
@@ -96,8 +97,12 @@ impl VulkanEngine {
         }
     }
 
-    pub fn get_frame_time(&self) -> Instant {
-        self.frame_time
+    pub fn get_frame_timestamp(&self) -> Instant {
+        self.last_frame_time
+    }
+
+    pub fn get_frame_time(&self) -> Duration {
+        self.last_frame_time - self.prev_frame_time
     }
 
     fn create_descriptor_set_layout(device: &VulkanDevice) -> VulkanResult<vk::DescriptorSetLayout> {
@@ -243,7 +248,8 @@ impl VulkanEngine {
             self.device
                 .wait_for_fences(slice::from_ref(&in_flight_fen), true, u64::MAX)
                 .describe_err("Failed waiting for fence")?;
-            self.frame_time = Instant::now();
+            self.prev_frame_time = self.last_frame_time;
+            self.last_frame_time = Instant::now();
             let acquire_res = self
                 .device
                 .swapchain_fn
@@ -308,11 +314,10 @@ impl VulkanEngine {
     }
 
     fn update_uniforms(&mut self) {
-        let time = ((self.frame_time - self.start_time).as_micros() as f64 / 1000000.0) as f32;
-        let model = Affine3A::from_axis_angle(Vec3::Z, 90.0 * DEG_TO_RAD * time);
-        let proj = Mat4::perspective_rh(45.0 * DEG_TO_RAD, self.swapchain.aspect(), 0.1, 1000.0);
+        let view = self.camera.get_view_transform();
+        let proj = Mat4::perspective_rh(45.0f32.to_radians(), self.swapchain.aspect(), 0.1, 1000.0);
         let ubo = UniformBufferObject {
-            mvp: proj * self.view * model,
+            mvp: proj * view * self.model,
         };
         self.frame_state[self.current_frame].uniforms.write_uniforms(ubo);
     }
