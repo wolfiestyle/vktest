@@ -6,6 +6,7 @@ use structopt::StructOpt;
 use vkengine::{CameraController, VulkanDevice, VulkanEngine, VulkanInstance, VulkanResult};
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
+use winit::window::Fullscreen;
 
 #[derive(StructOpt)]
 struct Arguments {
@@ -55,6 +56,8 @@ fn main() -> VulkanResult<()> {
     controller.yaw = 135.0;
     controller.pitch = 35.0;
 
+    let mut fullscreen = false;
+
     event_loop.run(move |event, _, control_flow| match event {
         Event::WindowEvent { event, .. } => match event {
             WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
@@ -68,6 +71,18 @@ fn main() -> VulkanResult<()> {
                 ..
             } => {
                 *control_flow = ControlFlow::Exit;
+            }
+            WindowEvent::KeyboardInput {
+                input:
+                    KeyboardInput {
+                        state: ElementState::Pressed,
+                        virtual_keycode: Some(VirtualKeyCode::F11),
+                        ..
+                    },
+                ..
+            } => {
+                fullscreen = !fullscreen;
+                window.set_fullscreen(fullscreen.then_some(Fullscreen::Borderless(None)));
             }
             WindowEvent::Resized(size) => {
                 vk_app.resize(size);
