@@ -344,7 +344,7 @@ struct Pipeline<Vert> {
     _p: PhantomData<Vert>,
 }
 
-impl<Vert: VertexAttrDesc> Pipeline<Vert> {
+impl<Vert: VertexInput> Pipeline<Vert> {
     fn new(device: &VulkanDevice, shader: &Shader, swapchain: &Swapchain) -> VulkanResult<Self> {
         let entry_point = cstr!("main");
         let shader_stages_ci = [
@@ -443,7 +443,7 @@ impl<Vert: VertexAttrDesc> Pipeline<Vert> {
                 .map_err(|(_, err)| VkError::VulkanMsg("Error creating pipeline", err))?
         };
 
-        device.debug(|d| d.set_object_name(&device, &pipeline[0], &format!("Pipeline<{}>", std::any::type_name::<Vert>())));
+        device.debug(|d| d.set_object_name(device, &pipeline[0], &format!("Pipeline<{}>", std::any::type_name::<Vert>())));
 
         Ok(Self {
             handle: pipeline[0],

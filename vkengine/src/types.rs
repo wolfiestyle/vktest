@@ -142,32 +142,32 @@ macro_rules! impl_format {
     };
 }
 
+impl_format!(f32, 1, vk::Format::R32_SFLOAT);
 impl_format!([f32; 1], 1, vk::Format::R32_SFLOAT);
 impl_format!([f32; 2], 1, vk::Format::R32G32_SFLOAT);
 impl_format!([f32; 3], 1, vk::Format::R32G32B32_SFLOAT);
 impl_format!([f32; 4], 1, vk::Format::R32G32B32A32_SFLOAT);
+impl_format!(u32, 1, vk::Format::R32_UINT);
+impl_format!([u32; 1], 1, vk::Format::R32_UINT);
+impl_format!([u32; 2], 1, vk::Format::R32G32_UINT);
+impl_format!([u32; 3], 1, vk::Format::R32G32B32_UINT);
+impl_format!([u32; 4], 1, vk::Format::R32G32B32A32_UINT);
+impl_format!(i32, 1, vk::Format::R32_SINT);
+impl_format!([i32; 1], 1, vk::Format::R32_SINT);
+impl_format!([i32; 2], 1, vk::Format::R32G32_SINT);
+impl_format!([i32; 3], 1, vk::Format::R32G32B32_SINT);
+impl_format!([i32; 4], 1, vk::Format::R32G32B32A32_SINT);
 
-pub trait VertexBindindDesc {
+pub trait VertexInput {
     fn binding_desc(binding: u32) -> vk::VertexInputBindingDescription;
-}
-
-impl<T: VertexAttrDesc> VertexBindindDesc for T {
-    fn binding_desc(binding: u32) -> vk::VertexInputBindingDescription {
-        vk::VertexInputBindingDescription {
-            binding,
-            stride: std::mem::size_of::<Self>() as _,
-            input_rate: vk::VertexInputRate::VERTEX,
-        }
-    }
-}
-
-pub trait VertexAttrDesc {
     fn attr_desc(binding: u32) -> Vec<vk::VertexInputAttributeDescription>;
 }
 
 macro_rules! impl_vertex {
     (tuple : $($name:ident $idx:tt),+) => {
-        impl<$($name: TypeFormat),+> VertexAttrDesc for ($($name,)+) {
+        impl<$($name: TypeFormat),+> VertexInput for ($($name,)+) {
+            impl_vertex!(@binding_desc);
+
             #[allow(unused_assignments)]
             fn attr_desc(binding: u32) -> Vec<vk::VertexInputAttributeDescription> {
                 let mut i = 0;
@@ -184,8 +184,11 @@ macro_rules! impl_vertex {
             }
         }
     };
+
     (struct $name:ty : $($field:ident),+) => {
-        impl VertexAttrDesc for $name {
+        impl VertexInput for $name {
+            impl_vertex!(@binding_desc);
+
             #[allow(unused_assignments)]
             fn attr_desc(binding: u32) -> Vec<vk::VertexInputAttributeDescription> {
                 let mut i = 0;
@@ -202,12 +205,25 @@ macro_rules! impl_vertex {
                 }),+]
             }
         }
-    }
+    };
+
+    (@binding_desc) => {
+        fn binding_desc(binding: u32) -> vk::VertexInputBindingDescription {
+            vk::VertexInputBindingDescription {
+                binding,
+                stride: std::mem::size_of::<Self>() as _,
+                input_rate: vk::VertexInputRate::VERTEX,
+            }
+        }
+    };
 }
 
 impl_vertex!(tuple: A 0);
 impl_vertex!(tuple: A 0, B 1);
 impl_vertex!(tuple: A 0, B 1, C 2);
+impl_vertex!(tuple: A 0, B 1, C 2, D 3);
+impl_vertex!(tuple: A 0, B 1, C 2, D 3, E 4);
+impl_vertex!(tuple: A 0, B 1, C 2, D 3, E 4, F 5);
 impl_vertex!(struct obj::TexturedVertex: position, normal, texture);
 
 trait LensFormat {
