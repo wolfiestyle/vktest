@@ -192,8 +192,6 @@ impl VulkanEngine {
 
         // commands
         unsafe {
-            self.device
-                .debug(|d| d.cmd_begin_label(cmd_buffer, "3D object", [0.2, 0.4, 0.6, 1.0]));
             self.device.transition_image_layout(
                 cmd_buffer,
                 self.swapchain.images[image_idx],
@@ -201,6 +199,8 @@ impl VulkanEngine {
                 vk::ImageLayout::UNDEFINED,
                 vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
             );
+            self.device
+                .debug(|d| d.cmd_begin_label(cmd_buffer, "3D object", [0.2, 0.4, 0.6, 1.0]));
             self.device.dynrender_fn.cmd_begin_rendering(cmd_buffer, &render_info);
             self.device
                 .cmd_bind_pipeline(cmd_buffer, vk::PipelineBindPoint::GRAPHICS, self.pipeline.handle);
@@ -221,6 +221,7 @@ impl VulkanEngine {
                 .cmd_set_scissor(cmd_buffer, 0, slice::from_ref(&self.swapchain.extent_rect()));
             self.device.cmd_draw_indexed(cmd_buffer, self.index_count, 1, 0, 0, 0);
             self.device.dynrender_fn.cmd_end_rendering(cmd_buffer);
+            self.device.debug(|d| d.cmd_end_label(cmd_buffer));
             self.device.transition_image_layout(
                 cmd_buffer,
                 self.swapchain.images[image_idx],
@@ -228,7 +229,6 @@ impl VulkanEngine {
                 vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
                 vk::ImageLayout::PRESENT_SRC_KHR,
             );
-            self.device.debug(|d| d.cmd_end_label(cmd_buffer));
             self.device
                 .end_command_buffer(cmd_buffer)
                 .describe_err("Failed to end recording command buffer")?;
@@ -465,6 +465,8 @@ impl<Vert: VertexAttrDesc> Pipeline<Vert> {
             device.destroy_shader_module(vert_shader, None);
             device.destroy_shader_module(frag_shader, None);
         }
+
+        device.debug(|d| d.set_object_name(&device, &pipeline[0], &format!("Pipeline<{}>", std::any::type_name::<Vert>())));
 
         Ok(Self {
             handle: pipeline[0],
