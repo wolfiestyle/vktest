@@ -85,6 +85,20 @@ impl VulkanDevice {
         }
     }
 
+    pub fn create_descriptor_set_layout(
+        &self, layout_bindings: &[vk::DescriptorSetLayoutBinding],
+    ) -> VulkanResult<vk::DescriptorSetLayout> {
+        let desc_layout_ci = vk::DescriptorSetLayoutCreateInfo::builder()
+            .flags(vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR)
+            .bindings(layout_bindings);
+
+        unsafe {
+            self.device
+                .create_descriptor_set_layout(&desc_layout_ci, None)
+                .describe_err("Failed to create descriptor set layout")
+        }
+    }
+
     pub fn create_command_pool(&self, family_idx: u32, flags: vk::CommandPoolCreateFlags) -> VulkanResult<vk::CommandPool> {
         let command_pool_ci = vk::CommandPoolCreateInfo::builder().flags(flags).queue_family_index(family_idx);
 
