@@ -119,7 +119,7 @@ impl VulkanEngine {
         self.last_frame_time - self.prev_frame_time
     }
 
-    fn record_command_buffer(&self, cmd_buffer: vk::CommandBuffer, image_idx: usize) -> VulkanResult<()> {
+    fn begin_draw_commands(&self, cmd_buffer: vk::CommandBuffer, image_idx: usize) -> VulkanResult<()> {
         let begin_info = vk::CommandBufferBeginInfo::default();
         unsafe {
             self.device
@@ -127,7 +127,6 @@ impl VulkanEngine {
                 .describe_err("Failed to begin recording command buffer")?;
         }
 
-        // render pass
         let color_attach = vk::RenderingAttachmentInfo::builder()
             .image_view(self.swapchain.image_views[image_idx])
             .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
@@ -152,18 +151,42 @@ impl VulkanEngine {
             .color_attachments(slice::from_ref(&color_attach))
             .depth_attachment(&depth_attach);
 
+        unsafe {
+            self.device.transition_image_layout(
+                cmd_buffer,
+                self.swapchain.images[image_idx],
+                self.swapchain.format,
+                vk::ImageLayout::UNDEFINED,
+                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            );
+            self.device.dynrender_fn.cmd_begin_rendering(cmd_buffer, &render_info);
+        }
+        Ok(())
+    }
+
+    fn end_draw_commands(&self, cmd_buffer: vk::CommandBuffer, image_idx: usize) -> VulkanResult<()> {
+        unsafe {
+            self.device.dynrender_fn.cmd_end_rendering(cmd_buffer);
+            self.device.transition_image_layout(
+                cmd_buffer,
+                self.swapchain.images[image_idx],
+                self.swapchain.format,
+                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                vk::ImageLayout::PRESENT_SRC_KHR,
+            );
+            self.device
+                .end_command_buffer(cmd_buffer)
+                .describe_err("Failed to end recording command buffer")?;
+        }
+        Ok(())
+    }
+
+    fn record_command_buffer(&self, cmd_buffer: vk::CommandBuffer, image_idx: usize) -> VulkanResult<()> {
+        self.begin_draw_commands(cmd_buffer, image_idx)?;
+
         // descriptor set
-        let uniforms = &self.frame_state[self.current_frame].uniforms;
-        let buffer_info = vk::DescriptorBufferInfo {
-            buffer: *uniforms.buffer,
-            offset: 0,
-            range: uniforms.buffer_size() as _,
-        };
-        let image_info = vk::DescriptorImageInfo {
-            image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-            image_view: self.texture.imgview,
-            sampler: self.texture.sampler,
-        };
+        let buffer_info = self.frame_state[self.current_frame].uniforms.descriptor();
+        let image_info = self.texture.descriptor();
         let desc_writes = [
             vk::WriteDescriptorSet::builder()
                 .dst_binding(0)
@@ -177,18 +200,9 @@ impl VulkanEngine {
                 .build(),
         ];
 
-        // commands
         unsafe {
-            self.device.transition_image_layout(
-                cmd_buffer,
-                self.swapchain.images[image_idx],
-                self.swapchain.format,
-                vk::ImageLayout::UNDEFINED,
-                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-            );
             self.device
                 .debug(|d| d.cmd_begin_label(cmd_buffer, "3D object", [0.2, 0.4, 0.6, 1.0]));
-            self.device.dynrender_fn.cmd_begin_rendering(cmd_buffer, &render_info);
             self.device
                 .cmd_bind_pipeline(cmd_buffer, vk::PipelineBindPoint::GRAPHICS, self.pipeline.handle);
             self.device
@@ -207,21 +221,10 @@ impl VulkanEngine {
             self.device
                 .cmd_set_scissor(cmd_buffer, 0, slice::from_ref(&self.swapchain.extent_rect()));
             self.device.cmd_draw_indexed(cmd_buffer, self.index_count, 1, 0, 0, 0);
-            self.device.dynrender_fn.cmd_end_rendering(cmd_buffer);
             self.device.debug(|d| d.cmd_end_label(cmd_buffer));
-            self.device.transition_image_layout(
-                cmd_buffer,
-                self.swapchain.images[image_idx],
-                self.swapchain.format,
-                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                vk::ImageLayout::PRESENT_SRC_KHR,
-            );
-            self.device
-                .end_command_buffer(cmd_buffer)
-                .describe_err("Failed to end recording command buffer")?;
         }
 
-        Ok(())
+        self.end_draw_commands(cmd_buffer, image_idx)
     }
 
     pub fn draw_frame(&mut self) -> VulkanResult<bool> {
@@ -518,6 +521,14 @@ impl Texture {
         let image = device.create_image_from_data(width, height, data)?;
         let imgview = device.create_image_view(*image, vk::Format::R8G8B8A8_SRGB, vk::ImageAspectFlags::COLOR)?;
         Ok(Self { image, imgview, sampler })
+    }
+
+    fn descriptor(&self) -> vk::DescriptorImageInfo {
+        vk::DescriptorImageInfo {
+            image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            image_view: self.imgview,
+            sampler: self.sampler,
+        }
     }
 }
 

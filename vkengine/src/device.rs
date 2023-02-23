@@ -765,8 +765,12 @@ impl<T> UniformBuffer<T> {
         }
     }
 
-    pub const fn buffer_size(&self) -> usize {
-        std::mem::size_of::<T>()
+    pub fn descriptor(&self) -> vk::DescriptorBufferInfo {
+        vk::DescriptorBufferInfo {
+            buffer: *self.buffer,
+            offset: 0,
+            range: std::mem::size_of::<T>() as _,
+        }
     }
 }
 
