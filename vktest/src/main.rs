@@ -19,10 +19,10 @@ struct Arguments {
 fn main() -> VulkanResult<()> {
     let args = Arguments::from_args();
 
-    let file = BufReader::new(File::open(args.model.unwrap_or_else(|| "model.obj".into())).unwrap());
+    let file = BufReader::new(File::open(args.model.unwrap_or_else(|| "data/model.obj".into())).unwrap());
     let model = obj::load_obj(file).unwrap();
     eprintln!("loaded {} vertices, {} indices", model.vertices.len(), model.indices.len());
-    let image = image::open(args.texture.unwrap_or_else(|| "texture.png".into()))
+    let image = image::open(args.texture.unwrap_or_else(|| "data/texture.png".into()))
         .unwrap()
         .into_rgba8();
     eprintln!("loaded image: {} x {}", image.width(), image.height());
