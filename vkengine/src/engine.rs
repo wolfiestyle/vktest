@@ -5,7 +5,6 @@ use ash::vk;
 use cstr::cstr;
 use glam::{Affine3A, Mat4};
 use inline_spirv::include_spirv;
-use std::marker::PhantomData;
 use std::slice;
 use std::time::{Duration, Instant};
 
@@ -20,7 +19,7 @@ pub struct VulkanEngine {
     window_resized: bool,
     swapchain: Swapchain,
     shader: Shader,
-    pipeline: Pipeline<Vertex>,
+    pipeline: Pipeline,
     command_pool: vk::CommandPool,
     command_buffers: Vec<vk::CommandBuffer>,
     frame_state: Vec<FrameState>,
@@ -72,7 +71,7 @@ impl VulkanEngine {
                     .build(),
             ],
         )?;
-        let pipeline = Pipeline::new(&vk, &shader, &swapchain)?;
+        let pipeline = Pipeline::new::<Vertex>(&vk, &shader, &swapchain)?;
 
         let vertex_buffer = vk.create_buffer(vertices, vk::BufferUsageFlags::VERTEX_BUFFER)?;
         let index_buffer = vk.create_buffer(indices, vk::BufferUsageFlags::INDEX_BUFFER)?;
@@ -338,14 +337,24 @@ impl Drop for VulkanEngine {
     }
 }
 
-struct Pipeline<Vert> {
+struct Pipeline {
     handle: vk::Pipeline,
     layout: vk::PipelineLayout,
-    _p: PhantomData<Vert>,
 }
 
-impl<Vert: VertexInput> Pipeline<Vert> {
-    fn new(device: &VulkanDevice, shader: &Shader, swapchain: &Swapchain) -> VulkanResult<Self> {
+impl Pipeline {
+    fn new<Vert: VertexInput>(device: &VulkanDevice, shader: &Shader, swapchain: &Swapchain) -> VulkanResult<Self> {
+        let binding_desc = Vert::binding_desc(0);
+        let attr_desc = Vert::attr_desc(0);
+        let pipeline = Self::create_pipeline(device, shader, swapchain, slice::from_ref(&binding_desc), &attr_desc)?;
+        device.debug(|d| d.set_object_name(device, &pipeline.handle, &format!("Pipeline<{}>", std::any::type_name::<Vert>())));
+        Ok(pipeline)
+    }
+
+    fn create_pipeline(
+        device: &VulkanDevice, shader: &Shader, swapchain: &Swapchain, binding_desc: &[vk::VertexInputBindingDescription],
+        attr_desc: &[vk::VertexInputAttributeDescription],
+    ) -> VulkanResult<Self> {
         let entry_point = cstr!("main");
         let shader_stages_ci = [
             vk::PipelineShaderStageCreateInfo::builder()
@@ -360,11 +369,9 @@ impl<Vert: VertexInput> Pipeline<Vert> {
                 .build(),
         ];
 
-        let binding_desc = Vert::binding_desc(0);
-        let attr_desc = Vert::attr_desc(0);
         let vertex_input_ci = vk::PipelineVertexInputStateCreateInfo::builder()
-            .vertex_binding_descriptions(slice::from_ref(&binding_desc))
-            .vertex_attribute_descriptions(&attr_desc);
+            .vertex_binding_descriptions(binding_desc)
+            .vertex_attribute_descriptions(attr_desc);
 
         let input_assembly_ci = vk::PipelineInputAssemblyStateCreateInfo::builder()
             .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
@@ -443,17 +450,14 @@ impl<Vert: VertexInput> Pipeline<Vert> {
                 .map_err(|(_, err)| VkError::VulkanMsg("Error creating pipeline", err))?
         };
 
-        device.debug(|d| d.set_object_name(device, &pipeline[0], &format!("Pipeline<{}>", std::any::type_name::<Vert>())));
-
         Ok(Self {
             handle: pipeline[0],
             layout: pipeline_layout,
-            _p: PhantomData,
         })
     }
 }
 
-impl<V> Cleanup<VulkanDevice> for Pipeline<V> {
+impl Cleanup<VulkanDevice> for Pipeline {
     unsafe fn cleanup(&mut self, device: &VulkanDevice) {
         device.destroy_pipeline(self.handle, None);
         device.destroy_pipeline_layout(self.layout, None);
