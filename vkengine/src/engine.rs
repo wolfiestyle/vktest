@@ -356,7 +356,7 @@ impl VulkanEngine {
 
     fn update_uniforms(&mut self) {
         let view = self.camera.get_view_transform();
-        let proj = Mat4::perspective_rh(45.0f32.to_radians(), self.swapchain.aspect(), 0.1, 1000.0);
+        let proj = self.camera.get_projection(self.swapchain.aspect());
         let ubo = UniformBufferObject {
             mvp: proj * view * self.model,
         };

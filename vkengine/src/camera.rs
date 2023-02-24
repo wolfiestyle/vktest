@@ -1,4 +1,4 @@
-use glam::{Affine3A, EulerRot, Quat, Vec3};
+use glam::{Affine3A, EulerRot, Mat4, Quat, Vec3};
 #[cfg(feature = "winit")]
 use winit::event::{DeviceEvent, WindowEvent};
 
@@ -7,6 +7,9 @@ pub struct Camera {
     pub position: Vec3,
     pub direction: Vec3,
     pub up: Vec3,
+    pub fov: f32,
+    pub near: f32,
+    pub far: f32,
 }
 
 impl Camera {
@@ -15,6 +18,7 @@ impl Camera {
             position: position.into(),
             direction: direction.into(),
             up: up.into(),
+            ..Default::default()
         }
     }
 
@@ -49,6 +53,10 @@ impl Camera {
     pub(crate) fn get_view_transform(&self) -> Affine3A {
         Affine3A::look_to_rh(self.position, self.direction, self.up)
     }
+
+    pub(crate) fn get_projection(&self, aspect: f32) -> Mat4 {
+        Mat4::perspective_rh(self.fov.to_radians(), aspect, self.near, self.far)
+    }
 }
 
 impl Default for Camera {
@@ -58,6 +66,9 @@ impl Default for Camera {
             position: Vec3::ZERO,
             direction: Vec3::Y,
             up: Vec3::NEG_Z,
+            fov: 45.0,
+            near: 0.1,
+            far: 1000.0,
         }
     }
 }
