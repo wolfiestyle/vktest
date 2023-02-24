@@ -14,6 +14,8 @@ struct Arguments {
     model: Option<PathBuf>,
     #[structopt(short, long, parse(from_os_str), help = "Texture for the model")]
     texture: Option<PathBuf>,
+    #[structopt(short, long, parse(from_os_str), help = "Directory with cubemap images for the skybox")]
+    skybox_dir: Option<PathBuf>,
 }
 
 fn main() -> VulkanResult<()> {
@@ -27,15 +29,20 @@ fn main() -> VulkanResult<()> {
         .into_rgba8();
     eprintln!("loaded image: {} x {}", image.width(), image.height());
 
-    let skybox = ["posx", "negx", "posy", "negy", "posz", "negz"]
-        .map(|side| {
-            std::thread::spawn(move || {
-                let filename = format!("data/skybox/{side}.jpg");
-                eprintln!("loading {filename}");
-                image::open(filename).unwrap().into_rgba8()
+    let skybox_dir = args.skybox_dir.unwrap_or_else(|| "data/skybox".into());
+    let skybox = std::thread::scope(|scope| {
+        let dir_ref = &skybox_dir;
+        ["posx", "negx", "posy", "negy", "posz", "negz"]
+            .map(|side| {
+                scope.spawn(move || {
+                    let filename = format!("{side}.jpg"); //FIXME: detect format
+                    let path = dir_ref.join(filename);
+                    eprintln!("loading {path:?}");
+                    image::open(path).unwrap().into_rgba8()
+                })
             })
-        })
-        .map(|jh| jh.join().unwrap());
+            .map(|jh| jh.join().unwrap())
+    });
     let skybox_raw: Vec<_> = skybox.iter().map(|img| img.as_raw().as_slice()).collect();
 
     let event_loop = EventLoop::new();
