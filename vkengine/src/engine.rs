@@ -85,7 +85,7 @@ impl VulkanEngine {
             include_spirv!("src/shaders/skybox.vert.glsl", vert, glsl),
             include_spirv!("src/shaders/skybox.frag.glsl", frag, glsl),
         )?;
-        let bg_pipeline = Pipeline::create_pipeline(&vk, &bg_shader, pipeline_layout, &swapchain, &[], &[], false)?;
+        let bg_pipeline = Pipeline::create_pipeline(&vk, &bg_shader, pipeline_layout, &swapchain, &[], &[], PipelineMode::Background)?;
         vk.debug(|d| d.set_object_name(&vk, &bg_pipeline.handle, "Pipeline background"));
         let bg_texture = Texture::new_cubemap(&vk, skybox_dims.0, skybox_dims.1, skybox_data, tex_sampler)?;
 
@@ -401,14 +401,22 @@ impl Pipeline {
     ) -> VulkanResult<Self> {
         let binding_desc = Vert::binding_desc(0);
         let attr_desc = Vert::attr_desc(0);
-        let pipeline = Self::create_pipeline(device, shader, layout, swapchain, slice::from_ref(&binding_desc), &attr_desc, true)?;
+        let pipeline = Self::create_pipeline(
+            device,
+            shader,
+            layout,
+            swapchain,
+            slice::from_ref(&binding_desc),
+            &attr_desc,
+            PipelineMode::Opaque,
+        )?;
         device.debug(|d| d.set_object_name(device, &pipeline.handle, &format!("Pipeline<{}>", std::any::type_name::<Vert>())));
         Ok(pipeline)
     }
 
     fn create_pipeline(
         device: &VulkanDevice, shader: &Shader, layout: vk::PipelineLayout, swapchain: &Swapchain,
-        binding_desc: &[vk::VertexInputBindingDescription], attr_desc: &[vk::VertexInputAttributeDescription], depth_write: bool,
+        binding_desc: &[vk::VertexInputBindingDescription], attr_desc: &[vk::VertexInputAttributeDescription], mode: PipelineMode,
     ) -> VulkanResult<Self> {
         let entry_point = cstr!("main");
         let shader_stages_ci = [
@@ -468,8 +476,8 @@ impl Pipeline {
 
         let depth_stencil_ci = vk::PipelineDepthStencilStateCreateInfo::builder()
             .depth_test_enable(true)
-            .depth_write_enable(depth_write)
-            .depth_compare_op(vk::CompareOp::LESS)
+            .depth_write_enable(mode.depth_write())
+            .depth_compare_op(mode.depth_compare_op())
             .depth_bounds_test_enable(false)
             .min_depth_bounds(0.0)
             .max_depth_bounds(1.0);
@@ -514,6 +522,28 @@ impl Pipeline {
 impl Cleanup<VulkanDevice> for Pipeline {
     unsafe fn cleanup(&mut self, device: &VulkanDevice) {
         device.destroy_pipeline(self.handle, None);
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum PipelineMode {
+    Opaque,
+    Background,
+}
+
+impl PipelineMode {
+    fn depth_write(self) -> bool {
+        match self {
+            Self::Opaque => true,
+            Self::Background => false,
+        }
+    }
+
+    fn depth_compare_op(self) -> vk::CompareOp {
+        match self {
+            Self::Opaque => vk::CompareOp::LESS,
+            Self::Background => vk::CompareOp::EQUAL,
+        }
     }
 }
 
