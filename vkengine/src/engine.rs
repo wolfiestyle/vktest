@@ -357,8 +357,11 @@ impl VulkanEngine {
     fn update_uniforms(&mut self) {
         let view = self.camera.get_view_transform();
         let proj = self.camera.get_projection(self.swapchain.aspect());
+        let viewproj = proj * view;
+        let viewproj_inv = viewproj.inverse();
         let ubo = UniformBufferObject {
-            mvp: proj * view * self.model,
+            mvp: viewproj * self.model,
+            viewproj_inv,
         };
         self.frame_state[self.current_frame].uniforms.write_uniforms(ubo);
     }
@@ -573,6 +576,7 @@ impl Cleanup<VulkanDevice> for FrameState {
 #[derive(Debug, Clone, Copy)]
 struct UniformBufferObject {
     mvp: Mat4,
+    viewproj_inv: Mat4,
 }
 
 struct Texture {
