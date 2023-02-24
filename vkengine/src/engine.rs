@@ -21,6 +21,7 @@ pub struct VulkanEngine {
     shader: Shader,
     desc_layout: vk::DescriptorSetLayout,
     pipeline: Pipeline,
+    pipeline_layout: vk::PipelineLayout,
     bg_shader: Shader,
     bg_pipeline: Pipeline,
     bg_texture: Texture,
@@ -76,14 +77,16 @@ impl VulkanEngine {
                 .stage_flags(vk::ShaderStageFlags::FRAGMENT)
                 .build(),
         ])?;
-        let pipeline = Pipeline::new::<Vertex>(&vk, &shader, desc_layout, &swapchain)?;
+        let pipeline_layout = Pipeline::create_layout(&vk, desc_layout)?;
+        let pipeline = Pipeline::new::<Vertex>(&vk, &shader, pipeline_layout, &swapchain)?;
 
         let bg_shader = Shader::new(
             &vk,
             include_spirv!("src/shaders/skybox.vert.glsl", vert, glsl),
             include_spirv!("src/shaders/skybox.frag.glsl", frag, glsl),
         )?;
-        let bg_pipeline = Pipeline::create_pipeline(&vk, &bg_shader, desc_layout, &swapchain, &[], &[], false)?;
+        let bg_pipeline = Pipeline::create_pipeline(&vk, &bg_shader, pipeline_layout, &swapchain, &[], &[], false)?;
+        vk.debug(|d| d.set_object_name(&vk, &bg_pipeline.handle, "Pipeline background"));
         let bg_texture = Texture::new_cubemap(&vk, skybox_dims.0, skybox_dims.1, skybox_data, tex_sampler)?;
 
         let vertex_buffer = vk.create_buffer(vertices, vk::BufferUsageFlags::VERTEX_BUFFER)?;
@@ -100,6 +103,7 @@ impl VulkanEngine {
             shader,
             desc_layout,
             pipeline,
+            pipeline_layout,
             bg_shader,
             bg_pipeline,
             bg_texture,
@@ -203,22 +207,8 @@ impl VulkanEngine {
     fn record_command_buffer(&self, cmd_buffer: vk::CommandBuffer, image_idx: usize) -> VulkanResult<()> {
         self.begin_draw_commands(cmd_buffer, image_idx)?;
 
-        // descriptor set
         let buffer_info = self.frame_state[self.current_frame].uniforms.descriptor();
         let image_info = self.texture.descriptor();
-        let desc_writes = [
-            vk::WriteDescriptorSet::builder()
-                .dst_binding(0)
-                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                .buffer_info(slice::from_ref(&buffer_info))
-                .build(),
-            vk::WriteDescriptorSet::builder()
-                .dst_binding(1)
-                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .image_info(slice::from_ref(&image_info))
-                .build(),
-        ];
-
         unsafe {
             // object
             self.device
@@ -232,9 +222,20 @@ impl VulkanEngine {
             self.device.pushdesc_fn.cmd_push_descriptor_set(
                 cmd_buffer,
                 vk::PipelineBindPoint::GRAPHICS,
-                self.pipeline.layout,
+                self.pipeline_layout,
                 0,
-                &desc_writes,
+                &[
+                    vk::WriteDescriptorSet::builder()
+                        .dst_binding(0)
+                        .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                        .buffer_info(slice::from_ref(&buffer_info))
+                        .build(),
+                    vk::WriteDescriptorSet::builder()
+                        .dst_binding(1)
+                        .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                        .image_info(slice::from_ref(&image_info))
+                        .build(),
+                ],
             );
             self.device
                 .cmd_bind_vertex_buffers(cmd_buffer, 0, slice::from_ref(&*self.vertex_buffer), &[0]);
@@ -245,19 +246,6 @@ impl VulkanEngine {
         }
 
         let image_info = self.bg_texture.descriptor();
-        let desc_writes = [
-            vk::WriteDescriptorSet::builder()
-                .dst_binding(0)
-                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                .buffer_info(slice::from_ref(&buffer_info))
-                .build(),
-            vk::WriteDescriptorSet::builder()
-                .dst_binding(1)
-                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .image_info(slice::from_ref(&image_info))
-                .build(),
-        ];
-
         unsafe {
             // background
             self.device
@@ -267,9 +255,13 @@ impl VulkanEngine {
             self.device.pushdesc_fn.cmd_push_descriptor_set(
                 cmd_buffer,
                 vk::PipelineBindPoint::GRAPHICS,
-                self.bg_pipeline.layout,
+                self.pipeline_layout,
                 0,
-                &desc_writes,
+                &[vk::WriteDescriptorSet::builder()
+                    .dst_binding(1)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .image_info(slice::from_ref(&image_info))
+                    .build()],
             );
             self.device.cmd_draw(cmd_buffer, 6, 1, 0, 0);
             self.device.debug(|d| d.cmd_end_label(cmd_buffer));
@@ -390,6 +382,7 @@ impl Drop for VulkanEngine {
             self.device.destroy_command_pool(self.command_pool, None);
             self.pipeline.cleanup(&self.device);
             self.bg_pipeline.cleanup(&self.device);
+            self.device.destroy_pipeline_layout(self.pipeline_layout, None);
             self.device.destroy_descriptor_set_layout(self.desc_layout, None);
             self.shader.cleanup(&self.device);
             self.bg_shader.cleanup(&self.device);
@@ -400,30 +393,21 @@ impl Drop for VulkanEngine {
 
 struct Pipeline {
     handle: vk::Pipeline,
-    layout: vk::PipelineLayout,
 }
 
 impl Pipeline {
     fn new<Vert: VertexInput>(
-        device: &VulkanDevice, shader: &Shader, desc_layout: vk::DescriptorSetLayout, swapchain: &Swapchain,
+        device: &VulkanDevice, shader: &Shader, layout: vk::PipelineLayout, swapchain: &Swapchain,
     ) -> VulkanResult<Self> {
         let binding_desc = Vert::binding_desc(0);
         let attr_desc = Vert::attr_desc(0);
-        let pipeline = Self::create_pipeline(
-            device,
-            shader,
-            desc_layout,
-            swapchain,
-            slice::from_ref(&binding_desc),
-            &attr_desc,
-            true,
-        )?;
+        let pipeline = Self::create_pipeline(device, shader, layout, swapchain, slice::from_ref(&binding_desc), &attr_desc, true)?;
         device.debug(|d| d.set_object_name(device, &pipeline.handle, &format!("Pipeline<{}>", std::any::type_name::<Vert>())));
         Ok(pipeline)
     }
 
     fn create_pipeline(
-        device: &VulkanDevice, shader: &Shader, desc_layout: vk::DescriptorSetLayout, swapchain: &Swapchain,
+        device: &VulkanDevice, shader: &Shader, layout: vk::PipelineLayout, swapchain: &Swapchain,
         binding_desc: &[vk::VertexInputBindingDescription], attr_desc: &[vk::VertexInputAttributeDescription], depth_write: bool,
     ) -> VulkanResult<Self> {
         let entry_point = cstr!("main");
@@ -490,14 +474,6 @@ impl Pipeline {
             .min_depth_bounds(0.0)
             .max_depth_bounds(1.0);
 
-        let pipeline_layout_ci = vk::PipelineLayoutCreateInfo::builder().set_layouts(slice::from_ref(&desc_layout));
-
-        let pipeline_layout = unsafe {
-            device
-                .create_pipeline_layout(&pipeline_layout_ci, None)
-                .describe_err("Failed to create pipeline layout")?
-        };
-
         let mut pipeline_rendering_ci = vk::PipelineRenderingCreateInfo::builder()
             .color_attachment_formats(slice::from_ref(&swapchain.format))
             .depth_attachment_format(swapchain.depth_format);
@@ -512,7 +488,7 @@ impl Pipeline {
             .color_blend_state(&color_blend_ci)
             .depth_stencil_state(&depth_stencil_ci)
             .dynamic_state(&dynamic_state_ci)
-            .layout(pipeline_layout)
+            .layout(layout)
             .push_next(&mut pipeline_rendering_ci);
 
         let pipeline = unsafe {
@@ -521,17 +497,23 @@ impl Pipeline {
                 .map_err(|(_, err)| VkError::VulkanMsg("Error creating pipeline", err))?
         };
 
-        Ok(Self {
-            handle: pipeline[0],
-            layout: pipeline_layout,
-        })
+        Ok(Self { handle: pipeline[0] })
+    }
+
+    fn create_layout(device: &VulkanDevice, desc_layout: vk::DescriptorSetLayout) -> VulkanResult<vk::PipelineLayout> {
+        let pipeline_layout_ci = vk::PipelineLayoutCreateInfo::builder().set_layouts(slice::from_ref(&desc_layout));
+
+        unsafe {
+            device
+                .create_pipeline_layout(&pipeline_layout_ci, None)
+                .describe_err("Failed to create pipeline layout")
+        }
     }
 }
 
 impl Cleanup<VulkanDevice> for Pipeline {
     unsafe fn cleanup(&mut self, device: &VulkanDevice) {
         device.destroy_pipeline(self.handle, None);
-        device.destroy_pipeline_layout(self.layout, None);
     }
 }
 
