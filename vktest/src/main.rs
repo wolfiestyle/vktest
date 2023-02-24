@@ -27,11 +27,15 @@ fn main() -> VulkanResult<()> {
         .into_rgba8();
     eprintln!("loaded image: {} x {}", image.width(), image.height());
 
-    let skybox = ["posx", "negx", "posy", "negy", "posz", "negz"].map(|side| {
-        let filename = format!("data/skybox/{side}.jpg");
-        eprintln!("loading {filename}");
-        image::open(filename).unwrap().into_rgba8()
-    });
+    let skybox = ["posx", "negx", "posy", "negy", "posz", "negz"]
+        .map(|side| {
+            std::thread::spawn(move || {
+                let filename = format!("data/skybox/{side}.jpg");
+                eprintln!("loading {filename}");
+                image::open(filename).unwrap().into_rgba8()
+            })
+        })
+        .map(|jh| jh.join().unwrap());
     let skybox_raw: Vec<_> = skybox.iter().map(|img| img.as_raw().as_slice()).collect();
 
     let event_loop = EventLoop::new();
