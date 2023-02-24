@@ -1,5 +1,5 @@
 use crate::camera::Camera;
-use crate::device::{Swapchain, UniformBuffer, VkBuffer, VkImage, VulkanDevice};
+use crate::device::{ImageData, Swapchain, UniformBuffer, VkBuffer, VkImage, VulkanDevice};
 use crate::types::*;
 use ash::vk;
 use cstr::cstr;
@@ -21,6 +21,9 @@ pub struct VulkanEngine {
     shader: Shader,
     desc_layout: vk::DescriptorSetLayout,
     pipeline: Pipeline,
+    bg_shader: Shader,
+    bg_pipeline: Pipeline,
+    bg_texture: Texture,
     command_pool: vk::CommandPool,
     command_buffers: Vec<vk::CommandBuffer>,
     frame_state: Vec<FrameState>,
@@ -38,7 +41,8 @@ pub struct VulkanEngine {
 
 impl VulkanEngine {
     pub fn new(
-        vk: VulkanDevice, window_size: WinSize, vertices: &[Vertex], indices: &[u32], img_width: u32, img_height: u32, img_data: &[u8],
+        vk: VulkanDevice, window_size: WinSize, vertices: &[Vertex], indices: &[u32], img_dims: (u32, u32), img_data: &[u8],
+        skybox_dims: (u32, u32), skybox_data: &[&[u8]],
     ) -> VulkanResult<Self> {
         let depth_format = vk.find_depth_format(false)?;
         let swapchain = vk.create_swapchain(window_size, SWAPCHAIN_IMAGE_COUNT, depth_format)?;
@@ -51,7 +55,7 @@ impl VulkanEngine {
             .collect::<Result<Vec<_>, _>>()?;
 
         let tex_sampler = vk.create_texture_sampler(vk::Filter::LINEAR, vk::SamplerAddressMode::REPEAT)?;
-        let texture = Texture::new(&vk, img_width, img_height, img_data, tex_sampler)?;
+        let texture = Texture::new(&vk, img_dims.0, img_dims.1, img_data, tex_sampler)?;
 
         let shader = Shader::new(
             &vk,
@@ -74,6 +78,14 @@ impl VulkanEngine {
         ])?;
         let pipeline = Pipeline::new::<Vertex>(&vk, &shader, desc_layout, &swapchain)?;
 
+        let bg_shader = Shader::new(
+            &vk,
+            include_spirv!("src/shaders/skybox.vert.glsl", vert, glsl),
+            include_spirv!("src/shaders/skybox.frag.glsl", frag, glsl),
+        )?;
+        let bg_pipeline = Pipeline::create_pipeline(&vk, &bg_shader, desc_layout, &swapchain, &[], &[], false)?;
+        let bg_texture = Texture::new_cubemap(&vk, skybox_dims.0, skybox_dims.1, skybox_data, tex_sampler)?;
+
         let vertex_buffer = vk.create_buffer(vertices, vk::BufferUsageFlags::VERTEX_BUFFER)?;
         let index_buffer = vk.create_buffer(indices, vk::BufferUsageFlags::INDEX_BUFFER)?;
 
@@ -88,6 +100,9 @@ impl VulkanEngine {
             shader,
             desc_layout,
             pipeline,
+            bg_shader,
+            bg_pipeline,
+            bg_texture,
             command_pool,
             command_buffers,
             frame_state,
@@ -132,7 +147,7 @@ impl VulkanEngine {
         let color_attach = vk::RenderingAttachmentInfo::builder()
             .image_view(self.swapchain.image_views[image_idx])
             .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-            .load_op(vk::AttachmentLoadOp::CLEAR)
+            .load_op(vk::AttachmentLoadOp::DONT_CARE)
             .store_op(vk::AttachmentStoreOp::STORE)
             .clear_value(vk::ClearValue {
                 color: vk::ClearColorValue {
@@ -158,6 +173,7 @@ impl VulkanEngine {
                 cmd_buffer,
                 self.swapchain.images[image_idx],
                 self.swapchain.format,
+                1,
                 vk::ImageLayout::UNDEFINED,
                 vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
             );
@@ -173,6 +189,7 @@ impl VulkanEngine {
                 cmd_buffer,
                 self.swapchain.images[image_idx],
                 self.swapchain.format,
+                1,
                 vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
                 vk::ImageLayout::PRESENT_SRC_KHR,
             );
@@ -203,14 +220,15 @@ impl VulkanEngine {
         ];
 
         unsafe {
+            // object
             self.device
-                .debug(|d| d.cmd_begin_label(cmd_buffer, "3D object", [0.2, 0.4, 0.6, 1.0]));
+                .debug(|d| d.cmd_begin_label(cmd_buffer, "3D object", [0.2, 0.6, 0.4, 1.0]));
             self.device
                 .cmd_bind_pipeline(cmd_buffer, vk::PipelineBindPoint::GRAPHICS, self.pipeline.handle);
             self.device
-                .cmd_bind_vertex_buffers(cmd_buffer, 0, slice::from_ref(&*self.vertex_buffer), &[0]);
+                .cmd_set_viewport(cmd_buffer, 0, slice::from_ref(&self.swapchain.viewport()));
             self.device
-                .cmd_bind_index_buffer(cmd_buffer, *self.index_buffer, 0, vk::IndexType::UINT32);
+                .cmd_set_scissor(cmd_buffer, 0, slice::from_ref(&self.swapchain.extent_rect()));
             self.device.pushdesc_fn.cmd_push_descriptor_set(
                 cmd_buffer,
                 vk::PipelineBindPoint::GRAPHICS,
@@ -219,10 +237,41 @@ impl VulkanEngine {
                 &desc_writes,
             );
             self.device
-                .cmd_set_viewport(cmd_buffer, 0, slice::from_ref(&self.swapchain.viewport()));
+                .cmd_bind_vertex_buffers(cmd_buffer, 0, slice::from_ref(&*self.vertex_buffer), &[0]);
             self.device
-                .cmd_set_scissor(cmd_buffer, 0, slice::from_ref(&self.swapchain.extent_rect()));
+                .cmd_bind_index_buffer(cmd_buffer, *self.index_buffer, 0, vk::IndexType::UINT32);
             self.device.cmd_draw_indexed(cmd_buffer, self.index_count, 1, 0, 0, 0);
+            self.device.debug(|d| d.cmd_end_label(cmd_buffer));
+        }
+
+        let image_info = self.bg_texture.descriptor();
+        let desc_writes = [
+            vk::WriteDescriptorSet::builder()
+                .dst_binding(0)
+                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                .buffer_info(slice::from_ref(&buffer_info))
+                .build(),
+            vk::WriteDescriptorSet::builder()
+                .dst_binding(1)
+                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .image_info(slice::from_ref(&image_info))
+                .build(),
+        ];
+
+        unsafe {
+            // background
+            self.device
+                .debug(|d| d.cmd_begin_label(cmd_buffer, "Background", [0.2, 0.4, 0.6, 1.0]));
+            self.device
+                .cmd_bind_pipeline(cmd_buffer, vk::PipelineBindPoint::GRAPHICS, self.bg_pipeline.handle);
+            self.device.pushdesc_fn.cmd_push_descriptor_set(
+                cmd_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.bg_pipeline.layout,
+                0,
+                &desc_writes,
+            );
+            self.device.cmd_draw(cmd_buffer, 6, 1, 0, 0);
             self.device.debug(|d| d.cmd_end_label(cmd_buffer));
         }
 
@@ -333,11 +382,14 @@ impl Drop for VulkanEngine {
             self.index_buffer.cleanup(&self.device);
             self.texture.cleanup(&self.device);
             self.device.destroy_sampler(self.tex_sampler, None);
+            self.bg_texture.cleanup(&self.device);
             self.frame_state.cleanup(&self.device);
             self.device.destroy_command_pool(self.command_pool, None);
             self.pipeline.cleanup(&self.device);
+            self.bg_pipeline.cleanup(&self.device);
             self.device.destroy_descriptor_set_layout(self.desc_layout, None);
             self.shader.cleanup(&self.device);
+            self.bg_shader.cleanup(&self.device);
             self.swapchain.cleanup(&self.device);
         }
     }
@@ -354,14 +406,22 @@ impl Pipeline {
     ) -> VulkanResult<Self> {
         let binding_desc = Vert::binding_desc(0);
         let attr_desc = Vert::attr_desc(0);
-        let pipeline = Self::create_pipeline(device, shader, swapchain, slice::from_ref(&binding_desc), &attr_desc, desc_layout)?;
+        let pipeline = Self::create_pipeline(
+            device,
+            shader,
+            desc_layout,
+            swapchain,
+            slice::from_ref(&binding_desc),
+            &attr_desc,
+            true,
+        )?;
         device.debug(|d| d.set_object_name(device, &pipeline.handle, &format!("Pipeline<{}>", std::any::type_name::<Vert>())));
         Ok(pipeline)
     }
 
     fn create_pipeline(
-        device: &VulkanDevice, shader: &Shader, swapchain: &Swapchain, binding_desc: &[vk::VertexInputBindingDescription],
-        attr_desc: &[vk::VertexInputAttributeDescription], desc_layout: vk::DescriptorSetLayout,
+        device: &VulkanDevice, shader: &Shader, desc_layout: vk::DescriptorSetLayout, swapchain: &Swapchain,
+        binding_desc: &[vk::VertexInputBindingDescription], attr_desc: &[vk::VertexInputAttributeDescription], depth_write: bool,
     ) -> VulkanResult<Self> {
         let entry_point = cstr!("main");
         let shader_stages_ci = [
@@ -421,7 +481,7 @@ impl Pipeline {
 
         let depth_stencil_ci = vk::PipelineDepthStencilStateCreateInfo::builder()
             .depth_test_enable(true)
-            .depth_write_enable(true)
+            .depth_write_enable(depth_write)
             .depth_compare_op(vk::CompareOp::LESS)
             .depth_bounds_test_enable(false)
             .min_depth_bounds(0.0)
@@ -523,8 +583,25 @@ struct Texture {
 
 impl Texture {
     fn new(device: &VulkanDevice, width: u32, height: u32, data: &[u8], sampler: vk::Sampler) -> VulkanResult<Self> {
-        let image = device.create_image_from_data(width, height, data)?;
-        let imgview = device.create_image_view(*image, vk::Format::R8G8B8A8_SRGB, vk::ImageAspectFlags::COLOR)?;
+        let image = device.create_image_from_data(width, height, ImageData::Single(data))?;
+        let imgview = device.create_image_view(
+            *image,
+            vk::Format::R8G8B8A8_SRGB,
+            vk::ImageViewType::TYPE_2D,
+            vk::ImageAspectFlags::COLOR,
+        )?;
+        Ok(Self { image, imgview, sampler })
+    }
+
+    fn new_cubemap(device: &VulkanDevice, width: u32, height: u32, data: &[&[u8]], sampler: vk::Sampler) -> VulkanResult<Self> {
+        assert!(data.len() == 6);
+        let image = device.create_image_from_data(width, height, ImageData::Array(6, data))?;
+        let imgview = device.create_image_view(
+            *image,
+            vk::Format::R8G8B8A8_SRGB,
+            vk::ImageViewType::CUBE,
+            vk::ImageAspectFlags::COLOR,
+        )?;
         Ok(Self { image, imgview, sampler })
     }
 

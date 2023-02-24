@@ -201,11 +201,11 @@ impl VulkanDevice {
         Ok(VkBuffer::new(buffer, memory))
     }
 
-    fn write_memory_slice<T: Copy>(&self, memory: &mut MemoryBlock, data: &[T]) -> VulkanResult<()> {
+    fn write_memory_slice<T: Copy>(&self, memory: &mut MemoryBlock, data: &[T], offset: u64) -> VulkanResult<()> {
         unsafe {
             let (prefix, bytes, suffix) = data.align_to();
             assert!(prefix.is_empty() && suffix.is_empty());
-            memory.write_bytes(AshMemoryDevice::wrap(&self.device), 0, bytes)?;
+            memory.write_bytes(AshMemoryDevice::wrap(&self.device), offset, bytes)?;
         }
         Ok(())
     }
@@ -232,7 +232,7 @@ impl VulkanDevice {
         )?;
         let dst_buffer = self.allocate_buffer(size, vk::BufferUsageFlags::TRANSFER_DST | usage, ga::UsageFlags::FAST_DEVICE_ACCESS)?;
 
-        self.write_memory_slice(&mut src_buffer.memory, data)?;
+        self.write_memory_slice(&mut src_buffer.memory, data, 0)?;
         self.copy_buffer(*dst_buffer, *src_buffer, size)?;
 
         unsafe { src_buffer.cleanup(self) };
@@ -251,18 +251,19 @@ impl VulkanDevice {
     }
 
     pub fn allocate_image(
-        &self, width: u32, height: u32, format: vk::Format, tiling: vk::ImageTiling, img_usage: vk::ImageUsageFlags,
+        &self, width: u32, height: u32, layers: u32, format: vk::Format, flags: vk::ImageCreateFlags, img_usage: vk::ImageUsageFlags,
         mem_usage: ga::UsageFlags,
     ) -> VulkanResult<VkImage> {
         let image_ci = vk::ImageCreateInfo::builder()
             .image_type(vk::ImageType::TYPE_2D)
             .extent(vk::Extent3D { width, height, depth: 1 })
             .mip_levels(1)
-            .array_layers(1)
+            .array_layers(layers)
             .format(format)
-            .tiling(tiling)
+            .tiling(vk::ImageTiling::OPTIMAL)
             .initial_layout(vk::ImageLayout::UNDEFINED)
             .usage(img_usage)
+            .flags(flags)
             .samples(vk::SampleCountFlags::TYPE_1)
             .sharing_mode(vk::SharingMode::EXCLUSIVE);
 
@@ -292,7 +293,7 @@ impl VulkanDevice {
     }
 
     pub fn transition_image_layout(
-        &self, cmd_buffer: vk::CommandBuffer, image: vk::Image, format: vk::Format, old_layout: vk::ImageLayout,
+        &self, cmd_buffer: vk::CommandBuffer, image: vk::Image, format: vk::Format, layer_count: u32, old_layout: vk::ImageLayout,
         new_layout: vk::ImageLayout,
     ) {
         let (src_access, dst_access, src_stage, dst_stage) = match (old_layout, new_layout) {
@@ -350,7 +351,7 @@ impl VulkanDevice {
                 base_mip_level: 0,
                 level_count: 1,
                 base_array_layer: 0,
-                layer_count: 1,
+                layer_count,
             });
         unsafe {
             self.device.cmd_pipeline_barrier(
@@ -365,7 +366,9 @@ impl VulkanDevice {
         }
     }
 
-    fn copy_buffer_to_image(&self, cmd_buffer: vk::CommandBuffer, buffer: vk::Buffer, image: vk::Image, width: u32, height: u32) {
+    fn copy_buffer_to_image(
+        &self, cmd_buffer: vk::CommandBuffer, buffer: vk::Buffer, image: vk::Image, width: u32, height: u32, layer_count: u32,
+    ) {
         let region = vk::BufferImageCopy::builder()
             .buffer_offset(0)
             .buffer_row_length(0)
@@ -374,7 +377,7 @@ impl VulkanDevice {
                 aspect_mask: vk::ImageAspectFlags::COLOR,
                 mip_level: 0,
                 base_array_layer: 0,
-                layer_count: 1,
+                layer_count,
             })
             .image_offset(Default::default())
             .image_extent(vk::Extent3D { width, height, depth: 1 });
@@ -389,39 +392,55 @@ impl VulkanDevice {
         }
     }
 
-    pub fn create_image_from_data(&self, width: u32, height: u32, data: &[u8]) -> VulkanResult<VkImage> {
-        let size = width as vk::DeviceSize * height as vk::DeviceSize * 4;
-        if data.len() != size as usize {
-            return Err(VkError::EngineError("Image size and data length doesn't match"));
-        }
+    pub fn create_image_from_data(&self, width: u32, height: u32, data: ImageData) -> VulkanResult<VkImage> {
+        let layer_size = width as vk::DeviceSize * height as vk::DeviceSize * 4;
+        let layers = data.layer_count();
+        let size = layer_size * layers as vk::DeviceSize;
         let mut src_buffer = self.allocate_buffer(
             size,
             vk::BufferUsageFlags::TRANSFER_SRC,
             ga::UsageFlags::UPLOAD | ga::UsageFlags::TRANSIENT,
         )?;
+        let flags = if layers == 6 {
+            vk::ImageCreateFlags::CUBE_COMPATIBLE
+        } else {
+            Default::default()
+        };
         let tex_image = self.allocate_image(
             width,
             height,
+            layers,
             vk::Format::R8G8B8A8_SRGB,
-            vk::ImageTiling::OPTIMAL,
+            flags,
             vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
             ga::UsageFlags::FAST_DEVICE_ACCESS,
         )?;
 
-        self.write_memory_slice(&mut src_buffer.memory, data)?;
+        match data {
+            ImageData::Single(bytes) => {
+                self.write_memory_slice(&mut src_buffer.memory, bytes, 0)?;
+            }
+            ImageData::Array(n, bytes) => {
+                for i in 0..n {
+                    self.write_memory_slice(&mut src_buffer.memory, bytes[i as usize], layer_size * i as u64)?;
+                }
+            }
+        }
         let cmd_buffer = self.begin_one_time_commands()?;
         self.transition_image_layout(
             cmd_buffer,
             *tex_image,
             vk::Format::R8G8B8A8_SRGB,
+            layers,
             vk::ImageLayout::UNDEFINED,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
         );
-        self.copy_buffer_to_image(cmd_buffer, *src_buffer, *tex_image, width, height);
+        self.copy_buffer_to_image(cmd_buffer, *src_buffer, *tex_image, width, height, layers);
         self.transition_image_layout(
             cmd_buffer,
             *tex_image,
             vk::Format::R8G8B8A8_SRGB,
+            layers,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
             vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
         );
@@ -434,18 +453,19 @@ impl VulkanDevice {
     }
 
     pub fn create_image_view(
-        &self, image: vk::Image, format: vk::Format, aspect_mask: vk::ImageAspectFlags,
+        &self, image: vk::Image, format: vk::Format, view_type: vk::ImageViewType, aspect_mask: vk::ImageAspectFlags,
     ) -> VulkanResult<vk::ImageView> {
+        let layer_count = if view_type == vk::ImageViewType::CUBE { 6 } else { 1 };
         let imageview_ci = vk::ImageViewCreateInfo::builder()
             .image(image)
-            .view_type(vk::ImageViewType::TYPE_2D)
+            .view_type(view_type)
             .format(format)
             .subresource_range(vk::ImageSubresourceRange {
                 aspect_mask,
                 base_mip_level: 0,
                 level_count: 1,
                 base_array_layer: 0,
-                layer_count: 1,
+                layer_count,
             });
 
         unsafe {
@@ -596,7 +616,14 @@ impl Swapchain {
 
         let image_views = images
             .iter()
-            .map(|&image| device.create_image_view(image, surface_format.format, vk::ImageAspectFlags::COLOR))
+            .map(|&image| {
+                device.create_image_view(
+                    image,
+                    surface_format.format,
+                    vk::ImageViewType::TYPE_2D,
+                    vk::ImageAspectFlags::COLOR,
+                )
+            })
             .collect::<Result<_, _>>()?;
 
         Ok(Self {
@@ -620,8 +647,9 @@ impl Swapchain {
                 device.allocate_image(
                     self.extent.width,
                     self.extent.height,
+                    1,
                     depth_format,
-                    vk::ImageTiling::OPTIMAL,
+                    vk::ImageCreateFlags::empty(),
                     vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
                     ga::UsageFlags::FAST_DEVICE_ACCESS,
                 )
@@ -630,7 +658,7 @@ impl Swapchain {
 
         let depth_imgviews = depth_images
             .iter()
-            .map(|image| device.create_image_view(**image, depth_format, vk::ImageAspectFlags::DEPTH))
+            .map(|image| device.create_image_view(**image, depth_format, vk::ImageViewType::TYPE_2D, vk::ImageAspectFlags::DEPTH))
             .collect::<Result<Vec<_>, _>>()?;
 
         let cmd_buffer = device.begin_one_time_commands()?;
@@ -639,6 +667,7 @@ impl Swapchain {
                 cmd_buffer,
                 img.handle,
                 depth_format,
+                1,
                 vk::ImageLayout::UNDEFINED,
                 vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
             );
@@ -779,5 +808,20 @@ impl<T> Cleanup<VulkanDevice> for UniformBuffer<T> {
         self.ub_mapped = None;
         self.buffer.memory.unmap(AshMemoryDevice::wrap(device));
         self.buffer.cleanup(device);
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ImageData<'a> {
+    Single(&'a [u8]),
+    Array(u32, &'a [&'a [u8]]),
+}
+
+impl ImageData<'_> {
+    fn layer_count(self) -> u32 {
+        match self {
+            Self::Single(_) => 1,
+            Self::Array(n, _) => n,
+        }
     }
 }

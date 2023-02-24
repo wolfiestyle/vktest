@@ -27,6 +27,13 @@ fn main() -> VulkanResult<()> {
         .into_rgba8();
     eprintln!("loaded image: {} x {}", image.width(), image.height());
 
+    let skybox = ["posx", "negx", "posy", "negy", "posz", "negz"].map(|side| {
+        let filename = format!("data/skybox/{side}.jpg");
+        eprintln!("loading {filename}");
+        image::open(filename).unwrap().into_rgba8()
+    });
+    let skybox_raw: Vec<_> = skybox.iter().map(|img| img.as_raw().as_slice()).collect();
+
     let event_loop = EventLoop::new();
     let win_size = winit::dpi::PhysicalSize::new(1024, 768);
     let window = winit::window::WindowBuilder::new()
@@ -42,9 +49,10 @@ fn main() -> VulkanResult<()> {
         win_size.into(),
         &model.vertices,
         &model.indices,
-        image.width(),
-        image.height(),
+        image.dimensions(),
         image.as_raw(),
+        skybox[0].dimensions(),
+        &skybox_raw,
     )?;
     vk_app.camera.position = [2.0, 2.0, 2.0].into();
     vk_app.camera.look_at([0.0; 3]);
