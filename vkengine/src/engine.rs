@@ -55,7 +55,7 @@ impl VulkanEngine {
             .map(|_| FrameState::new(&vk))
             .collect::<Result<Vec<_>, _>>()?;
 
-        let tex_sampler = vk.create_texture_sampler(vk::Filter::LINEAR, vk::SamplerAddressMode::REPEAT)?;
+        let tex_sampler = vk.create_texture_sampler(vk::Filter::LINEAR, vk::Filter::LINEAR, vk::SamplerAddressMode::REPEAT)?;
         let texture = Texture::new(&vk, img_dims.0, img_dims.1, img_data, tex_sampler)?;
 
         let shader = Shader::new(
@@ -89,8 +89,8 @@ impl VulkanEngine {
         vk.debug(|d| d.set_object_name(&vk, &bg_pipeline.handle, "Pipeline background"));
         let bg_texture = Texture::new_cubemap(&vk, skybox_dims.0, skybox_dims.1, skybox_data, tex_sampler)?;
 
-        let vertex_buffer = vk.create_buffer(vertices, vk::BufferUsageFlags::VERTEX_BUFFER)?;
-        let index_buffer = vk.create_buffer(indices, vk::BufferUsageFlags::INDEX_BUFFER)?;
+        let vertex_buffer = vk.create_buffer_from_data(vertices, vk::BufferUsageFlags::VERTEX_BUFFER)?;
+        let index_buffer = vk.create_buffer_from_data(indices, vk::BufferUsageFlags::INDEX_BUFFER)?;
 
         let camera = Camera::default();
         let now = Instant::now();

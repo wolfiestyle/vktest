@@ -223,7 +223,7 @@ impl VulkanDevice {
         self.end_one_time_commands(cmd_buffer)
     }
 
-    pub fn create_buffer<T: Copy>(&self, data: &[T], usage: vk::BufferUsageFlags) -> VulkanResult<VkBuffer> {
+    pub fn create_buffer_from_data<T: Copy>(&self, data: &[T], usage: vk::BufferUsageFlags) -> VulkanResult<VkBuffer> {
         let size = std::mem::size_of_val(data) as _;
         let mut src_buffer = self.allocate_buffer(
             size,
@@ -475,10 +475,12 @@ impl VulkanDevice {
         }
     }
 
-    pub fn create_texture_sampler(&self, filter: vk::Filter, addr_mode: vk::SamplerAddressMode) -> VulkanResult<vk::Sampler> {
+    pub fn create_texture_sampler(
+        &self, mag_filter: vk::Filter, min_filter: vk::Filter, addr_mode: vk::SamplerAddressMode,
+    ) -> VulkanResult<vk::Sampler> {
         let sampler_ci = vk::SamplerCreateInfo::builder()
-            .mag_filter(filter)
-            .min_filter(filter)
+            .mag_filter(mag_filter)
+            .min_filter(min_filter)
             .address_mode_u(addr_mode)
             .address_mode_v(addr_mode)
             .address_mode_w(addr_mode)
