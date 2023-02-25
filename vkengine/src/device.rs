@@ -201,15 +201,6 @@ impl VulkanDevice {
         Ok(VkBuffer::new(buffer, memory))
     }
 
-    fn write_memory_slice<T: Copy>(&self, memory: &mut MemoryBlock, data: &[T], offset: u64) -> VulkanResult<()> {
-        unsafe {
-            let (prefix, bytes, suffix) = data.align_to();
-            assert!(prefix.is_empty() && suffix.is_empty());
-            memory.write_bytes(AshMemoryDevice::wrap(&self.device), offset, bytes)?;
-        }
-        Ok(())
-    }
-
     fn copy_buffer(&self, dst_buffer: vk::Buffer, src_buffer: vk::Buffer, size: vk::DeviceSize) -> VulkanResult<()> {
         let cmd_buffer = self.begin_one_time_commands()?;
         let copy_region = vk::BufferCopy {
@@ -232,7 +223,7 @@ impl VulkanDevice {
         )?;
         let dst_buffer = self.allocate_buffer(size, vk::BufferUsageFlags::TRANSFER_DST | usage, ga::UsageFlags::FAST_DEVICE_ACCESS)?;
 
-        self.write_memory_slice(&mut src_buffer.memory, data, 0)?;
+        src_buffer.write_slice(self, data, 0)?;
         self.copy_buffer(*dst_buffer, *src_buffer, size)?;
 
         unsafe { src_buffer.cleanup(self) };
@@ -393,9 +384,9 @@ impl VulkanDevice {
     }
 
     pub fn create_image_from_data(&self, width: u32, height: u32, data: ImageData) -> VulkanResult<VkImage> {
-        let layer_size = width as vk::DeviceSize * height as vk::DeviceSize * 4;
+        let layer_size = width as usize * height as usize * 4;
         let layers = data.layer_count();
-        let size = layer_size * layers as vk::DeviceSize;
+        let size = layer_size as vk::DeviceSize * layers as vk::DeviceSize;
         let mut src_buffer = self.allocate_buffer(
             size,
             vk::BufferUsageFlags::TRANSFER_SRC,
@@ -418,11 +409,11 @@ impl VulkanDevice {
 
         match data {
             ImageData::Single(bytes) => {
-                self.write_memory_slice(&mut src_buffer.memory, bytes, 0)?;
+                src_buffer.write_bytes(self, bytes, 0)?;
             }
             ImageData::Array(n, bytes) => {
-                for i in 0..n {
-                    self.write_memory_slice(&mut src_buffer.memory, bytes[i as usize], layer_size * i as u64)?;
+                for i in 0..n as usize {
+                    src_buffer.write_bytes(self, bytes[i], layer_size * i)?;
                 }
             }
         }
@@ -752,6 +743,22 @@ impl<T> MemoryObject<T> {
             handle,
             memory: ManuallyDrop::new(memory),
         }
+    }
+
+    #[inline]
+    pub fn write_bytes(&mut self, device: &VulkanDevice, bytes: &[u8], offset: usize) -> VulkanResult<()> {
+        unsafe {
+            self.memory
+                .write_bytes(AshMemoryDevice::wrap(&device), offset as _, bytes)
+                .map_err(From::from)
+        }
+    }
+
+    #[inline]
+    pub fn write_slice<D>(&mut self, device: &VulkanDevice, slice: &[D], offset: usize) -> VulkanResult<()> {
+        let (_, bytes, _) = unsafe { slice.align_to() };
+        let byte_offset = offset * std::mem::size_of::<D>();
+        self.write_bytes(device, bytes, byte_offset)
     }
 
     unsafe fn free_memory(&mut self, device: &VulkanDevice) {
