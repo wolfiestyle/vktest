@@ -316,6 +316,12 @@ impl VulkanDevice {
                 vk::PipelineStageFlags::TRANSFER,
                 vk::PipelineStageFlags::FRAGMENT_SHADER,
             ),
+            (vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL, vk::ImageLayout::TRANSFER_DST_OPTIMAL) => (
+                vk::AccessFlags::SHADER_READ,
+                vk::AccessFlags::TRANSFER_WRITE,
+                vk::PipelineStageFlags::FRAGMENT_SHADER,
+                vk::PipelineStageFlags::TRANSFER,
+            ),
             (vk::ImageLayout::UNDEFINED, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL) => (
                 vk::AccessFlags::empty(),
                 vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
@@ -334,7 +340,7 @@ impl VulkanDevice {
                 vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
                 vk::PipelineStageFlags::BOTTOM_OF_PIPE,
             ),
-            _ => panic!("Unsupported layout transition"),
+            _ => panic!("Unsupported layout transition {old_layout:?} -> {new_layout:?}"),
         };
 
         let aspect_mask = match format {
@@ -374,7 +380,8 @@ impl VulkanDevice {
     }
 
     fn copy_buffer_to_image(
-        &self, cmd_buffer: vk::CommandBuffer, buffer: vk::Buffer, image: vk::Image, width: u32, height: u32, layer_count: u32,
+        &self, cmd_buffer: vk::CommandBuffer, buffer: vk::Buffer, image: vk::Image, offset: vk::Offset3D, extent: vk::Extent3D,
+        layer_count: u32,
     ) {
         let region = vk::BufferImageCopy::builder()
             .buffer_offset(0)
@@ -386,8 +393,8 @@ impl VulkanDevice {
                 base_array_layer: 0,
                 layer_count,
             })
-            .image_offset(Default::default())
-            .image_extent(vk::Extent3D { width, height, depth: 1 });
+            .image_offset(offset)
+            .image_extent(extent);
         unsafe {
             self.device.cmd_copy_buffer_to_image(
                 cmd_buffer,
@@ -442,7 +449,14 @@ impl VulkanDevice {
             vk::ImageLayout::UNDEFINED,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
         );
-        self.copy_buffer_to_image(cmd_buffer, *src_buffer, *tex_image, width, height, layers);
+        self.copy_buffer_to_image(
+            cmd_buffer,
+            *src_buffer,
+            *tex_image,
+            vk::Offset3D::default(),
+            vk::Extent3D { width, height, depth: 1 },
+            layers,
+        );
         self.transition_image_layout(
             cmd_buffer,
             *tex_image,
@@ -457,6 +471,60 @@ impl VulkanDevice {
         self.debug(|d| d.set_object_name(&self.device, &tex_image.handle, "Texture image"));
 
         Ok(tex_image)
+    }
+
+    pub(crate) fn update_image_from_data(
+        &self, image: vk::Image, x: i32, y: i32, width: u32, height: u32, data: ImageData,
+    ) -> VulkanResult<()> {
+        let layer_size = width as usize * height as usize * 4;
+        let layers = data.layer_count();
+        let size = layer_size as vk::DeviceSize * layers as vk::DeviceSize;
+        let mut src_buffer = self.allocate_buffer(
+            size,
+            vk::BufferUsageFlags::TRANSFER_SRC,
+            ga::UsageFlags::UPLOAD | ga::UsageFlags::TRANSIENT,
+        )?;
+
+        match data {
+            ImageData::Single(bytes) => {
+                src_buffer.write_bytes(self, bytes, 0)?;
+            }
+            ImageData::Array(n, bytes) => {
+                for i in 0..n as usize {
+                    src_buffer.write_bytes(self, bytes[i], layer_size * i)?;
+                }
+            }
+        }
+
+        let cmd_buffer = self.begin_one_time_commands()?;
+        self.transition_image_layout(
+            cmd_buffer,
+            image,
+            vk::Format::R8G8B8A8_SRGB,
+            layers,
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+        );
+        self.copy_buffer_to_image(
+            cmd_buffer,
+            *src_buffer,
+            image,
+            vk::Offset3D { x, y, z: 0 },
+            vk::Extent3D { width, height, depth: 1 },
+            layers,
+        );
+        self.transition_image_layout(
+            cmd_buffer,
+            image,
+            vk::Format::R8G8B8A8_SRGB,
+            layers,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+        );
+        self.end_one_time_commands(cmd_buffer)?;
+
+        unsafe { src_buffer.cleanup(self) };
+        Ok(())
     }
 
     pub fn create_image_view(

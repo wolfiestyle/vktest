@@ -652,14 +652,14 @@ struct UniformBufferObject {
     viewproj_inv: Mat4,
 }
 
-struct Texture {
+pub struct Texture {
     image: VkImage,
     imgview: vk::ImageView,
     sampler: vk::Sampler,
 }
 
 impl Texture {
-    fn new(device: &VulkanDevice, width: u32, height: u32, data: &[u8], sampler: vk::Sampler) -> VulkanResult<Self> {
+    pub fn new(device: &VulkanDevice, width: u32, height: u32, data: &[u8], sampler: vk::Sampler) -> VulkanResult<Self> {
         let image = device.create_image_from_data(width, height, ImageData::Single(data))?;
         let imgview = device.create_image_view(
             *image,
@@ -670,7 +670,7 @@ impl Texture {
         Ok(Self { image, imgview, sampler })
     }
 
-    fn new_cubemap(device: &VulkanDevice, width: u32, height: u32, data: &[&[u8]], sampler: vk::Sampler) -> VulkanResult<Self> {
+    pub fn new_cubemap(device: &VulkanDevice, width: u32, height: u32, data: &[&[u8]], sampler: vk::Sampler) -> VulkanResult<Self> {
         assert!(data.len() == 6);
         let image = device.create_image_from_data(width, height, ImageData::Array(6, data))?;
         let imgview = device.create_image_view(
@@ -682,7 +682,12 @@ impl Texture {
         Ok(Self { image, imgview, sampler })
     }
 
-    fn descriptor(&self) -> vk::DescriptorImageInfo {
+    pub fn update(&mut self, device: &VulkanDevice, x: u32, y: u32, width: u32, height: u32, data: &[u8]) -> VulkanResult<()> {
+        //TODO: validate params
+        device.update_image_from_data(*self.image, x as _, y as _, width, height, ImageData::Single(data))
+    }
+
+    pub(crate) fn descriptor(&self) -> vk::DescriptorImageInfo {
         vk::DescriptorImageInfo {
             image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
             image_view: self.imgview,
