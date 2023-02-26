@@ -80,15 +80,14 @@ impl VulkanEngine {
                 .build(),
         ])?;
         let pipeline_layout = Pipeline::create_layout(&vk, desc_layout)?;
-        let pipeline = Pipeline::new::<Vertex>(&vk, &shader, pipeline_layout, &swapchain)?;
+        let pipeline = Pipeline::new::<Vertex>(&vk, &shader, pipeline_layout, &swapchain, PipelineMode::Opaque)?;
 
         let bg_shader = Shader::new(
             &vk,
             include_spirv!("src/shaders/skybox.vert.glsl", vert, glsl),
             include_spirv!("src/shaders/skybox.frag.glsl", frag, glsl),
         )?;
-        let bg_pipeline = Pipeline::create_pipeline(&vk, &bg_shader, pipeline_layout, &swapchain, &[], &[], PipelineMode::Background)?;
-        vk.debug(|d| d.set_object_name(&vk, &bg_pipeline.handle, "Pipeline background"));
+        let bg_pipeline = Pipeline::new_no_input(&vk, &bg_shader, pipeline_layout, &swapchain, PipelineMode::Background)?;
         let bg_texture = Texture::new_cubemap(&vk, skybox_dims.0, skybox_dims.1, skybox_data, tex_sampler)?;
 
         let vertex_buffer = vk.create_buffer_from_data(vertices, vk::BufferUsageFlags::VERTEX_BUFFER)?;
@@ -428,26 +427,26 @@ impl Drop for VulkanEngine {
     }
 }
 
-struct Pipeline {
+pub struct Pipeline {
     handle: vk::Pipeline,
 }
 
 impl Pipeline {
-    fn new<Vert: VertexInput>(
-        device: &VulkanDevice, shader: &Shader, layout: vk::PipelineLayout, swapchain: &Swapchain,
+    pub fn new<Vert: VertexInput>(
+        device: &VulkanDevice, shader: &Shader, layout: vk::PipelineLayout, swapchain: &Swapchain, mode: PipelineMode,
     ) -> VulkanResult<Self> {
         let binding_desc = Vert::binding_desc(0);
         let attr_desc = Vert::attr_desc(0);
-        let pipeline = Self::create_pipeline(
-            device,
-            shader,
-            layout,
-            swapchain,
-            slice::from_ref(&binding_desc),
-            &attr_desc,
-            PipelineMode::Opaque,
-        )?;
+        let pipeline = Self::create_pipeline(device, shader, layout, swapchain, slice::from_ref(&binding_desc), &attr_desc, mode)?;
         device.debug(|d| d.set_object_name(device, &pipeline.handle, &format!("Pipeline<{}>", std::any::type_name::<Vert>())));
+        Ok(pipeline)
+    }
+
+    pub fn new_no_input(
+        device: &VulkanDevice, shader: &Shader, layout: vk::PipelineLayout, swapchain: &Swapchain, mode: PipelineMode,
+    ) -> VulkanResult<Self> {
+        let pipeline = Pipeline::create_pipeline(device, shader, layout, &swapchain, &[], &[], mode)?;
+        device.debug(|d| d.set_object_name(&device, &pipeline.handle, "Pipeline<()>"));
         Ok(pipeline)
     }
 
@@ -489,7 +488,7 @@ impl Pipeline {
         let rasterizer_ci = vk::PipelineRasterizationStateCreateInfo::builder()
             .polygon_mode(vk::PolygonMode::FILL)
             .line_width(1.0)
-            .cull_mode(vk::CullModeFlags::BACK)
+            .cull_mode(mode.cull_mode())
             .front_face(vk::FrontFace::CLOCKWISE);
 
         let multisample_ci = vk::PipelineMultisampleStateCreateInfo::builder()
@@ -498,12 +497,12 @@ impl Pipeline {
 
         let color_attach = vk::PipelineColorBlendAttachmentState::builder()
             .color_write_mask(vk::ColorComponentFlags::RGBA)
-            .blend_enable(false)
-            .src_color_blend_factor(vk::BlendFactor::ONE)
-            .dst_color_blend_factor(vk::BlendFactor::ZERO)
+            .blend_enable(mode.blend_enable())
+            .src_color_blend_factor(vk::BlendFactor::ONE) // premultiplied alpha
+            .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
             .color_blend_op(vk::BlendOp::ADD)
-            .src_color_blend_factor(vk::BlendFactor::ONE)
-            .dst_color_blend_factor(vk::BlendFactor::ZERO)
+            .src_alpha_blend_factor(vk::BlendFactor::ONE)
+            .dst_alpha_blend_factor(vk::BlendFactor::ZERO)
             .alpha_blend_op(vk::BlendOp::ADD);
 
         let color_blend_ci = vk::PipelineColorBlendStateCreateInfo::builder()
@@ -512,7 +511,7 @@ impl Pipeline {
             .attachments(slice::from_ref(&color_attach));
 
         let depth_stencil_ci = vk::PipelineDepthStencilStateCreateInfo::builder()
-            .depth_test_enable(true)
+            .depth_test_enable(mode.depth_test())
             .depth_write_enable(mode.depth_write())
             .depth_compare_op(mode.depth_compare_op())
             .depth_bounds_test_enable(false)
@@ -562,24 +561,57 @@ impl Cleanup<VulkanDevice> for Pipeline {
     }
 }
 
+impl std::ops::Deref for Pipeline {
+    type Target = vk::Pipeline;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.handle
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
-enum PipelineMode {
+pub enum PipelineMode {
     Opaque,
+    Transparent,
     Background,
+    Overlay,
 }
 
 impl PipelineMode {
+    fn depth_test(self) -> bool {
+        match self {
+            Self::Overlay => false,
+            _ => true,
+        }
+    }
+
     fn depth_write(self) -> bool {
         match self {
             Self::Opaque => true,
-            Self::Background => false,
+            _ => false,
         }
     }
 
     fn depth_compare_op(self) -> vk::CompareOp {
         match self {
-            Self::Opaque => vk::CompareOp::LESS,
+            Self::Opaque | Self::Transparent => vk::CompareOp::LESS,
             Self::Background => vk::CompareOp::EQUAL,
+            Self::Overlay => vk::CompareOp::ALWAYS,
+        }
+    }
+
+    fn cull_mode(self) -> vk::CullModeFlags {
+        match self {
+            Self::Overlay => vk::CullModeFlags::NONE,
+            _ => vk::CullModeFlags::BACK,
+        }
+    }
+
+    fn blend_enable(self) -> bool {
+        match self {
+            Self::Transparent | Self::Overlay => true,
+            _ => false,
         }
     }
 }
