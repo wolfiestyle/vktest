@@ -99,6 +99,20 @@ impl VulkanDevice {
         }
     }
 
+    pub fn create_pipeline_layout(
+        &self, set_layouts: &[vk::DescriptorSetLayout], push_constants: &[vk::PushConstantRange],
+    ) -> VulkanResult<vk::PipelineLayout> {
+        let pipeline_layout_ci = vk::PipelineLayoutCreateInfo::builder()
+            .set_layouts(set_layouts)
+            .push_constant_ranges(push_constants);
+
+        unsafe {
+            self.device
+                .create_pipeline_layout(&pipeline_layout_ci, None)
+                .describe_err("Failed to create pipeline layout")
+        }
+    }
+
     pub fn create_command_pool(&self, family_idx: u32, flags: vk::CommandPoolCreateFlags) -> VulkanResult<vk::CommandPool> {
         let command_pool_ci = vk::CommandPoolCreateInfo::builder().flags(flags).queue_family_index(family_idx);
 

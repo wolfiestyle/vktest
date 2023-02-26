@@ -79,7 +79,7 @@ impl VulkanEngine {
                 .stage_flags(vk::ShaderStageFlags::FRAGMENT)
                 .build(),
         ])?;
-        let pipeline_layout = Pipeline::create_layout(&vk, desc_layout)?;
+        let pipeline_layout = vk.create_pipeline_layout(slice::from_ref(&desc_layout), &[])?;
         let pipeline = Pipeline::new::<Vertex>(&vk, &shader, pipeline_layout, &swapchain, PipelineMode::Opaque)?;
 
         let bg_shader = Shader::new(
@@ -542,16 +542,6 @@ impl Pipeline {
         };
 
         Ok(Self { handle: pipeline[0] })
-    }
-
-    fn create_layout(device: &VulkanDevice, desc_layout: vk::DescriptorSetLayout) -> VulkanResult<vk::PipelineLayout> {
-        let pipeline_layout_ci = vk::PipelineLayoutCreateInfo::builder().set_layouts(slice::from_ref(&desc_layout));
-
-        unsafe {
-            device
-                .create_pipeline_layout(&pipeline_layout_ci, None)
-                .describe_err("Failed to create pipeline layout")
-        }
     }
 }
 
