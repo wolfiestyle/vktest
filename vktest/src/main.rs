@@ -116,7 +116,10 @@ fn main() -> VulkanResult<()> {
             window.request_redraw();
         }
         Event::RedrawRequested(_) => {
-            vk_app.draw_frame().unwrap();
+            //FIXME: temporary api
+            let mut cmd_buffers = vec![vk_app.draw_object().unwrap()];
+
+            vk_app.submit_draw_commands(&cmd_buffers).unwrap();
 
             let cur_time = vk_app.get_frame_timestamp();
             if cur_time - prev_time > Duration::from_secs(1) {

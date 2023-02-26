@@ -25,8 +25,9 @@ pub struct VulkanEngine {
     bg_shader: Shader,
     bg_pipeline: Pipeline,
     bg_texture: Texture,
-    command_pool: vk::CommandPool,
-    command_buffers: Vec<vk::CommandBuffer>,
+    main_cmd_pool: vk::CommandPool,
+    secondary_cmd_pool: vk::CommandPool,
+    main_cmd_buffers: Vec<vk::CommandBuffer>,
     frame_state: Vec<FrameState>,
     current_frame: usize,
     vertex_buffer: VkBuffer,
@@ -49,8 +50,9 @@ impl VulkanEngine {
         let swapchain = vk.create_swapchain(window_size, SWAPCHAIN_IMAGE_COUNT, depth_format)?;
         eprintln!("color_format: {:?}, depth_format: {depth_format:?}", swapchain.format);
 
-        let command_pool = vk.create_command_pool(vk.dev_info.graphics_idx, vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)?;
-        let command_buffers = vk.create_command_buffers(command_pool, MAX_FRAMES_IN_FLIGHT as u32)?;
+        let main_cmd_pool = vk.create_command_pool(vk.dev_info.graphics_idx, vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)?;
+        let secondary_cmd_pool = vk.create_command_pool(vk.dev_info.graphics_idx, vk::CommandPoolCreateFlags::TRANSIENT)?;
+        let main_cmd_buffers = vk.create_command_buffers(main_cmd_pool, MAX_FRAMES_IN_FLIGHT as u32, vk::CommandBufferLevel::PRIMARY)?;
         let frame_state = (0..MAX_FRAMES_IN_FLIGHT)
             .map(|_| FrameState::new(&vk))
             .collect::<Result<Vec<_>, _>>()?;
@@ -107,8 +109,9 @@ impl VulkanEngine {
             bg_shader,
             bg_pipeline,
             bg_texture,
-            command_pool,
-            command_buffers,
+            main_cmd_pool,
+            secondary_cmd_pool,
+            main_cmd_buffers,
             frame_state,
             current_frame: 0,
             vertex_buffer,
@@ -140,7 +143,9 @@ impl VulkanEngine {
         self.last_frame_time - self.prev_frame_time
     }
 
-    fn begin_draw_commands(&self, cmd_buffer: vk::CommandBuffer, image_idx: usize) -> VulkanResult<()> {
+    fn record_primary_command_buffer(
+        &self, cmd_buffer: vk::CommandBuffer, image_idx: usize, secondaries: &[vk::CommandBuffer],
+    ) -> VulkanResult<()> {
         let begin_info = vk::CommandBufferBeginInfo::default();
         unsafe {
             self.device
@@ -167,6 +172,7 @@ impl VulkanEngine {
                 depth_stencil: vk::ClearDepthStencilValue { depth: 1.0, stencil: 0 },
             });
         let render_info = vk::RenderingInfo::builder()
+            .flags(vk::RenderingFlags::CONTENTS_SECONDARY_COMMAND_BUFFERS)
             .render_area(self.swapchain.extent_rect())
             .layer_count(1)
             .color_attachments(slice::from_ref(&color_attach))
@@ -182,12 +188,7 @@ impl VulkanEngine {
                 vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
             );
             self.device.dynrender_fn.cmd_begin_rendering(cmd_buffer, &render_info);
-        }
-        Ok(())
-    }
-
-    fn end_draw_commands(&self, cmd_buffer: vk::CommandBuffer, image_idx: usize) -> VulkanResult<()> {
-        unsafe {
+            self.device.cmd_execute_commands(cmd_buffer, secondaries);
             self.device.dynrender_fn.cmd_end_rendering(cmd_buffer);
             self.device.transition_image_layout(
                 cmd_buffer,
@@ -204,8 +205,37 @@ impl VulkanEngine {
         Ok(())
     }
 
-    fn record_command_buffer(&self, cmd_buffer: vk::CommandBuffer, image_idx: usize) -> VulkanResult<()> {
-        self.begin_draw_commands(cmd_buffer, image_idx)?;
+    pub fn begin_secondary_draw_commands(&self) -> VulkanResult<vk::CommandBuffer> {
+        let cmd_buffer = self
+            .device
+            .create_command_buffers(self.secondary_cmd_pool, 1, vk::CommandBufferLevel::SECONDARY)?[0];
+        let mut render_info = vk::CommandBufferInheritanceRenderingInfo::builder()
+            .color_attachment_formats(slice::from_ref(&self.swapchain.format))
+            .depth_attachment_format(self.swapchain.depth_format)
+            .rasterization_samples(vk::SampleCountFlags::TYPE_1);
+        let inherit_info = vk::CommandBufferInheritanceInfo::builder().push_next(&mut render_info);
+        let begin_info = vk::CommandBufferBeginInfo::builder()
+            .flags(vk::CommandBufferUsageFlags::RENDER_PASS_CONTINUE)
+            .inheritance_info(&inherit_info);
+        unsafe {
+            self.device
+                .begin_command_buffer(cmd_buffer, &begin_info)
+                .describe_err("Failed to begin recording secondary command buffer")?;
+        }
+        Ok(cmd_buffer)
+    }
+
+    pub fn end_secondary_draw_commands(&self, cmd_buffer: vk::CommandBuffer) -> VulkanResult<vk::CommandBuffer> {
+        unsafe {
+            self.device
+                .end_command_buffer(cmd_buffer)
+                .describe_err("Failed to end recording secodary command buffer")?;
+        }
+        Ok(cmd_buffer)
+    }
+
+    pub fn draw_object(&self) -> VulkanResult<vk::CommandBuffer> {
+        let cmd_buffer = self.begin_secondary_draw_commands()?;
 
         let buffer_info = self.frame_state[self.current_frame].uniforms.descriptor();
         let image_info = self.texture.descriptor();
@@ -267,22 +297,32 @@ impl VulkanEngine {
             self.device.debug(|d| d.cmd_end_label(cmd_buffer));
         }
 
-        self.end_draw_commands(cmd_buffer, image_idx)
+        self.end_secondary_draw_commands(cmd_buffer)
     }
 
-    pub fn draw_frame(&mut self) -> VulkanResult<bool> {
-        let frame = &self.frame_state[self.current_frame];
+    pub fn submit_draw_commands(&mut self, draw_commands: &[vk::CommandBuffer]) -> VulkanResult<bool> {
+        let frame = &mut self.frame_state[self.current_frame];
         let in_flight_fen = frame.in_flight_fen;
         let image_avail_sem = frame.image_avail_sem;
         let render_finish_sem = frame.render_finished_sem;
-        let command_buffer = self.command_buffers[self.current_frame];
+        let command_buffer = self.main_cmd_buffers[self.current_frame];
 
-        let image_idx = unsafe {
+        unsafe {
             self.device
                 .wait_for_fences(slice::from_ref(&in_flight_fen), true, u64::MAX)
                 .describe_err("Failed waiting for fence")?;
-            self.prev_frame_time = self.last_frame_time;
-            self.last_frame_time = Instant::now();
+        }
+        // all previous work for this frame is done at this point
+        if !frame.cmd_buffers.is_empty() {
+            unsafe { self.device.free_command_buffers(self.secondary_cmd_pool, &frame.cmd_buffers) };
+            frame.cmd_buffers.clear();
+        }
+        self.prev_frame_time = self.last_frame_time;
+        self.last_frame_time = Instant::now();
+        frame.cmd_buffers.extend(draw_commands);
+        self.update_uniforms();
+
+        let image_idx = unsafe {
             let acquire_res = self
                 .device
                 .swapchain_fn
@@ -298,8 +338,6 @@ impl VulkanEngine {
             }
         };
 
-        self.update_uniforms();
-
         unsafe {
             self.device
                 .reset_fences(slice::from_ref(&in_flight_fen))
@@ -309,14 +347,13 @@ impl VulkanEngine {
                 .describe_err("Failed to reset command buffer")?;
         }
 
-        self.record_command_buffer(command_buffer, image_idx as _)?;
+        self.record_primary_command_buffer(command_buffer, image_idx as _, draw_commands)?;
 
         let submit_info = vk::SubmitInfo::builder()
             .wait_semaphores(slice::from_ref(&image_avail_sem))
             .wait_dst_stage_mask(&[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT])
             .command_buffers(slice::from_ref(&command_buffer))
             .signal_semaphores(slice::from_ref(&render_finish_sem));
-
         unsafe {
             self.device
                 .queue_submit(self.device.graphics_queue, slice::from_ref(&submit_info), in_flight_fen)
@@ -327,7 +364,6 @@ impl VulkanEngine {
             .wait_semaphores(slice::from_ref(&render_finish_sem))
             .swapchains(slice::from_ref(&*self.swapchain))
             .image_indices(slice::from_ref(&image_idx));
-
         let suboptimal = unsafe {
             self.device
                 .swapchain_fn
@@ -379,7 +415,8 @@ impl Drop for VulkanEngine {
             self.device.destroy_sampler(self.tex_sampler, None);
             self.bg_texture.cleanup(&self.device);
             self.frame_state.cleanup(&self.device);
-            self.device.destroy_command_pool(self.command_pool, None);
+            self.device.destroy_command_pool(self.main_cmd_pool, None);
+            self.device.destroy_command_pool(self.secondary_cmd_pool, None);
             self.pipeline.cleanup(&self.device);
             self.bg_pipeline.cleanup(&self.device);
             self.device.destroy_pipeline_layout(self.pipeline_layout, None);
@@ -552,6 +589,7 @@ struct FrameState {
     render_finished_sem: vk::Semaphore,
     in_flight_fen: vk::Fence,
     uniforms: UniformBuffer<UniformBufferObject>,
+    cmd_buffers: Vec<vk::CommandBuffer>,
 }
 
 impl FrameState {
@@ -571,6 +609,7 @@ impl FrameState {
             render_finished_sem,
             in_flight_fen,
             uniforms,
+            cmd_buffers: vec![],
         })
     }
 }

@@ -109,10 +109,12 @@ impl VulkanDevice {
         }
     }
 
-    pub fn create_command_buffers(&self, pool: vk::CommandPool, count: u32) -> VulkanResult<Vec<vk::CommandBuffer>> {
+    pub fn create_command_buffers(
+        &self, pool: vk::CommandPool, count: u32, level: vk::CommandBufferLevel,
+    ) -> VulkanResult<Vec<vk::CommandBuffer>> {
         let alloc_info = vk::CommandBufferAllocateInfo::builder()
             .command_pool(pool)
-            .level(vk::CommandBufferLevel::PRIMARY)
+            .level(level)
             .command_buffer_count(count);
 
         unsafe {
@@ -123,7 +125,7 @@ impl VulkanDevice {
     }
 
     fn begin_one_time_commands(&self) -> VulkanResult<vk::CommandBuffer> {
-        let cmd_buffer = self.create_command_buffers(self.transfer_pool, 1)?[0];
+        let cmd_buffer = self.create_command_buffers(self.transfer_pool, 1, vk::CommandBufferLevel::PRIMARY)?[0];
         let begin_info = vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
         unsafe {
             self.device
