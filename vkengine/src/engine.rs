@@ -703,13 +703,13 @@ impl Cleanup<VulkanDevice> for Texture {
     }
 }
 
-struct Shader {
+pub struct Shader {
     vert: vk::ShaderModule,
     frag: vk::ShaderModule,
 }
 
 impl Shader {
-    fn new(device: &VulkanDevice, vert_spv: &[u32], frag_spv: &[u32]) -> VulkanResult<Self> {
+    pub fn new(device: &VulkanDevice, vert_spv: &[u32], frag_spv: &[u32]) -> VulkanResult<Self> {
         let vert = device.create_shader_module(vert_spv)?;
         let frag = device.create_shader_module(frag_spv)?;
         Ok(Self { vert, frag })
