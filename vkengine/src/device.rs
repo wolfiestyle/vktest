@@ -303,45 +303,26 @@ impl VulkanDevice {
         &self, cmd_buffer: vk::CommandBuffer, image: vk::Image, format: vk::Format, layer_count: u32, old_layout: vk::ImageLayout,
         new_layout: vk::ImageLayout,
     ) {
-        let (src_access, dst_access, src_stage, dst_stage) = match (old_layout, new_layout) {
-            (vk::ImageLayout::UNDEFINED, vk::ImageLayout::TRANSFER_DST_OPTIMAL) => (
-                vk::AccessFlags::empty(),
-                vk::AccessFlags::TRANSFER_WRITE,
-                vk::PipelineStageFlags::TOP_OF_PIPE,
-                vk::PipelineStageFlags::TRANSFER,
-            ),
-            (vk::ImageLayout::TRANSFER_DST_OPTIMAL, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL) => (
-                vk::AccessFlags::TRANSFER_WRITE,
-                vk::AccessFlags::SHADER_READ,
-                vk::PipelineStageFlags::TRANSFER,
-                vk::PipelineStageFlags::FRAGMENT_SHADER,
-            ),
-            (vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL, vk::ImageLayout::TRANSFER_DST_OPTIMAL) => (
-                vk::AccessFlags::SHADER_READ,
-                vk::AccessFlags::TRANSFER_WRITE,
-                vk::PipelineStageFlags::FRAGMENT_SHADER,
-                vk::PipelineStageFlags::TRANSFER,
-            ),
-            (vk::ImageLayout::UNDEFINED, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL) => (
-                vk::AccessFlags::empty(),
-                vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
-                vk::PipelineStageFlags::TOP_OF_PIPE,
-                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-            ),
-            (vk::ImageLayout::UNDEFINED, vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL) => (
-                vk::AccessFlags::empty(),
-                vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
-                vk::PipelineStageFlags::TOP_OF_PIPE,
-                vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS | vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
-            ),
-            (vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL, vk::ImageLayout::PRESENT_SRC_KHR) => (
-                vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
-                vk::AccessFlags::empty(),
-                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                vk::PipelineStageFlags::BOTTOM_OF_PIPE,
-            ),
-            _ => panic!("Unsupported layout transition {old_layout:?} -> {new_layout:?}"),
-        };
+        fn layout_to_access_and_stage(layout: vk::ImageLayout, is_dst: bool) -> (vk::AccessFlags, vk::PipelineStageFlags) {
+            match layout {
+                vk::ImageLayout::UNDEFINED if !is_dst => (vk::AccessFlags::empty(), vk::PipelineStageFlags::TOP_OF_PIPE),
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL => (vk::AccessFlags::TRANSFER_WRITE, vk::PipelineStageFlags::TRANSFER),
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL => (vk::AccessFlags::SHADER_READ, vk::PipelineStageFlags::FRAGMENT_SHADER),
+                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL => (
+                    vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+                    vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                ),
+                vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL => (
+                    vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
+                    vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS | vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
+                ),
+                vk::ImageLayout::PRESENT_SRC_KHR if is_dst => (vk::AccessFlags::empty(), vk::PipelineStageFlags::BOTTOM_OF_PIPE),
+                _ => panic!("Unsupported layout transition"),
+            }
+        }
+
+        let (src_access, src_stage) = layout_to_access_and_stage(old_layout, false);
+        let (dst_access, dst_stage) = layout_to_access_and_stage(new_layout, true);
 
         let aspect_mask = match format {
             vk::Format::D16_UNORM_S8_UINT | vk::Format::D24_UNORM_S8_UINT | vk::Format::D32_SFLOAT_S8_UINT => {
@@ -371,7 +352,7 @@ impl VulkanDevice {
                 cmd_buffer,
                 src_stage,
                 dst_stage,
-                Default::default(),
+                vk::DependencyFlags::empty(),
                 &[],
                 &[],
                 slice::from_ref(&barrier),
