@@ -678,7 +678,7 @@ impl Texture {
         device: &VulkanDevice, width: u32, height: u32, format: vk::Format, data: &[&[u8]], sampler: vk::Sampler,
     ) -> VulkanResult<Self> {
         assert!(data.len() == 6);
-        let image = device.create_image_from_data(width, height, format, ImageData::Array(6, data))?;
+        let image = device.create_image_from_data(width, height, format, ImageData::Array(data))?;
         let imgview = device.create_image_view(*image, format, vk::ImageViewType::CUBE, vk::ImageAspectFlags::COLOR)?;
         Ok(Self { image, imgview, sampler })
     }

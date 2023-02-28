@@ -415,8 +415,8 @@ impl VulkanDevice {
             ImageData::Single(bytes) => {
                 src_buffer.write_bytes(self, bytes, 0)?;
             }
-            ImageData::Array(n, bytes) => {
-                for i in 0..n as usize {
+            ImageData::Array(bytes) => {
+                for i in 0..bytes.len() {
                     src_buffer.write_bytes(self, bytes[i], layer_size * i)?;
                 }
             }
@@ -470,8 +470,8 @@ impl VulkanDevice {
             ImageData::Single(bytes) => {
                 src_buffer.write_bytes(self, bytes, 0)?;
             }
-            ImageData::Array(n, bytes) => {
-                for i in 0..n as usize {
+            ImageData::Array(bytes) => {
+                for i in 0..bytes.len() {
                     src_buffer.write_bytes(self, bytes[i], layer_size * i)?;
                 }
             }
@@ -885,17 +885,17 @@ impl<T> Cleanup<VulkanDevice> for UniformBuffer<T> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy)]
 pub enum ImageData<'a> {
     Single(&'a [u8]),
-    Array(u32, &'a [&'a [u8]]),
+    Array(&'a [&'a [u8]]),
 }
 
 impl ImageData<'_> {
     fn layer_count(self) -> u32 {
         match self {
             Self::Single(_) => 1,
-            Self::Array(n, _) => n,
+            Self::Array(s) => s.len() as _,
         }
     }
 }
