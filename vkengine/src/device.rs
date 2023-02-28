@@ -248,16 +248,6 @@ impl VulkanDevice {
         Ok(dst_buffer)
     }
 
-    pub fn create_uniform_buffer<T>(&self) -> VulkanResult<UniformBuffer<T>> {
-        let size = std::mem::size_of::<T>();
-        let mut buffer = self.allocate_buffer(size as _, vk::BufferUsageFlags::UNIFORM_BUFFER, ga::UsageFlags::UPLOAD)?;
-        let ub_mapped = unsafe { buffer.memory.map(AshMemoryDevice::wrap(self), 0, size)?.cast() };
-        Ok(UniformBuffer {
-            buffer,
-            ub_mapped: Some(ub_mapped),
-        })
-    }
-
     pub fn allocate_image(
         &self, width: u32, height: u32, layers: u32, format: vk::Format, flags: vk::ImageCreateFlags, img_usage: vk::ImageUsageFlags,
         mem_usage: ga::UsageFlags,
@@ -886,18 +876,29 @@ impl MappedMemory<'_> {
         let byte_offset = offset * std::mem::size_of::<T>();
         self.write_bytes(bytes, byte_offset)
     }
+
+    #[inline]
+    pub fn write_object<T: Copy>(&mut self, object: &T) {
+        assert!(std::mem::size_of::<T>() <= self.size, "memory write out of bounds");
+        unsafe { std::ptr::copy_nonoverlapping(object, self.mapped.as_ptr().cast::<T>(), 1) }
+    }
 }
 
 pub struct UniformBuffer<T> {
     pub buffer: VkBuffer,
-    ub_mapped: Option<std::ptr::NonNull<T>>,
+    _p: PhantomData<T>,
 }
 
-impl<T> UniformBuffer<T> {
-    pub fn write_uniforms(&mut self, ubo: T) {
-        unsafe {
-            std::ptr::write_volatile(self.ub_mapped.expect("use after free").as_ptr(), ubo);
-        }
+impl<T: Copy> UniformBuffer<T> {
+    pub fn new(device: &VulkanDevice) -> VulkanResult<Self> {
+        let size = std::mem::size_of::<T>() as _;
+        let buffer = device.allocate_buffer(size, vk::BufferUsageFlags::UNIFORM_BUFFER, ga::UsageFlags::UPLOAD)?;
+        Ok(Self { buffer, _p: PhantomData })
+    }
+
+    pub fn write_uniforms(&mut self, device: &ash::Device, ubo: T) -> VulkanResult<()> {
+        self.buffer.map(device)?.write_object(&ubo);
+        Ok(())
     }
 
     pub fn descriptor(&self) -> vk::DescriptorBufferInfo {
@@ -911,8 +912,6 @@ impl<T> UniformBuffer<T> {
 
 impl<T> Cleanup<VulkanDevice> for UniformBuffer<T> {
     unsafe fn cleanup(&mut self, device: &VulkanDevice) {
-        self.ub_mapped = None;
-        self.buffer.memory.unmap(AshMemoryDevice::wrap(device));
         self.buffer.cleanup(device);
     }
 }

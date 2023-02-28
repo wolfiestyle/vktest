@@ -326,7 +326,7 @@ impl VulkanEngine {
         self.prev_frame_time = self.last_frame_time;
         self.last_frame_time = Instant::now();
         frame.cmd_buffers.extend(draw_commands);
-        self.update_uniforms();
+        self.update_uniforms()?;
 
         let image_idx = unsafe {
             let acquire_res = self
@@ -388,7 +388,7 @@ impl VulkanEngine {
         Ok(true)
     }
 
-    fn update_uniforms(&mut self) {
+    fn update_uniforms(&mut self) -> VulkanResult<()> {
         let view = self.camera.get_view_transform();
         let proj = self.camera.get_projection(self.swapchain.aspect());
         let viewproj = proj * view;
@@ -397,7 +397,7 @@ impl VulkanEngine {
             mvp: viewproj * self.model,
             viewproj_inv,
         };
-        self.frame_state[self.current_frame].uniforms.write_uniforms(ubo);
+        self.frame_state[self.current_frame].uniforms.write_uniforms(&self.device, ubo)
     }
 
     fn recreate_swapchain(&mut self) -> VulkanResult<()> {
@@ -626,7 +626,7 @@ impl FrameState {
         let image_avail_sem = device.create_semaphore()?;
         let render_finished_sem = device.create_semaphore()?;
         let in_flight_fen = device.create_fence()?;
-        let uniforms = device.create_uniform_buffer()?;
+        let uniforms = UniformBuffer::new(device)?;
         device.debug(|d| {
             d.set_object_name(device, &image_avail_sem, "Image available semaphore");
             d.set_object_name(device, &render_finished_sem, "Render finished semaphore");
