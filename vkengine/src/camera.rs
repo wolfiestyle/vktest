@@ -66,7 +66,7 @@ impl Default for Camera {
             position: Vec3::ZERO,
             direction: Vec3::Y,
             up: Vec3::NEG_Z,
-            fov: 45.0,
+            fov: 60.0,
             near: 0.1,
             far: 1000.0,
         }
