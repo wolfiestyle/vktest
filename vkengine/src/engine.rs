@@ -44,29 +44,30 @@ pub struct VulkanEngine {
 
 impl VulkanEngine {
     pub fn new(
-        vk: VulkanDevice, window_size: WinSize, vertices: &[Vertex], indices: &[u32], img_dims: (u32, u32), img_data: &[u8],
+        device: VulkanDevice, window_size: WinSize, vertices: &[Vertex], indices: &[u32], img_dims: (u32, u32), img_data: &[u8],
         skybox_dims: (u32, u32), skybox_data: &[&[u8]; 6],
     ) -> VulkanResult<Self> {
-        let depth_format = vk.find_depth_format(false)?;
-        let swapchain = vk.create_swapchain(window_size, SWAPCHAIN_IMAGE_COUNT, depth_format)?;
+        let depth_format = device.find_depth_format(false)?;
+        let swapchain = device.create_swapchain(window_size, SWAPCHAIN_IMAGE_COUNT, depth_format)?;
         eprintln!("color_format: {:?}, depth_format: {depth_format:?}", swapchain.format);
 
-        let main_cmd_pool = vk.create_command_pool(vk.dev_info.graphics_idx, vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)?;
-        let secondary_cmd_pool = vk.create_command_pool(vk.dev_info.graphics_idx, vk::CommandPoolCreateFlags::TRANSIENT)?;
-        let main_cmd_buffers = vk.create_command_buffers(main_cmd_pool, MAX_FRAMES_IN_FLIGHT as u32, vk::CommandBufferLevel::PRIMARY)?;
+        let main_cmd_pool = device.create_command_pool(device.dev_info.graphics_idx, vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)?;
+        let secondary_cmd_pool = device.create_command_pool(device.dev_info.graphics_idx, vk::CommandPoolCreateFlags::TRANSIENT)?;
+        let main_cmd_buffers =
+            device.create_command_buffers(main_cmd_pool, MAX_FRAMES_IN_FLIGHT as u32, vk::CommandBufferLevel::PRIMARY)?;
         let frame_state = (0..MAX_FRAMES_IN_FLIGHT)
-            .map(|_| FrameState::new(&vk))
+            .map(|_| FrameState::new(&device))
             .collect::<Result<Vec<_>, _>>()?;
 
-        let tex_sampler = vk.create_texture_sampler(vk::Filter::LINEAR, vk::Filter::LINEAR, vk::SamplerAddressMode::REPEAT)?;
-        let texture = Texture::new(&vk, img_dims.0, img_dims.1, vk::Format::R8G8B8A8_SRGB, img_data, tex_sampler)?;
+        let tex_sampler = device.create_texture_sampler(vk::Filter::LINEAR, vk::Filter::LINEAR, vk::SamplerAddressMode::REPEAT)?;
+        let texture = Texture::new(&device, img_dims.0, img_dims.1, vk::Format::R8G8B8A8_SRGB, img_data, tex_sampler)?;
 
         let shader = Shader::new(
-            &vk,
+            &device,
             include_spirv!("src/shaders/texture.vert.glsl", vert, glsl),
             include_spirv!("src/shaders/texture.frag.glsl", frag, glsl),
         )?;
-        let desc_layout = vk.create_descriptor_set_layout(&[
+        let desc_layout = device.create_descriptor_set_layout(&[
             vk::DescriptorSetLayoutBinding::builder()
                 .binding(0)
                 .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
@@ -80,17 +81,17 @@ impl VulkanEngine {
                 .stage_flags(vk::ShaderStageFlags::FRAGMENT)
                 .build(),
         ])?;
-        let pipeline_layout = vk.create_pipeline_layout(slice::from_ref(&desc_layout), &[])?;
-        let pipeline = Pipeline::new::<Vertex>(&vk, &shader, pipeline_layout, &swapchain, PipelineMode::Opaque)?;
+        let pipeline_layout = device.create_pipeline_layout(slice::from_ref(&desc_layout), &[])?;
+        let pipeline = Pipeline::new::<Vertex>(&device, &shader, pipeline_layout, &swapchain, PipelineMode::Opaque)?;
 
         let bg_shader = Shader::new(
-            &vk,
+            &device,
             include_spirv!("src/shaders/skybox.vert.glsl", vert, glsl),
             include_spirv!("src/shaders/skybox.frag.glsl", frag, glsl),
         )?;
-        let bg_pipeline = Pipeline::new_no_input(&vk, &bg_shader, pipeline_layout, &swapchain, PipelineMode::Background)?;
+        let bg_pipeline = Pipeline::new_no_input(&device, &bg_shader, pipeline_layout, &swapchain, PipelineMode::Background)?;
         let bg_texture = Texture::new_cubemap(
-            &vk,
+            &device,
             skybox_dims.0,
             skybox_dims.1,
             vk::Format::R8G8B8A8_SRGB,
@@ -98,14 +99,14 @@ impl VulkanEngine {
             tex_sampler,
         )?;
 
-        let vertex_buffer = vk.create_buffer_from_data(vertices, vk::BufferUsageFlags::VERTEX_BUFFER)?;
-        let index_buffer = vk.create_buffer_from_data(indices, vk::BufferUsageFlags::INDEX_BUFFER)?;
+        let vertex_buffer = device.create_buffer_from_data(vertices, vk::BufferUsageFlags::VERTEX_BUFFER)?;
+        let index_buffer = device.create_buffer_from_data(indices, vk::BufferUsageFlags::INDEX_BUFFER)?;
 
         let camera = Camera::default();
         let now = Instant::now();
 
         Ok(Self {
-            device: vk.into(),
+            device: device.into(),
             window_size,
             window_resized: false,
             swapchain,
