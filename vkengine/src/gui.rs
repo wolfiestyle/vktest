@@ -118,7 +118,7 @@ impl VkGui {
                         }
                     };
                     entry.insert(TextureSlot {
-                        texture: Texture::new(device, width, height, bytes, sampler)?,
+                        texture: Texture::new(device, width, height, vk::Format::R8G8B8A8_SRGB, bytes, sampler)?,
                         delete: false,
                     });
                 }

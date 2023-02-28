@@ -58,7 +58,7 @@ impl VulkanEngine {
             .collect::<Result<Vec<_>, _>>()?;
 
         let tex_sampler = vk.create_texture_sampler(vk::Filter::LINEAR, vk::Filter::LINEAR, vk::SamplerAddressMode::REPEAT)?;
-        let texture = Texture::new(&vk, img_dims.0, img_dims.1, img_data, tex_sampler)?;
+        let texture = Texture::new(&vk, img_dims.0, img_dims.1, vk::Format::R8G8B8A8_SRGB, img_data, tex_sampler)?;
 
         let shader = Shader::new(
             &vk,
@@ -88,7 +88,14 @@ impl VulkanEngine {
             include_spirv!("src/shaders/skybox.frag.glsl", frag, glsl),
         )?;
         let bg_pipeline = Pipeline::new_no_input(&vk, &bg_shader, pipeline_layout, &swapchain, PipelineMode::Background)?;
-        let bg_texture = Texture::new_cubemap(&vk, skybox_dims.0, skybox_dims.1, skybox_data, tex_sampler)?;
+        let bg_texture = Texture::new_cubemap(
+            &vk,
+            skybox_dims.0,
+            skybox_dims.1,
+            vk::Format::R8G8B8A8_SRGB,
+            skybox_data,
+            tex_sampler,
+        )?;
 
         let vertex_buffer = vk.create_buffer_from_data(vertices, vk::BufferUsageFlags::VERTEX_BUFFER)?;
         let index_buffer = vk.create_buffer_from_data(indices, vk::BufferUsageFlags::INDEX_BUFFER)?;
@@ -659,26 +666,20 @@ pub struct Texture {
 }
 
 impl Texture {
-    pub fn new(device: &VulkanDevice, width: u32, height: u32, data: &[u8], sampler: vk::Sampler) -> VulkanResult<Self> {
-        let image = device.create_image_from_data(width, height, ImageData::Single(data))?;
-        let imgview = device.create_image_view(
-            *image,
-            vk::Format::R8G8B8A8_SRGB,
-            vk::ImageViewType::TYPE_2D,
-            vk::ImageAspectFlags::COLOR,
-        )?;
+    pub fn new(
+        device: &VulkanDevice, width: u32, height: u32, format: vk::Format, data: &[u8], sampler: vk::Sampler,
+    ) -> VulkanResult<Self> {
+        let image = device.create_image_from_data(width, height, format, ImageData::Single(data))?;
+        let imgview = device.create_image_view(*image, format, vk::ImageViewType::TYPE_2D, vk::ImageAspectFlags::COLOR)?;
         Ok(Self { image, imgview, sampler })
     }
 
-    pub fn new_cubemap(device: &VulkanDevice, width: u32, height: u32, data: &[&[u8]], sampler: vk::Sampler) -> VulkanResult<Self> {
+    pub fn new_cubemap(
+        device: &VulkanDevice, width: u32, height: u32, format: vk::Format, data: &[&[u8]], sampler: vk::Sampler,
+    ) -> VulkanResult<Self> {
         assert!(data.len() == 6);
-        let image = device.create_image_from_data(width, height, ImageData::Array(6, data))?;
-        let imgview = device.create_image_view(
-            *image,
-            vk::Format::R8G8B8A8_SRGB,
-            vk::ImageViewType::CUBE,
-            vk::ImageAspectFlags::COLOR,
-        )?;
+        let image = device.create_image_from_data(width, height, format, ImageData::Array(6, data))?;
+        let imgview = device.create_image_view(*image, format, vk::ImageViewType::CUBE, vk::ImageAspectFlags::COLOR)?;
         Ok(Self { image, imgview, sampler })
     }
 

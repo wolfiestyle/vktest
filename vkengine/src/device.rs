@@ -387,7 +387,7 @@ impl VulkanDevice {
         }
     }
 
-    pub fn create_image_from_data(&self, width: u32, height: u32, data: ImageData) -> VulkanResult<VkImage> {
+    pub fn create_image_from_data(&self, width: u32, height: u32, format: vk::Format, data: ImageData) -> VulkanResult<VkImage> {
         let layer_size = width as usize * height as usize * 4;
         let layers = data.layer_count();
         let size = layer_size as vk::DeviceSize * layers as vk::DeviceSize;
@@ -405,7 +405,7 @@ impl VulkanDevice {
             width,
             height,
             layers,
-            vk::Format::R8G8B8A8_SRGB,
+            format,
             flags,
             vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
             ga::UsageFlags::FAST_DEVICE_ACCESS,
@@ -425,7 +425,7 @@ impl VulkanDevice {
         self.transition_image_layout(
             cmd_buffer,
             *tex_image,
-            vk::Format::R8G8B8A8_SRGB,
+            format,
             layers,
             vk::ImageLayout::UNDEFINED,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
@@ -441,7 +441,7 @@ impl VulkanDevice {
         self.transition_image_layout(
             cmd_buffer,
             *tex_image,
-            vk::Format::R8G8B8A8_SRGB,
+            format,
             layers,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
             vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
