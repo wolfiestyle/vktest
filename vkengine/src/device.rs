@@ -7,6 +7,7 @@ use gpu_alloc_ash::AshMemoryDevice;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use std::marker::PhantomData;
 use std::mem::ManuallyDrop;
+use std::mem::{size_of, size_of_val};
 use std::slice;
 use std::sync::{Arc, Mutex};
 
@@ -232,7 +233,7 @@ impl VulkanDevice {
     }
 
     pub fn create_buffer_from_data<T: Copy>(&self, data: &[T], usage: vk::BufferUsageFlags) -> VulkanResult<VkBuffer> {
-        let size = std::mem::size_of_val(data) as _;
+        let size = size_of_val(data) as _;
         let mut src_buffer = self.allocate_buffer(
             size,
             vk::BufferUsageFlags::TRANSFER_SRC,
@@ -873,13 +874,13 @@ impl MappedMemory<'_> {
     #[inline]
     pub fn write_slice<T: Copy>(&mut self, slice: &[T], offset: usize) {
         let (_, bytes, _) = unsafe { slice.align_to() };
-        let byte_offset = offset * std::mem::size_of::<T>();
+        let byte_offset = offset * size_of::<T>();
         self.write_bytes(bytes, byte_offset)
     }
 
     #[inline]
     pub fn write_object<T: Copy>(&mut self, object: &T) {
-        assert!(std::mem::size_of::<T>() <= self.size, "memory write out of bounds");
+        assert!(size_of::<T>() <= self.size, "memory write out of bounds");
         unsafe { std::ptr::copy_nonoverlapping(object, self.mapped.as_ptr().cast::<T>(), 1) }
     }
 }
@@ -891,7 +892,7 @@ pub struct UniformBuffer<T> {
 
 impl<T: Copy> UniformBuffer<T> {
     pub fn new(device: &VulkanDevice) -> VulkanResult<Self> {
-        let size = std::mem::size_of::<T>() as _;
+        let size = size_of::<T>() as _;
         let buffer = device.allocate_buffer(size, vk::BufferUsageFlags::UNIFORM_BUFFER, ga::UsageFlags::UPLOAD)?;
         Ok(Self { buffer, _p: PhantomData })
     }
@@ -905,7 +906,7 @@ impl<T: Copy> UniformBuffer<T> {
         vk::DescriptorBufferInfo {
             buffer: *self.buffer,
             offset: 0,
-            range: std::mem::size_of::<T>() as _,
+            range: size_of::<T>() as _,
         }
     }
 }
