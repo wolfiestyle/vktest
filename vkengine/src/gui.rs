@@ -190,13 +190,14 @@ impl VkGui {
         let mut vert_offset = 0;
         let mut idx_offset = 0;
         let idx_base = total_vert_size / 4;
+        let mut mem = self.buffer.map(device)?;
         for prim in primitives {
             match prim.primitive {
                 Primitive::Mesh(mesh) => {
                     let n_vert = mesh.vertices.len();
                     let n_idx = mesh.indices.len();
-                    self.buffer.write_slice(device, &mesh.vertices, vert_offset)?;
-                    self.buffer.write_slice(device, &mesh.indices, idx_base + idx_offset)?;
+                    mem.write_slice(&mesh.vertices, vert_offset);
+                    mem.write_slice(&mesh.indices, idx_base + idx_offset);
                     let vk::Extent2D { width, height } = engine.swapchain.extent;
                     let proj = Mat4::orthographic_rh(0.0, width as _, 0.0, height as _, 0.0, 1.0);
                     let texture = &self.textures.get(&mesh.texture_id).describe_err("Missing gui texture")?.texture;

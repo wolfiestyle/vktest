@@ -5,6 +5,7 @@ use ash::extensions::khr;
 use ash::vk;
 use gpu_alloc_ash::AshMemoryDevice;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
+use std::marker::PhantomData;
 use std::mem::ManuallyDrop;
 use std::slice;
 use std::sync::{Arc, Mutex};
@@ -239,7 +240,7 @@ impl VulkanDevice {
         )?;
         let dst_buffer = self.allocate_buffer(size, vk::BufferUsageFlags::TRANSFER_DST | usage, ga::UsageFlags::FAST_DEVICE_ACCESS)?;
 
-        src_buffer.write_slice(self, data, 0)?;
+        src_buffer.map(&self)?.write_slice(data, 0);
         self.copy_buffer(*dst_buffer, *src_buffer, size)?;
 
         unsafe { src_buffer.cleanup(self) };
@@ -410,11 +411,12 @@ impl VulkanDevice {
 
         match data {
             ImageData::Single(bytes) => {
-                src_buffer.write_bytes(self, bytes, 0)?;
+                src_buffer.map(&self)?.write_bytes(bytes, 0);
             }
             ImageData::Array(bytes) => {
+                let mut mem = src_buffer.map(&self)?;
                 for i in 0..bytes.len() {
-                    src_buffer.write_bytes(self, bytes[i], layer_size * i)?;
+                    mem.write_bytes(bytes[i], layer_size * i);
                 }
             }
         }
@@ -465,11 +467,12 @@ impl VulkanDevice {
 
         match data {
             ImageData::Single(bytes) => {
-                src_buffer.write_bytes(self, bytes, 0)?;
+                src_buffer.map(&self)?.write_bytes(bytes, 0);
             }
             ImageData::Array(bytes) => {
+                let mut mem = src_buffer.map(&self)?;
                 for i in 0..bytes.len() {
-                    src_buffer.write_bytes(self, bytes[i], layer_size * i)?;
+                    mem.write_bytes(bytes[i], layer_size * i);
                 }
             }
         }
@@ -797,6 +800,7 @@ pub type VkImage = MemoryObject<vk::Image>;
 pub struct MemoryObject<T> {
     pub handle: T,
     pub memory: ManuallyDrop<MemoryBlock>,
+    mapped: Option<std::ptr::NonNull<u8>>,
 }
 
 impl<T> MemoryObject<T> {
@@ -804,26 +808,36 @@ impl<T> MemoryObject<T> {
         Self {
             handle,
             memory: ManuallyDrop::new(memory),
+            mapped: None,
         }
     }
 
-    #[inline]
-    pub fn write_bytes(&mut self, device: &VulkanDevice, bytes: &[u8], offset: usize) -> VulkanResult<()> {
-        unsafe {
-            self.memory
-                .write_bytes(AshMemoryDevice::wrap(&device), offset as _, bytes)
-                .map_err(From::from)
-        }
+    pub fn map<'a>(&'a mut self, device: &ash::Device) -> VulkanResult<MappedMemory<'a>> {
+        let size = self.memory.size() as _;
+        let mapped = match self.mapped {
+            Some(ptr) => ptr,
+            None => {
+                let ptr = unsafe { self.memory.map(AshMemoryDevice::wrap(device), 0, size)? };
+                self.mapped = Some(ptr);
+                ptr
+            }
+        };
+        Ok(MappedMemory {
+            mapped,
+            size,
+            _p: PhantomData,
+        })
     }
 
-    #[inline]
-    pub fn write_slice<D>(&mut self, device: &VulkanDevice, slice: &[D], offset: usize) -> VulkanResult<()> {
-        let (_, bytes, _) = unsafe { slice.align_to() };
-        let byte_offset = offset * std::mem::size_of::<D>();
-        self.write_bytes(device, bytes, byte_offset)
+    pub fn unmap(&mut self, device: &ash::Device) {
+        if self.mapped.is_some() {
+            unsafe { self.memory.unmap(AshMemoryDevice::wrap(device)) };
+            self.mapped = None;
+        }
     }
 
     unsafe fn free_memory(&mut self, device: &VulkanDevice) {
+        self.unmap(device);
         device
             .allocator
             .lock()
@@ -850,6 +864,27 @@ impl Cleanup<VulkanDevice> for MemoryObject<vk::Image> {
     unsafe fn cleanup(&mut self, device: &VulkanDevice) {
         device.destroy_image(self.handle, None);
         self.free_memory(device);
+    }
+}
+
+pub struct MappedMemory<'a> {
+    mapped: std::ptr::NonNull<u8>,
+    size: usize,
+    _p: PhantomData<&'a ()>,
+}
+
+impl MappedMemory<'_> {
+    #[inline]
+    pub fn write_bytes(&mut self, bytes: &[u8], offset: usize) {
+        assert!(offset + bytes.len() <= self.size, "memory write out of bounds");
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), self.mapped.as_ptr().offset(offset as _), bytes.len()) }
+    }
+
+    #[inline]
+    pub fn write_slice<D>(&mut self, slice: &[D], offset: usize) {
+        let (_, bytes, _) = unsafe { slice.align_to() };
+        let byte_offset = offset * std::mem::size_of::<D>();
+        self.write_bytes(bytes, byte_offset)
     }
 }
 
