@@ -881,9 +881,9 @@ impl MappedMemory<'_> {
     }
 
     #[inline]
-    pub fn write_slice<D>(&mut self, slice: &[D], offset: usize) {
+    pub fn write_slice<T: Copy>(&mut self, slice: &[T], offset: usize) {
         let (_, bytes, _) = unsafe { slice.align_to() };
-        let byte_offset = offset * std::mem::size_of::<D>();
+        let byte_offset = offset * std::mem::size_of::<T>();
         self.write_bytes(bytes, byte_offset)
     }
 }
