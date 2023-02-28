@@ -86,8 +86,8 @@ impl VkGui {
 
     pub fn draw(&mut self, run_output: FullOutput, engine: &VulkanEngine) -> VulkanResult<vk::CommandBuffer> {
         let primitives = self.context.tessellate(run_output.shapes);
-        self.cleanup_textures(&engine.device)?;
-        self.update_textures(run_output.textures_delta, &engine.device)?;
+        self.cleanup_textures()?;
+        self.update_textures(run_output.textures_delta)?;
         self.platform_output = Some(run_output.platform_output);
         self.build_draw_commands(primitives, engine)
     }
@@ -98,7 +98,7 @@ impl VkGui {
         }
     }
 
-    fn update_textures(&mut self, tex_delta: TexturesDelta, device: &VulkanDevice) -> VulkanResult<()> {
+    fn update_textures(&mut self, tex_delta: TexturesDelta) -> VulkanResult<()> {
         // create or update textures
         for (id, image) in tex_delta.set {
             let (pixels, [width, height]) = match image.image {
@@ -111,7 +111,7 @@ impl VkGui {
                     let sampler = match self.samplers.entry(image.options) {
                         Entry::Occupied(entry) => *entry.get(),
                         Entry::Vacant(entry) => {
-                            let sampler = device.create_texture_sampler(
+                            let sampler = self.device.create_texture_sampler(
                                 vk_filter(image.options.magnification),
                                 vk_filter(image.options.minification),
                                 vk::SamplerAddressMode::CLAMP_TO_EDGE,
@@ -121,13 +121,13 @@ impl VkGui {
                         }
                     };
                     entry.insert(TextureSlot {
-                        texture: Texture::new(device, width, height, vk::Format::R8G8B8A8_SRGB, bytes, sampler)?,
+                        texture: Texture::new(&self.device, width, height, vk::Format::R8G8B8A8_SRGB, bytes, sampler)?,
                         delete: false,
                     });
                 }
                 Entry::Occupied(mut entry) => {
                     let [x, y] = image.pos.unwrap_or([0, 0]).map(|v| v as _);
-                    entry.get_mut().texture.update(device, x, y, width, height, bytes)?;
+                    entry.get_mut().texture.update(&self.device, x, y, width, height, bytes)?;
                 }
             }
         }
@@ -143,14 +143,14 @@ impl VkGui {
         Ok(())
     }
 
-    fn cleanup_textures(&mut self, device: &VulkanDevice) -> VulkanResult<()> {
+    fn cleanup_textures(&mut self) -> VulkanResult<()> {
         if self.deletion_pending {
             unsafe {
-                device.queue_wait_idle(device.graphics_queue)?; //FIXME: sync properly
+                self.device.queue_wait_idle(self.device.graphics_queue)?; //FIXME: sync properly
             }
             self.textures.retain(|_, ts| {
                 if ts.delete {
-                    unsafe { ts.texture.cleanup(device) };
+                    unsafe { ts.texture.cleanup(&self.device) };
                 }
                 !ts.delete
             });
@@ -168,7 +168,7 @@ impl VkGui {
         let total_vert_size = total_verts * size_of::<Vertex>();
         let total_bytes = total_vert_size + total_idx * size_of::<u32>();
         // allocate nearest power of two sized buffer if necessary
-        let device = &engine.device;
+        let device = &*self.device;
         if total_bytes as u64 > self.buffer.memory.size() {
             let new_size = 1u64 << ((total_bytes - 1).ilog2() + 1);
             unsafe {
