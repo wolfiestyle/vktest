@@ -44,7 +44,12 @@ fn main() -> VulkanResult<()> {
             })
             .map(|jh| jh.join().unwrap())
     });
-    let skybox_raw: Vec<_> = skybox.iter().map(|img| img.as_raw().as_slice()).collect();
+    let skybox_raw = skybox
+        .iter()
+        .map(|img| img.as_raw().as_slice())
+        .collect::<Vec<_>>()
+        .try_into()
+        .unwrap();
 
     let event_loop = EventLoop::new();
     let win_size = winit::dpi::PhysicalSize::new(1024, 768);

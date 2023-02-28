@@ -387,7 +387,9 @@ impl VulkanDevice {
         }
     }
 
-    pub fn create_image_from_data(&self, width: u32, height: u32, format: vk::Format, data: ImageData) -> VulkanResult<VkImage> {
+    pub fn create_image_from_data(
+        &self, width: u32, height: u32, format: vk::Format, data: ImageData, flags: vk::ImageCreateFlags,
+    ) -> VulkanResult<VkImage> {
         let layer_size = width as usize * height as usize * 4;
         let layers = data.layer_count();
         let size = layer_size as vk::DeviceSize * layers as vk::DeviceSize;
@@ -396,11 +398,6 @@ impl VulkanDevice {
             vk::BufferUsageFlags::TRANSFER_SRC,
             ga::UsageFlags::UPLOAD | ga::UsageFlags::TRANSIENT,
         )?;
-        let flags = if layers == 6 {
-            vk::ImageCreateFlags::CUBE_COMPATIBLE
-        } else {
-            Default::default()
-        };
         let tex_image = self.allocate_image(
             width,
             height,

@@ -44,7 +44,7 @@ pub struct VulkanEngine {
 impl VulkanEngine {
     pub fn new(
         vk: VulkanDevice, window_size: WinSize, vertices: &[Vertex], indices: &[u32], img_dims: (u32, u32), img_data: &[u8],
-        skybox_dims: (u32, u32), skybox_data: &[&[u8]],
+        skybox_dims: (u32, u32), skybox_data: &[&[u8]; 6],
     ) -> VulkanResult<Self> {
         let depth_format = vk.find_depth_format(false)?;
         let swapchain = vk.create_swapchain(window_size, SWAPCHAIN_IMAGE_COUNT, depth_format)?;
@@ -669,16 +669,15 @@ impl Texture {
     pub fn new(
         device: &VulkanDevice, width: u32, height: u32, format: vk::Format, data: &[u8], sampler: vk::Sampler,
     ) -> VulkanResult<Self> {
-        let image = device.create_image_from_data(width, height, format, ImageData::Single(data))?;
+        let image = device.create_image_from_data(width, height, format, ImageData::Single(data), Default::default())?;
         let imgview = device.create_image_view(*image, format, vk::ImageViewType::TYPE_2D, vk::ImageAspectFlags::COLOR)?;
         Ok(Self { image, imgview, sampler })
     }
 
     pub fn new_cubemap(
-        device: &VulkanDevice, width: u32, height: u32, format: vk::Format, data: &[&[u8]], sampler: vk::Sampler,
+        device: &VulkanDevice, width: u32, height: u32, format: vk::Format, data: &[&[u8]; 6], sampler: vk::Sampler,
     ) -> VulkanResult<Self> {
-        assert!(data.len() == 6);
-        let image = device.create_image_from_data(width, height, format, ImageData::Array(data))?;
+        let image = device.create_image_from_data(width, height, format, ImageData::Array(data), vk::ImageCreateFlags::CUBE_COMPATIBLE)?;
         let imgview = device.create_image_view(*image, format, vk::ImageViewType::CUBE, vk::ImageAspectFlags::COLOR)?;
         Ok(Self { image, imgview, sampler })
     }
