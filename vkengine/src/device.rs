@@ -241,7 +241,7 @@ impl VulkanDevice {
         )?;
         let dst_buffer = self.allocate_buffer(size, vk::BufferUsageFlags::TRANSFER_DST | usage, ga::UsageFlags::FAST_DEVICE_ACCESS)?;
 
-        src_buffer.map(&self)?.write_slice(data, 0);
+        src_buffer.map(self)?.write_slice(data, 0);
         self.copy_buffer(*dst_buffer, *src_buffer, size)?;
 
         unsafe { src_buffer.cleanup(self) };
@@ -402,12 +402,12 @@ impl VulkanDevice {
 
         match data {
             ImageData::Single(bytes) => {
-                src_buffer.map(&self)?.write_bytes(bytes, 0);
+                src_buffer.map(self)?.write_bytes(bytes, 0);
             }
-            ImageData::Array(bytes) => {
-                let mut mem = src_buffer.map(&self)?;
-                for i in 0..bytes.len() {
-                    mem.write_bytes(bytes[i], layer_size * i);
+            ImageData::Array(bytes_arr) => {
+                let mut mem = src_buffer.map(self)?;
+                for (i, &bytes) in bytes_arr.iter().enumerate() {
+                    mem.write_bytes(bytes, layer_size * i);
                 }
             }
         }
@@ -458,12 +458,12 @@ impl VulkanDevice {
 
         match data {
             ImageData::Single(bytes) => {
-                src_buffer.map(&self)?.write_bytes(bytes, 0);
+                src_buffer.map(self)?.write_bytes(bytes, 0);
             }
-            ImageData::Array(bytes) => {
-                let mut mem = src_buffer.map(&self)?;
-                for i in 0..bytes.len() {
-                    mem.write_bytes(bytes[i], layer_size * i);
+            ImageData::Array(bytes_arr) => {
+                let mut mem = src_buffer.map(self)?;
+                for (i, &bytes) in bytes_arr.iter().enumerate() {
+                    mem.write_bytes(bytes, layer_size * i);
                 }
             }
         }
@@ -868,7 +868,7 @@ impl MappedMemory<'_> {
     #[inline]
     pub fn write_bytes(&mut self, bytes: &[u8], offset: usize) {
         assert!(offset + bytes.len() <= self.size, "memory write out of bounds");
-        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), self.mapped.as_ptr().offset(offset as _), bytes.len()) }
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), self.mapped.as_ptr().add(offset), bytes.len()) }
     }
 
     #[inline]

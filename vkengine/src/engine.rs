@@ -452,8 +452,8 @@ impl Pipeline {
     pub fn new_no_input(
         device: &VulkanDevice, shader: &Shader, layout: vk::PipelineLayout, swapchain: &Swapchain, mode: PipelineMode,
     ) -> VulkanResult<Self> {
-        let pipeline = Pipeline::create_pipeline(device, shader, layout, &swapchain, &[], &[], mode)?;
-        device.debug(|d| d.set_object_name(&device, &pipeline.handle, "Pipeline<()>"));
+        let pipeline = Pipeline::create_pipeline(device, shader, layout, swapchain, &[], &[], mode)?;
+        device.debug(|d| d.set_object_name(device, &pipeline.handle, "Pipeline<()>"));
         Ok(pipeline)
     }
 
