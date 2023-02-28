@@ -9,4 +9,7 @@ pub use camera::{Camera, CameraController};
 pub use device::VulkanDevice;
 pub use engine::VulkanEngine;
 pub use instance::{DeviceSelection, DeviceType, VulkanInstance};
-pub use types::{VkError, VulkanResult};
+pub use types::{Cleanup, VkError, VulkanResult};
+
+#[cfg(feature = "egui")]
+pub mod gui;

@@ -5,8 +5,8 @@ authors = ["SnowDerg <slayerbeast@gmail.com>"]
 edition = "2021"
 
 [dependencies]
-vkengine = { path = "../vkengine", features = ["winit"] }
-winit = "0.27.5"
+vkengine = { path = "../vkengine", features = ["winit", "egui"] }
+winit = "0.28.1"
 image = "0.24.5"
 obj-rs = "0.7.0"
 structopt = "0.3.26"

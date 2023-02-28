@@ -14,10 +14,10 @@ const MAX_FRAMES_IN_FLIGHT: usize = 2;
 type Vertex = obj::TexturedVertex;
 
 pub struct VulkanEngine {
-    device: VulkanDevice,
+    pub device: VulkanDevice,
     window_size: WinSize,
     window_resized: bool,
-    swapchain: Swapchain,
+    pub(crate) swapchain: Swapchain,
     shader: Shader,
     desc_layout: vk::DescriptorSetLayout,
     pipeline: Pipeline,

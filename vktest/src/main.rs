@@ -3,7 +3,8 @@ use std::io::BufReader;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use structopt::StructOpt;
-use vkengine::{CameraController, VulkanDevice, VulkanEngine, VulkanInstance, VulkanResult};
+use vkengine::gui::{egui, VkGui};
+use vkengine::{CameraController, Cleanup, VulkanDevice, VulkanEngine, VulkanInstance, VulkanResult};
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::Fullscreen;
@@ -68,8 +69,12 @@ fn main() -> VulkanResult<()> {
     vk_app.camera.position = [2.0, 2.0, 2.0].into();
     vk_app.camera.look_at([0.0; 3]);
 
+    let mut gui = VkGui::new(&event_loop, &vk_app)?;
+    let mut show_gui = true;
+
     let mut prev_time = Instant::now();
     let mut frame_count = 0u32;
+    let mut fps = 0;
     let mut controller = CameraController::new();
     //TODO: compute these from current camera direction
     controller.yaw = 135.0;
@@ -78,36 +83,42 @@ fn main() -> VulkanResult<()> {
     let mut fullscreen = false;
 
     event_loop.run(move |event, _, control_flow| match event {
-        Event::WindowEvent { event, .. } => match event {
-            WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
-            WindowEvent::KeyboardInput {
-                input:
-                    KeyboardInput {
-                        state: ElementState::Pressed,
-                        virtual_keycode: Some(VirtualKeyCode::Escape),
-                        ..
-                    },
-                ..
-            } => {
-                *control_flow = ControlFlow::Exit;
+        Event::WindowEvent { event, .. } => {
+            if gui.event_input(&event).consumed {
+                return;
             }
-            WindowEvent::KeyboardInput {
-                input:
-                    KeyboardInput {
-                        state: ElementState::Pressed,
-                        virtual_keycode: Some(VirtualKeyCode::F11),
-                        ..
-                    },
-                ..
-            } => {
-                fullscreen = !fullscreen;
-                window.set_fullscreen(fullscreen.then_some(Fullscreen::Borderless(None)));
+
+            match event {
+                WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+                WindowEvent::KeyboardInput {
+                    input:
+                        KeyboardInput {
+                            state: ElementState::Pressed,
+                            virtual_keycode: Some(VirtualKeyCode::Escape),
+                            ..
+                        },
+                    ..
+                } => {
+                    show_gui = !show_gui;
+                }
+                WindowEvent::KeyboardInput {
+                    input:
+                        KeyboardInput {
+                            state: ElementState::Pressed,
+                            virtual_keycode: Some(VirtualKeyCode::F11),
+                            ..
+                        },
+                    ..
+                } => {
+                    fullscreen = !fullscreen;
+                    window.set_fullscreen(fullscreen.then_some(Fullscreen::Borderless(None)));
+                }
+                WindowEvent::Resized(size) => {
+                    vk_app.resize(size);
+                }
+                _ => controller.update_from_window_event(&event),
             }
-            WindowEvent::Resized(size) => {
-                vk_app.resize(size);
-            }
-            _ => controller.update_from_window_event(&event),
-        },
+        }
         Event::DeviceEvent { event, .. } => controller.update_from_device_event(&event),
         Event::MainEventsCleared => {
             let dt = (vk_app.get_frame_time().as_micros() as f64 / 1e6) as f32;
@@ -116,13 +127,38 @@ fn main() -> VulkanResult<()> {
             window.request_redraw();
         }
         Event::RedrawRequested(_) => {
-            //FIXME: temporary api
-            let mut cmd_buffers = vec![vk_app.draw_object().unwrap()];
+            let ui_output = gui.run(&window, |ctx| {
+                egui::panel::SidePanel::left("main")
+                    .frame(egui::Frame::default().fill(egui::Color32::from_black_alpha(192)))
+                    .resizable(false)
+                    .show_animated(ctx, show_gui, |ui| {
+                        ui.heading("VKtest 3D engine");
+                        ui.label(format!("{fps} fps"));
+                        ui.add_space(10.0);
+                        ui.checkbox(&mut controller.flying, "Flying");
+                        ui.horizontal(|ui| {
+                            ui.label("fov: ");
+                            ui.add(egui::Slider::new(&mut vk_app.camera.fov, 10.0..=120.0));
+                        });
+                        if ui.button("Exit").clicked() {
+                            *control_flow = ControlFlow::Exit;
+                        }
+                    });
+            });
+            gui.event_output(&window);
+
+            let cmd_buffers = [
+                // 3D objects
+                vk_app.draw_object().unwrap(),
+                // user interface
+                gui.draw(ui_output, &vk_app).unwrap(),
+            ];
 
             vk_app.submit_draw_commands(&cmd_buffers).unwrap();
 
             let cur_time = vk_app.get_frame_timestamp();
             if cur_time - prev_time > Duration::from_secs(1) {
+                fps = frame_count;
                 println!("{frame_count} fps, frame time {:?}", vk_app.get_frame_time());
                 prev_time = cur_time;
                 frame_count = 0;
@@ -130,6 +166,9 @@ fn main() -> VulkanResult<()> {
                 frame_count += 1;
             }
         }
+        Event::LoopDestroyed => unsafe {
+            gui.cleanup(&vk_app.device);
+        },
         _ => (),
     });
 }

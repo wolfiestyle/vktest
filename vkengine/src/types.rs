@@ -80,6 +80,14 @@ impl<T> ErrorDescription<&'static str> for ash::prelude::VkResult<T> {
     }
 }
 
+impl<T> ErrorDescription<&'static str> for Option<T> {
+    type Output = T;
+
+    fn describe_err(self, msg: &'static str) -> VulkanResult<Self::Output> {
+        self.ok_or_else(|| VkError::EngineError(msg))
+    }
+}
+
 pub trait Cleanup<C> {
     unsafe fn cleanup(&mut self, context: &C);
 }
@@ -87,6 +95,14 @@ pub trait Cleanup<C> {
 impl<C, T: Cleanup<C>> Cleanup<C> for [T] {
     unsafe fn cleanup(&mut self, context: &C) {
         for item in self {
+            item.cleanup(context);
+        }
+    }
+}
+
+impl<C, K, V: Cleanup<C>> Cleanup<C> for std::collections::HashMap<K, V> {
+    unsafe fn cleanup(&mut self, context: &C) {
+        for item in self.values_mut() {
             item.cleanup(context);
         }
     }
@@ -157,6 +173,10 @@ impl_format!([i32; 1], 1, vk::Format::R32_SINT);
 impl_format!([i32; 2], 1, vk::Format::R32G32_SINT);
 impl_format!([i32; 3], 1, vk::Format::R32G32B32_SINT);
 impl_format!([i32; 4], 1, vk::Format::R32G32B32A32_SINT);
+#[cfg(feature = "egui")]
+impl_format!(egui::Pos2, 1, vk::Format::R32G32_SFLOAT);
+#[cfg(feature = "egui")]
+impl_format!(egui::Color32, 1, vk::Format::R8G8B8A8_UNORM);
 
 pub trait VertexInput {
     fn binding_desc(binding: u32) -> vk::VertexInputBindingDescription;
@@ -225,6 +245,8 @@ impl_vertex!(tuple: A 0, B 1, C 2, D 3);
 impl_vertex!(tuple: A 0, B 1, C 2, D 3, E 4);
 impl_vertex!(tuple: A 0, B 1, C 2, D 3, E 4, F 5);
 impl_vertex!(struct obj::TexturedVertex: position, normal, texture);
+#[cfg(feature = "egui")]
+impl_vertex!(struct egui::epaint::Vertex: pos, uv, color);
 
 trait LensFormat {
     #[inline(always)]
