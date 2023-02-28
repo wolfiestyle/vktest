@@ -10,6 +10,7 @@ use inline_spirv::include_spirv;
 use std::collections::{hash_map::Entry, HashMap};
 use std::mem::size_of;
 use std::slice;
+use std::sync::Arc;
 use winit::event::WindowEvent;
 use winit::event_loop::EventLoopWindowTarget;
 use winit::window::Window;
@@ -17,6 +18,7 @@ use winit::window::Window;
 pub use egui; //FIXME: forward only what's needed to build UIs
 
 pub struct VkGui {
+    device: Arc<VulkanDevice>,
     context: Context,
     winit_state: State,
     platform_output: Option<PlatformOutput>,
@@ -31,9 +33,9 @@ pub struct VkGui {
 
 impl VkGui {
     pub fn new(event_loop: &EventLoopWindowTarget<()>, engine: &VulkanEngine) -> VulkanResult<Self> {
-        let device = &engine.device;
+        let device = engine.device.clone();
         let mut shader = Shader::new(
-            device,
+            &device,
             include_spirv!("src/shaders/gui.vert.glsl", vert, glsl),
             include_spirv!("src/shaders/gui.frag.glsl", frag, glsl),
         )?;
@@ -51,14 +53,15 @@ impl VkGui {
             .offset(0)
             .size(size_of::<Mat4>() as _);
         let pipeline_layout = device.create_pipeline_layout(slice::from_ref(&set_layout), slice::from_ref(&push_constants))?;
-        let pipeline = Pipeline::new::<Vertex>(device, &shader, pipeline_layout, &engine.swapchain, PipelineMode::Overlay)?;
-        unsafe { shader.cleanup(device) };
+        let pipeline = Pipeline::new::<Vertex>(&device, &shader, pipeline_layout, &engine.swapchain, PipelineMode::Overlay)?;
+        unsafe { shader.cleanup(&device) };
         let buffer = device.allocate_buffer(
             65536,
             vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::INDEX_BUFFER,
             ga::UsageFlags::UPLOAD,
         )?;
         Ok(Self {
+            device,
             context: egui::Context::default(),
             winit_state: State::new(event_loop),
             platform_output: None,
@@ -237,17 +240,19 @@ impl VkGui {
     }
 }
 
-impl Cleanup<VulkanDevice> for VkGui {
-    unsafe fn cleanup(&mut self, device: &VulkanDevice) {
-        device.device_wait_idle().unwrap();
-        self.textures.cleanup(device);
-        for &sampler in self.samplers.values() {
-            device.destroy_sampler(sampler, None);
+impl Drop for VkGui {
+    fn drop(&mut self) {
+        unsafe {
+            self.device.device_wait_idle().unwrap();
+            self.textures.cleanup(&self.device);
+            for &sampler in self.samplers.values() {
+                self.device.destroy_sampler(sampler, None);
+            }
+            self.pipeline.cleanup(&self.device);
+            self.device.destroy_pipeline_layout(self.pipeline_layout, None);
+            self.device.destroy_descriptor_set_layout(self.set_layout, None);
+            self.buffer.cleanup(&self.device);
         }
-        self.pipeline.cleanup(device);
-        device.destroy_pipeline_layout(self.pipeline_layout, None);
-        device.destroy_descriptor_set_layout(self.set_layout, None);
-        self.buffer.cleanup(device);
     }
 }
 

@@ -6,6 +6,7 @@ use cstr::cstr;
 use glam::{Affine3A, Mat4};
 use inline_spirv::include_spirv;
 use std::slice;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 const SWAPCHAIN_IMAGE_COUNT: u32 = 3;
@@ -14,7 +15,7 @@ const MAX_FRAMES_IN_FLIGHT: usize = 2;
 type Vertex = obj::TexturedVertex;
 
 pub struct VulkanEngine {
-    pub device: VulkanDevice,
+    pub device: Arc<VulkanDevice>,
     window_size: WinSize,
     window_resized: bool,
     pub(crate) swapchain: Swapchain,
@@ -104,7 +105,7 @@ impl VulkanEngine {
         let now = Instant::now();
 
         Ok(Self {
-            device: vk,
+            device: vk.into(),
             window_size,
             window_resized: false,
             swapchain,

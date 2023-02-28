@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use structopt::StructOpt;
 use vkengine::gui::{egui, VkGui};
-use vkengine::{CameraController, Cleanup, VulkanDevice, VulkanEngine, VulkanInstance, VulkanResult};
+use vkengine::{CameraController, VulkanDevice, VulkanEngine, VulkanInstance, VulkanResult};
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::Fullscreen;
@@ -171,9 +171,6 @@ fn main() -> VulkanResult<()> {
                 frame_count += 1;
             }
         }
-        Event::LoopDestroyed => unsafe {
-            gui.cleanup(&vk_app.device);
-        },
         _ => (),
     });
 }
