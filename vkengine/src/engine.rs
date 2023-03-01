@@ -2,6 +2,7 @@ use crate::camera::Camera;
 use crate::device::{ImageData, Swapchain, UniformBuffer, VkBuffer, VkImage, VulkanDevice};
 use crate::types::*;
 use ash::vk;
+use bytemuck_derive::{Pod, Zeroable};
 use cstr::cstr;
 use glam::{Affine3A, Mat4};
 use inline_spirv::include_spirv;
@@ -654,8 +655,8 @@ impl Cleanup<VulkanDevice> for FrameState {
     }
 }
 
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, Pod, Zeroable)]
 struct UniformBufferObject {
     mvp: Mat4,
     viewproj_inv: Mat4,

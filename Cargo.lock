@@ -1830,6 +1830,7 @@ dependencies = [
  "ash",
  "ash-window",
  "bytemuck",
+ "bytemuck_derive",
  "cstr",
  "egui",
  "egui-winit",

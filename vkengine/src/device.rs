@@ -879,9 +879,8 @@ impl MappedMemory<'_> {
     }
 
     #[inline]
-    pub fn write_object<T: Copy>(&mut self, object: &T) {
-        assert!(size_of::<T>() <= self.size, "memory write out of bounds");
-        unsafe { std::ptr::copy_nonoverlapping(object, self.mapped.as_ptr().cast::<T>(), 1) }
+    pub fn write_object<T: bytemuck::Pod>(&mut self, object: &T) {
+        self.write_bytes(bytemuck::bytes_of(object), 0)
     }
 }
 
@@ -890,7 +889,7 @@ pub struct UniformBuffer<T> {
     _p: PhantomData<T>,
 }
 
-impl<T: Copy> UniformBuffer<T> {
+impl<T: bytemuck::Pod> UniformBuffer<T> {
     pub fn new(device: &VulkanDevice) -> VulkanResult<Self> {
         let size = size_of::<T>() as _;
         let buffer = device.allocate_buffer(size, vk::BufferUsageFlags::UNIFORM_BUFFER, ga::UsageFlags::UPLOAD)?;
