@@ -247,9 +247,10 @@ impl VulkanEngine {
         Ok(cmd_buffer)
     }
 
-    pub fn draw_object(&self) -> VulkanResult<vk::CommandBuffer> {
+    pub fn draw_object(&mut self) -> VulkanResult<DrawPayload> {
         let cmd_buffer = self.begin_secondary_draw_commands()?;
 
+        self.update_uniforms()?;
         let buffer_info = self.frame_state[self.current_frame].uniforms.descriptor();
         let image_info = self.texture.descriptor();
         unsafe {
@@ -310,10 +311,15 @@ impl VulkanEngine {
             self.device.debug(|d| d.cmd_end_label(cmd_buffer));
         }
 
-        self.end_secondary_draw_commands(cmd_buffer)
+        Ok(DrawPayload {
+            cmd_buffer: self.end_secondary_draw_commands(cmd_buffer)?,
+            drop_cmdbuffer: true,
+            drop_buffers: vec![],
+            drop_textures: vec![],
+        })
     }
 
-    pub fn submit_draw_commands(&mut self, draw_commands: &[vk::CommandBuffer]) -> VulkanResult<bool> {
+    pub fn submit_draw_commands(&mut self, draw_commands: impl IntoIterator<Item = DrawPayload>) -> VulkanResult<bool> {
         let frame = &mut self.frame_state[self.current_frame];
         let in_flight_fen = frame.in_flight_fen;
         let image_avail_sem = frame.image_avail_sem;
@@ -326,14 +332,11 @@ impl VulkanEngine {
                 .describe_err("Failed waiting for fence")?;
         }
         // all previous work for this frame is done at this point
-        if !frame.cmd_buffers.is_empty() {
-            unsafe { self.device.free_command_buffers(self.secondary_cmd_pool, &frame.cmd_buffers) };
-            frame.cmd_buffers.clear();
-        }
+        frame.free_payload(&self.device, self.secondary_cmd_pool);
         self.prev_frame_time = self.last_frame_time;
         self.last_frame_time = Instant::now();
-        frame.cmd_buffers.extend(draw_commands);
-        self.update_uniforms()?;
+        frame.payload.extend(draw_commands);
+        let cmd_buffers: Vec<_> = frame.payload.iter().map(|pl| pl.cmd_buffer).collect();
 
         let image_idx = unsafe {
             let acquire_res = self
@@ -360,7 +363,7 @@ impl VulkanEngine {
                 .describe_err("Failed to reset command buffer")?;
         }
 
-        self.record_primary_command_buffer(command_buffer, image_idx as _, draw_commands)?;
+        self.record_primary_command_buffer(command_buffer, image_idx as _, &cmd_buffers)?;
 
         let submit_info = vk::SubmitInfo::builder()
             .wait_semaphores(slice::from_ref(&image_avail_sem))
@@ -659,12 +662,20 @@ impl PipelineMode {
     }
 }
 
+#[derive(Debug)]
+pub struct DrawPayload {
+    pub cmd_buffer: vk::CommandBuffer,
+    pub drop_cmdbuffer: bool,
+    pub drop_buffers: Vec<VkBuffer>,
+    pub drop_textures: Vec<Texture>,
+}
+
 struct FrameState {
     image_avail_sem: vk::Semaphore,
     render_finished_sem: vk::Semaphore,
     in_flight_fen: vk::Fence,
     uniforms: UniformBuffer<UniformBufferObject>,
-    cmd_buffers: Vec<vk::CommandBuffer>,
+    payload: Vec<DrawPayload>,
 }
 
 impl FrameState {
@@ -684,8 +695,20 @@ impl FrameState {
             render_finished_sem,
             in_flight_fen,
             uniforms,
-            cmd_buffers: vec![],
+            payload: vec![],
         })
+    }
+
+    fn free_payload(&mut self, device: &VulkanDevice, cmd_pool: vk::CommandPool) {
+        for mut pl in self.payload.drain(..) {
+            unsafe {
+                if pl.drop_cmdbuffer {
+                    device.free_command_buffers(cmd_pool, &[pl.cmd_buffer]);
+                }
+                pl.drop_buffers.cleanup(device);
+                pl.drop_textures.cleanup(device);
+            }
+        }
     }
 }
 
@@ -705,6 +728,7 @@ struct UniformBufferObject {
     viewproj_inv: Mat4,
 }
 
+#[derive(Debug)]
 pub struct Texture {
     image: VkImage,
     imgview: vk::ImageView,

@@ -1,5 +1,5 @@
 use crate::device::{VkBuffer, VulkanDevice};
-use crate::engine::{Pipeline, PipelineMode, Shader, Texture, VulkanEngine};
+use crate::engine::{DrawPayload, Pipeline, PipelineMode, Shader, Texture, VulkanEngine};
 use crate::types::{Cleanup, ErrorDescription, VulkanResult};
 use ash::vk;
 use egui::epaint::{Primitive, Vertex};
@@ -22,12 +22,11 @@ pub struct VkGui {
     context: Context,
     winit_state: State,
     platform_output: Option<PlatformOutput>,
-    textures: HashMap<TextureId, TextureSlot>,
+    textures: HashMap<TextureId, Texture>,
     samplers: HashMap<TextureOptions, vk::Sampler>,
     pipeline: Pipeline,
     set_layout: vk::DescriptorSetLayout,
     buffer: VkBuffer,
-    deletion_pending: bool,
 }
 
 impl VkGui {
@@ -74,7 +73,6 @@ impl VkGui {
             pipeline,
             set_layout,
             buffer,
-            deletion_pending: false,
         })
     }
 
@@ -87,12 +85,17 @@ impl VkGui {
         self.context.run(raw_input, run_ui)
     }
 
-    pub fn draw(&mut self, run_output: FullOutput, engine: &VulkanEngine) -> VulkanResult<vk::CommandBuffer> {
+    pub fn draw(&mut self, run_output: FullOutput, engine: &VulkanEngine) -> VulkanResult<DrawPayload> {
         let primitives = self.context.tessellate(run_output.shapes);
-        self.cleanup_textures()?;
-        self.update_textures(run_output.textures_delta)?;
+        let drop_textures = self.update_textures(run_output.textures_delta)?;
         self.platform_output = Some(run_output.platform_output);
-        self.build_draw_commands(primitives, engine)
+        let (cmd_buffer, drop_buffers) = self.build_draw_commands(primitives, engine)?;
+        Ok(DrawPayload {
+            cmd_buffer,
+            drop_cmdbuffer: true,
+            drop_buffers,
+            drop_textures,
+        })
     }
 
     pub fn event_output(&mut self, window: &Window) {
@@ -101,7 +104,7 @@ impl VkGui {
         }
     }
 
-    fn update_textures(&mut self, tex_delta: TexturesDelta) -> VulkanResult<()> {
+    fn update_textures(&mut self, tex_delta: TexturesDelta) -> VulkanResult<Vec<Texture>> {
         // create or update textures
         for (id, image) in tex_delta.set {
             let (pixels, [width, height]) = match image.image {
@@ -123,46 +126,29 @@ impl VkGui {
                             sampler
                         }
                     };
-                    entry.insert(TextureSlot {
-                        texture: Texture::new(&self.device, width, height, vk::Format::R8G8B8A8_SRGB, bytes, sampler)?,
-                        delete: false,
-                    });
+                    entry.insert(Texture::new(
+                        &self.device,
+                        width,
+                        height,
+                        vk::Format::R8G8B8A8_SRGB,
+                        bytes,
+                        sampler,
+                    )?);
                 }
                 Entry::Occupied(mut entry) => {
                     let [x, y] = image.pos.unwrap_or([0, 0]).map(|v| v as _);
-                    entry.get_mut().texture.update(&self.device, x, y, width, height, bytes)?;
+                    entry.get_mut().update(&self.device, x, y, width, height, bytes)?;
                 }
             }
         }
-        // mark textures to be deleted in next frame
-        if !tex_delta.free.is_empty() {
-            self.deletion_pending = true;
-        }
-        for id in tex_delta.free {
-            if let Some(ts) = self.textures.get_mut(&id) {
-                ts.delete = true;
-            }
-        }
-        Ok(())
+        // return textures to be deleted in next frame
+        let drop_textures: Vec<_> = tex_delta.free.iter().filter_map(|tex_id| self.textures.remove(tex_id)).collect();
+        Ok(drop_textures)
     }
 
-    fn cleanup_textures(&mut self) -> VulkanResult<()> {
-        if self.deletion_pending {
-            unsafe {
-                self.device.queue_wait_idle(self.device.graphics_queue)?; //FIXME: sync properly
-            }
-            self.textures.retain(|_, ts| {
-                if ts.delete {
-                    unsafe { ts.texture.cleanup(&self.device) };
-                }
-                !ts.delete
-            });
-            self.deletion_pending = false;
-        }
-        Ok(())
-    }
-
-    fn build_draw_commands(&mut self, primitives: Vec<ClippedPrimitive>, engine: &VulkanEngine) -> VulkanResult<vk::CommandBuffer> {
+    fn build_draw_commands(
+        &mut self, primitives: Vec<ClippedPrimitive>, engine: &VulkanEngine,
+    ) -> VulkanResult<(vk::CommandBuffer, Vec<VkBuffer>)> {
         // get combined buffer size for a single shared allocation
         let (total_verts, total_idx) = primitives.iter().fold((0, 0), |acc, prim| match prim.primitive {
             Primitive::Mesh(ref mesh) => (acc.0 + mesh.vertices.len(), acc.1 + mesh.indices.len()),
@@ -172,17 +158,15 @@ impl VkGui {
         let total_bytes = total_vert_size + total_idx * size_of::<u32>();
         // allocate nearest power of two sized buffer if necessary
         let device = &*self.device;
+        let mut drop_buffers = vec![];
         if total_bytes as u64 > self.buffer.memory.size() {
             let new_size = 1u64 << ((total_bytes - 1).ilog2() + 1);
-            unsafe {
-                device.queue_wait_idle(device.graphics_queue)?; //FIXME: sync properly
-                self.buffer.cleanup(device);
-            }
-            self.buffer = device.allocate_buffer(
+            let new_buffer = device.allocate_buffer(
                 new_size,
                 vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::INDEX_BUFFER,
                 ga::UsageFlags::UPLOAD,
             )?;
+            drop_buffers.push(std::mem::replace(&mut self.buffer, new_buffer));
         }
         // build a command buffer from the primitives
         let cmd_buffer = engine.begin_secondary_draw_commands()?;
@@ -206,7 +190,7 @@ impl VkGui {
                     mem.write_slice(&mesh.indices, idx_base + idx_offset);
                     let vk::Extent2D { width, height } = engine.swapchain.extent;
                     let proj = Mat4::orthographic_rh(0.0, width as _, 0.0, height as _, 0.0, 1.0);
-                    let texture = &self.textures.get(&mesh.texture_id).describe_err("Missing gui texture")?.texture;
+                    let texture = self.textures.get(&mesh.texture_id).describe_err("Missing gui texture")?;
                     let image_info = texture.descriptor();
                     let desc_writes = vk::WriteDescriptorSet::builder()
                         .dst_binding(0)
@@ -239,7 +223,7 @@ impl VkGui {
             }
         }
         device.debug(|d| d.cmd_end_label(cmd_buffer));
-        engine.end_secondary_draw_commands(cmd_buffer)
+        Ok((engine.end_secondary_draw_commands(cmd_buffer)?, drop_buffers))
     }
 }
 
@@ -255,17 +239,6 @@ impl Drop for VkGui {
             self.device.destroy_descriptor_set_layout(self.set_layout, None);
             self.buffer.cleanup(&self.device);
         }
-    }
-}
-
-struct TextureSlot {
-    texture: Texture,
-    delete: bool,
-}
-
-impl Cleanup<VulkanDevice> for TextureSlot {
-    unsafe fn cleanup(&mut self, device: &VulkanDevice) {
-        self.texture.cleanup(device)
     }
 }
 
