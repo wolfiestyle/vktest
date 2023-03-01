@@ -20,11 +20,8 @@ pub struct VulkanEngine {
     window_size: WinSize,
     window_resized: bool,
     pub(crate) swapchain: Swapchain,
-    shader: Shader,
     desc_layout: vk::DescriptorSetLayout,
     pipeline: Pipeline,
-    pipeline_layout: vk::PipelineLayout,
-    bg_shader: Shader,
     bg_pipeline: Pipeline,
     bg_texture: Texture,
     main_cmd_pool: vk::CommandPool,
@@ -63,7 +60,7 @@ impl VulkanEngine {
         let tex_sampler = device.create_texture_sampler(vk::Filter::LINEAR, vk::Filter::LINEAR, vk::SamplerAddressMode::REPEAT)?;
         let texture = Texture::new(&device, img_dims.0, img_dims.1, vk::Format::R8G8B8A8_SRGB, img_data, tex_sampler)?;
 
-        let shader = Shader::new(
+        let mut shader = Shader::new(
             &device,
             include_spirv!("src/shaders/texture.vert.glsl", vert, glsl),
             include_spirv!("src/shaders/texture.frag.glsl", frag, glsl),
@@ -82,15 +79,25 @@ impl VulkanEngine {
                 .stage_flags(vk::ShaderStageFlags::FRAGMENT)
                 .build(),
         ])?;
-        let pipeline_layout = device.create_pipeline_layout(slice::from_ref(&desc_layout), &[])?;
-        let pipeline = Pipeline::new::<Vertex>(&device, &shader, pipeline_layout, &swapchain, PipelineMode::Opaque)?;
+        let pipeline = Pipeline::builder(&shader)
+            .vertex_input::<Vertex>()
+            .descriptor_layout(desc_layout)
+            .render_to_swapchain(&swapchain)
+            .build(&device)?;
+        unsafe { shader.cleanup(&device) };
 
-        let bg_shader = Shader::new(
+        let mut bg_shader = Shader::new(
             &device,
             include_spirv!("src/shaders/skybox.vert.glsl", vert, glsl),
             include_spirv!("src/shaders/skybox.frag.glsl", frag, glsl),
         )?;
-        let bg_pipeline = Pipeline::new_no_input(&device, &bg_shader, pipeline_layout, &swapchain, PipelineMode::Background)?;
+        let bg_pipeline = Pipeline::builder(&bg_shader)
+            .descriptor_layout(desc_layout)
+            .render_to_swapchain(&swapchain)
+            .mode(PipelineMode::Background)
+            .build(&device)?;
+        unsafe { bg_shader.cleanup(&device) };
+
         let bg_texture = Texture::new_cubemap(
             &device,
             skybox_dims.0,
@@ -111,11 +118,8 @@ impl VulkanEngine {
             window_size,
             window_resized: false,
             swapchain,
-            shader,
             desc_layout,
             pipeline,
-            pipeline_layout,
-            bg_shader,
             bg_pipeline,
             bg_texture,
             main_cmd_pool,
@@ -261,7 +265,7 @@ impl VulkanEngine {
             self.device.pushdesc_fn.cmd_push_descriptor_set(
                 cmd_buffer,
                 vk::PipelineBindPoint::GRAPHICS,
-                self.pipeline_layout,
+                self.pipeline.layout,
                 0,
                 &[
                     vk::WriteDescriptorSet::builder()
@@ -294,7 +298,7 @@ impl VulkanEngine {
             self.device.pushdesc_fn.cmd_push_descriptor_set(
                 cmd_buffer,
                 vk::PipelineBindPoint::GRAPHICS,
-                self.pipeline_layout,
+                self.bg_pipeline.layout,
                 0,
                 &[vk::WriteDescriptorSet::builder()
                     .dst_binding(1)
@@ -428,59 +432,97 @@ impl Drop for VulkanEngine {
             self.device.destroy_command_pool(self.secondary_cmd_pool, None);
             self.pipeline.cleanup(&self.device);
             self.bg_pipeline.cleanup(&self.device);
-            self.device.destroy_pipeline_layout(self.pipeline_layout, None);
             self.device.destroy_descriptor_set_layout(self.desc_layout, None);
-            self.shader.cleanup(&self.device);
-            self.bg_shader.cleanup(&self.device);
             self.swapchain.cleanup(&self.device);
         }
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct PipelineBuilder<'a> {
+    pub shader: &'a Shader,
+    pub desc_layouts: Vec<vk::DescriptorSetLayout>,
+    pub push_constants: &'a [vk::PushConstantRange],
+    pub binding_desc: Vec<vk::VertexInputBindingDescription>,
+    pub attrib_desc: Vec<vk::VertexInputAttributeDescription>,
+    pub color_format: vk::Format,
+    pub depth_format: vk::Format,
+    pub mode: PipelineMode,
+}
+
+impl<'a> PipelineBuilder<'a> {
+    pub fn vertex_input<V: VertexInput>(mut self) -> Self {
+        self.binding_desc = vec![V::binding_desc(0)];
+        self.attrib_desc = V::attr_desc(0);
+        self
+    }
+
+    pub fn descriptor_layout(mut self, set_layout: vk::DescriptorSetLayout) -> Self {
+        self.desc_layouts = vec![set_layout];
+        self
+    }
+
+    pub fn push_constants(mut self, push_constants: &'a [vk::PushConstantRange]) -> Self {
+        self.push_constants = push_constants;
+        self
+    }
+
+    pub fn render_to_swapchain(mut self, swapchain: &Swapchain) -> Self {
+        self.color_format = swapchain.format;
+        self.depth_format = swapchain.depth_format;
+        self
+    }
+
+    pub fn mode(mut self, mode: PipelineMode) -> Self {
+        self.mode = mode;
+        self
+    }
+
+    pub fn build(self, device: &VulkanDevice) -> VulkanResult<Pipeline> {
+        let layout = device.create_pipeline_layout(&self.desc_layouts, self.push_constants)?;
+        let handle = Pipeline::create_pipeline(&device, layout, self)?;
+        Ok(Pipeline { handle, layout })
+    }
+}
+
+#[derive(Debug)]
 pub struct Pipeline {
-    handle: vk::Pipeline,
+    pub(crate) handle: vk::Pipeline,
+    pub(crate) layout: vk::PipelineLayout,
 }
 
 impl Pipeline {
-    pub fn new<Vert: VertexInput>(
-        device: &VulkanDevice, shader: &Shader, layout: vk::PipelineLayout, swapchain: &Swapchain, mode: PipelineMode,
-    ) -> VulkanResult<Self> {
-        let binding_desc = Vert::binding_desc(0);
-        let attr_desc = Vert::attr_desc(0);
-        let pipeline = Self::create_pipeline(device, shader, layout, swapchain, slice::from_ref(&binding_desc), &attr_desc, mode)?;
-        device.debug(|d| d.set_object_name(device, &pipeline.handle, &format!("Pipeline<{}>", std::any::type_name::<Vert>())));
-        Ok(pipeline)
+    pub fn builder(shader: &Shader) -> PipelineBuilder {
+        PipelineBuilder {
+            shader,
+            desc_layouts: vec![],
+            push_constants: &[],
+            binding_desc: vec![],
+            attrib_desc: vec![],
+            color_format: vk::Format::UNDEFINED,
+            depth_format: vk::Format::UNDEFINED,
+            mode: PipelineMode::Opaque,
+        }
     }
 
-    pub fn new_no_input(
-        device: &VulkanDevice, shader: &Shader, layout: vk::PipelineLayout, swapchain: &Swapchain, mode: PipelineMode,
-    ) -> VulkanResult<Self> {
-        let pipeline = Pipeline::create_pipeline(device, shader, layout, swapchain, &[], &[], mode)?;
-        device.debug(|d| d.set_object_name(device, &pipeline.handle, "Pipeline<()>"));
-        Ok(pipeline)
-    }
-
-    fn create_pipeline(
-        device: &VulkanDevice, shader: &Shader, layout: vk::PipelineLayout, swapchain: &Swapchain,
-        binding_desc: &[vk::VertexInputBindingDescription], attr_desc: &[vk::VertexInputAttributeDescription], mode: PipelineMode,
-    ) -> VulkanResult<Self> {
+    fn create_pipeline(device: &VulkanDevice, layout: vk::PipelineLayout, params: PipelineBuilder) -> VulkanResult<vk::Pipeline> {
         let entry_point = cstr!("main");
         let shader_stages_ci = [
             vk::PipelineShaderStageCreateInfo::builder()
                 .stage(vk::ShaderStageFlags::VERTEX)
-                .module(shader.vert)
+                .module(params.shader.vert)
                 .name(entry_point)
                 .build(),
             vk::PipelineShaderStageCreateInfo::builder()
                 .stage(vk::ShaderStageFlags::FRAGMENT)
-                .module(shader.frag)
+                .module(params.shader.frag)
                 .name(entry_point)
                 .build(),
         ];
 
         let vertex_input_ci = vk::PipelineVertexInputStateCreateInfo::builder()
-            .vertex_binding_descriptions(binding_desc)
-            .vertex_attribute_descriptions(attr_desc);
+            .vertex_binding_descriptions(&params.binding_desc)
+            .vertex_attribute_descriptions(&params.attrib_desc);
 
         let input_assembly_ci = vk::PipelineInputAssemblyStateCreateInfo::builder()
             .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
@@ -498,7 +540,7 @@ impl Pipeline {
         let rasterizer_ci = vk::PipelineRasterizationStateCreateInfo::builder()
             .polygon_mode(vk::PolygonMode::FILL)
             .line_width(1.0)
-            .cull_mode(mode.cull_mode())
+            .cull_mode(params.mode.cull_mode())
             .front_face(vk::FrontFace::CLOCKWISE);
 
         let multisample_ci = vk::PipelineMultisampleStateCreateInfo::builder()
@@ -507,7 +549,7 @@ impl Pipeline {
 
         let color_attach = vk::PipelineColorBlendAttachmentState::builder()
             .color_write_mask(vk::ColorComponentFlags::RGBA)
-            .blend_enable(mode.blend_enable())
+            .blend_enable(params.mode.blend_enable())
             .src_color_blend_factor(vk::BlendFactor::ONE) // premultiplied alpha
             .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
             .color_blend_op(vk::BlendOp::ADD)
@@ -521,16 +563,16 @@ impl Pipeline {
             .attachments(slice::from_ref(&color_attach));
 
         let depth_stencil_ci = vk::PipelineDepthStencilStateCreateInfo::builder()
-            .depth_test_enable(mode.depth_test())
-            .depth_write_enable(mode.depth_write())
-            .depth_compare_op(mode.depth_compare_op())
+            .depth_test_enable(params.mode.depth_test())
+            .depth_write_enable(params.mode.depth_write())
+            .depth_compare_op(params.mode.depth_compare_op())
             .depth_bounds_test_enable(false)
             .min_depth_bounds(0.0)
             .max_depth_bounds(1.0);
 
         let mut pipeline_rendering_ci = vk::PipelineRenderingCreateInfo::builder()
-            .color_attachment_formats(slice::from_ref(&swapchain.format))
-            .depth_attachment_format(swapchain.depth_format);
+            .color_attachment_formats(slice::from_ref(&params.color_format))
+            .depth_attachment_format(params.depth_format);
 
         let pipeline_ci = vk::GraphicsPipelineCreateInfo::builder()
             .stages(&shader_stages_ci)
@@ -551,13 +593,14 @@ impl Pipeline {
                 .map_err(|(_, err)| VkError::VulkanMsg("Error creating pipeline", err))?
         };
 
-        Ok(Self { handle: pipeline[0] })
+        Ok(pipeline[0])
     }
 }
 
 impl Cleanup<VulkanDevice> for Pipeline {
     unsafe fn cleanup(&mut self, device: &VulkanDevice) {
         device.destroy_pipeline(self.handle, None);
+        device.destroy_pipeline_layout(self.layout, None);
     }
 }
 
@@ -706,6 +749,7 @@ impl Cleanup<VulkanDevice> for Texture {
     }
 }
 
+#[derive(Debug)]
 pub struct Shader {
     vert: vk::ShaderModule,
     frag: vk::ShaderModule,

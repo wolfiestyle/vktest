@@ -25,7 +25,6 @@ pub struct VkGui {
     textures: HashMap<TextureId, TextureSlot>,
     samplers: HashMap<TextureOptions, vk::Sampler>,
     pipeline: Pipeline,
-    pipeline_layout: vk::PipelineLayout,
     set_layout: vk::DescriptorSetLayout,
     buffer: VkBuffer,
     deletion_pending: bool,
@@ -52,8 +51,13 @@ impl VkGui {
             .stage_flags(vk::ShaderStageFlags::VERTEX)
             .offset(0)
             .size(size_of::<Mat4>() as _);
-        let pipeline_layout = device.create_pipeline_layout(slice::from_ref(&set_layout), slice::from_ref(&push_constants))?;
-        let pipeline = Pipeline::new::<Vertex>(&device, &shader, pipeline_layout, &engine.swapchain, PipelineMode::Overlay)?;
+        let pipeline = Pipeline::builder(&shader)
+            .vertex_input::<Vertex>()
+            .descriptor_layout(set_layout)
+            .push_constants(slice::from_ref(&push_constants))
+            .render_to_swapchain(&engine.swapchain)
+            .mode(PipelineMode::Overlay)
+            .build(&device)?;
         unsafe { shader.cleanup(&device) };
         let buffer = device.allocate_buffer(
             65536,
@@ -68,7 +72,6 @@ impl VkGui {
             textures: Default::default(),
             samplers: Default::default(),
             pipeline,
-            pipeline_layout,
             set_layout,
             buffer,
             deletion_pending: false,
@@ -214,13 +217,13 @@ impl VkGui {
                         device.pushdesc_fn.cmd_push_descriptor_set(
                             cmd_buffer,
                             vk::PipelineBindPoint::GRAPHICS,
-                            self.pipeline_layout,
+                            self.pipeline.layout,
                             0,
                             slice::from_ref(&desc_writes),
                         );
                         device.cmd_push_constants(
                             cmd_buffer,
-                            self.pipeline_layout,
+                            self.pipeline.layout,
                             vk::ShaderStageFlags::VERTEX,
                             0,
                             bytemuck::bytes_of(&proj),
@@ -249,7 +252,6 @@ impl Drop for VkGui {
                 self.device.destroy_sampler(sampler, None);
             }
             self.pipeline.cleanup(&self.device);
-            self.device.destroy_pipeline_layout(self.pipeline_layout, None);
             self.device.destroy_descriptor_set_layout(self.set_layout, None);
             self.buffer.cleanup(&self.device);
         }
