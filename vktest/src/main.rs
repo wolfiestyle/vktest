@@ -152,14 +152,14 @@ fn main() -> VulkanResult<()> {
             });
             gui.event_output(&window);
 
-            let cmd_buffers = [
+            let draw_cmds = [
                 // 3D objects
                 vk_app.draw_object().unwrap(),
                 // user interface
                 gui.draw(ui_output, &vk_app).unwrap(),
             ];
 
-            vk_app.submit_draw_commands(cmd_buffers).unwrap();
+            vk_app.submit_draw_commands(draw_cmds).unwrap();
 
             let cur_time = vk_app.get_frame_timestamp();
             if cur_time - prev_time > Duration::from_secs(1) {

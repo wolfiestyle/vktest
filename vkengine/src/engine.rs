@@ -483,7 +483,7 @@ impl<'a> PipelineBuilder<'a> {
 
     pub fn build(self, device: &VulkanDevice) -> VulkanResult<Pipeline> {
         let layout = device.create_pipeline_layout(&self.desc_layouts, self.push_constants)?;
-        let handle = Pipeline::create_pipeline(&device, layout, self)?;
+        let handle = Pipeline::create_pipeline(device, layout, self)?;
         Ok(Pipeline { handle, layout })
     }
 }
