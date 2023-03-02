@@ -168,8 +168,9 @@ impl VulkanDevice {
         Ok(())
     }
 
-    pub fn create_semaphore(&self) -> VulkanResult<vk::Semaphore> {
-        let semaphore_ci = vk::SemaphoreCreateInfo::default();
+    pub fn create_semaphore(&self, sem_type: vk::SemaphoreType) -> VulkanResult<vk::Semaphore> {
+        let mut sem_type_ci = vk::SemaphoreTypeCreateInfo::builder().semaphore_type(sem_type);
+        let semaphore_ci = vk::SemaphoreCreateInfo::builder().push_next(&mut sem_type_ci);
         unsafe {
             self.device
                 .create_semaphore(&semaphore_ci, None)

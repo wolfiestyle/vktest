@@ -167,9 +167,17 @@ impl VulkanInstance {
     fn query_device_feature_support(&self, phys_dev: vk::PhysicalDevice, surface: vk::SurfaceKHR) -> VulkanResult<DeviceInfo> {
         // device info
         let properties = unsafe { self.instance.get_physical_device_properties(phys_dev) };
-        //let features = unsafe { self.instance.get_physical_device_features(phys_dev) };  //TODO: get limits and stuff
         let dev_type = properties.device_type.into();
         let name = vk_to_cstr(&properties.device_name).to_str().unwrap_or("unknown").to_owned();
+
+        // features
+        let mut tl_sem_feats = vk::PhysicalDeviceTimelineSemaphoreFeatures::default();
+        let mut features2 = vk::PhysicalDeviceFeatures2::builder().push_next(&mut tl_sem_feats);
+        unsafe { self.instance.get_physical_device_features2(phys_dev, &mut features2) };
+        if tl_sem_feats.timeline_semaphore == vk::FALSE {
+            eprintln!("Device '{name}' doesn't support timeline semaphores");
+            return Err(VkError::UnsuitableDevice);
+        }
 
         // queue families
         let queue_families = unsafe { self.instance.get_physical_device_queue_family_properties(phys_dev) };
@@ -283,12 +291,14 @@ impl VulkanInstance {
             .collect();
 
         let mut dyn_render_enable = vk::PhysicalDeviceDynamicRenderingFeatures::builder().dynamic_rendering(true);
+        let mut tl_sem_enable = vk::PhysicalDeviceTimelineSemaphoreFeatures::builder().timeline_semaphore(true);
 
         let device_ci = vk::DeviceCreateInfo::builder()
             .queue_create_infos(&queues_ci)
             .enabled_features(&features)
             .enabled_extension_names(&extensions)
-            .push_next(&mut dyn_render_enable);
+            .push_next(&mut dyn_render_enable)
+            .push_next(&mut tl_sem_enable);
 
         unsafe {
             self.instance

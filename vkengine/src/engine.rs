@@ -328,22 +328,23 @@ impl VulkanEngine {
     pub fn submit_draw_commands(&mut self, draw_commands: impl IntoIterator<Item = DrawPayload>) -> VulkanResult<bool> {
         let frame_idx = (self.current_frame % self.frame_state.len() as u64) as usize;
         let frame = &mut self.frame_state[frame_idx];
-        let in_flight_fen = frame.in_flight_fen;
         let image_avail_sem = frame.image_avail_sem;
         let render_finish_sem = frame.render_finished_sem;
+        let in_flight_sem = frame.in_flight_sem;
         let command_buffer = self.main_cmd_buffers[frame_idx];
 
+        let wait_info = vk::SemaphoreWaitInfo::builder()
+            .semaphores(slice::from_ref(&in_flight_sem))
+            .values(slice::from_ref(&frame.wait_frame));
         unsafe {
             self.device
-                .wait_for_fences(slice::from_ref(&in_flight_fen), true, u64::MAX)
-                .describe_err("Failed waiting for fence")?;
+                .wait_semaphores(&wait_info, u64::MAX)
+                .describe_err("Failed waiting semaphore")?;
         }
         // all previous work for this frame is done at this point
         frame.free_payload(&self.device, self.secondary_cmd_pool);
         self.prev_frame_time = self.last_frame_time;
         self.last_frame_time = Instant::now();
-        frame.payload.extend(draw_commands);
-        let cmd_buffers: Vec<_> = frame.payload.iter().map(|pl| pl.cmd_buffer).collect();
 
         let image_idx = unsafe {
             let acquire_res = self
@@ -363,25 +364,32 @@ impl VulkanEngine {
 
         unsafe {
             self.device
-                .reset_fences(slice::from_ref(&in_flight_fen))
-                .describe_err("Failed resetting fences")?;
-            self.device
                 .reset_command_buffer(command_buffer, Default::default())
                 .describe_err("Failed to reset command buffer")?;
         }
 
+        let next_frame = self.current_frame + 1;
+        frame.wait_frame = next_frame;
+        frame.payload.extend(draw_commands);
+        let cmd_buffers: Vec<_> = frame.payload.iter().map(|pl| pl.cmd_buffer).collect();
         self.record_primary_command_buffer(command_buffer, image_idx as _, &cmd_buffers)?;
 
+        let signal_values = [0, next_frame];
+        let signal_sems = [render_finish_sem, in_flight_sem];
+        let mut timeline_info = vk::TimelineSemaphoreSubmitInfo::builder().signal_semaphore_values(&signal_values);
         let submit_info = vk::SubmitInfo::builder()
             .wait_semaphores(slice::from_ref(&image_avail_sem))
             .wait_dst_stage_mask(&[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT])
             .command_buffers(slice::from_ref(&command_buffer))
-            .signal_semaphores(slice::from_ref(&render_finish_sem));
+            .signal_semaphores(&signal_sems)
+            .push_next(&mut timeline_info);
         unsafe {
             self.device
-                .queue_submit(self.device.graphics_queue, slice::from_ref(&submit_info), in_flight_fen)
+                .queue_submit(self.device.graphics_queue, slice::from_ref(&submit_info), vk::Fence::null())
                 .describe_err("Failed to submit draw command buffer")?
         }
+
+        self.current_frame += 1;
 
         let present_info = vk::PresentInfoKHR::builder()
             .wait_semaphores(slice::from_ref(&render_finish_sem))
@@ -393,8 +401,6 @@ impl VulkanEngine {
                 .queue_present(self.device.present_queue, &present_info)
                 .describe_err("Failed to present queue")?
         };
-
-        self.current_frame += 1;
 
         if suboptimal || self.window_resized {
             eprintln!("swapchain suboptimal");
@@ -678,29 +684,31 @@ pub struct DrawPayload {
 }
 
 struct FrameState {
-    image_avail_sem: vk::Semaphore,
-    render_finished_sem: vk::Semaphore,
-    in_flight_fen: vk::Fence,
+    image_avail_sem: vk::Semaphore,     // present -> image acquired
+    render_finished_sem: vk::Semaphore, // queue submit -> present
+    in_flight_sem: vk::Semaphore,       // queue submit -> frame finished
+    wait_frame: u64,
     uniforms: UniformBuffer<UniformBufferObject>,
     payload: Vec<DrawPayload>,
 }
 
 impl FrameState {
     fn new(device: &VulkanDevice) -> VulkanResult<Self> {
-        let image_avail_sem = device.create_semaphore()?;
-        let render_finished_sem = device.create_semaphore()?;
-        let in_flight_fen = device.create_fence()?;
+        let image_avail_sem = device.create_semaphore(vk::SemaphoreType::BINARY)?;
+        let render_finished_sem = device.create_semaphore(vk::SemaphoreType::BINARY)?;
+        let in_flight_sem = device.create_semaphore(vk::SemaphoreType::TIMELINE)?;
         let uniforms = UniformBuffer::new(device)?;
         device.debug(|d| {
             d.set_object_name(device, &image_avail_sem, "Image available semaphore");
             d.set_object_name(device, &render_finished_sem, "Render finished semaphore");
-            d.set_object_name(device, &in_flight_fen, "In-flight fence");
             d.set_object_name(device, &*uniforms.buffer, "Uniform buffer");
+            d.set_object_name(&device, &in_flight_sem, "In-flight semaphore")
         });
         Ok(Self {
             image_avail_sem,
             render_finished_sem,
-            in_flight_fen,
+            in_flight_sem,
+            wait_frame: 0,
             uniforms,
             payload: vec![],
         })
@@ -723,7 +731,7 @@ impl Cleanup<VulkanDevice> for FrameState {
     unsafe fn cleanup(&mut self, device: &VulkanDevice) {
         device.destroy_semaphore(self.image_avail_sem, None);
         device.destroy_semaphore(self.render_finished_sem, None);
-        device.destroy_fence(self.in_flight_fen, None);
+        device.destroy_semaphore(self.in_flight_sem, None);
         self.uniforms.cleanup(device);
     }
 }
