@@ -78,7 +78,7 @@ fn main() -> VulkanResult<()> {
     let mut show_gui = true;
 
     let mut prev_time = Instant::now();
-    let mut frame_count = 0u32;
+    let mut prev_frame_count = 0;
     let mut fps = 0;
     let mut controller = CameraController::new();
     //TODO: compute these from current camera direction
@@ -139,6 +139,7 @@ fn main() -> VulkanResult<()> {
                     .show_animated(ctx, show_gui, |ui| {
                         ui.heading("VKtest 3D engine");
                         ui.label(format!("{fps} fps"));
+                        ui.label(format!("frame {}", vk_app.get_frame_count()));
                         ui.add_space(10.0);
                         ui.checkbox(&mut controller.flying, "Flying");
                         ui.horizontal(|ui| {
@@ -163,12 +164,11 @@ fn main() -> VulkanResult<()> {
 
             let cur_time = vk_app.get_frame_timestamp();
             if cur_time - prev_time > Duration::from_secs(1) {
-                fps = frame_count;
-                println!("{frame_count} fps, frame time {:?}", vk_app.get_frame_time());
+                let frame_count = vk_app.get_frame_count();
+                fps = frame_count - prev_frame_count;
+                println!("{fps} fps, frame time {:?}", vk_app.get_frame_time());
                 prev_time = cur_time;
-                frame_count = 0;
-            } else {
-                frame_count += 1;
+                prev_frame_count = frame_count;
             }
         }
         _ => (),

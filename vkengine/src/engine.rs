@@ -28,7 +28,7 @@ pub struct VulkanEngine {
     secondary_cmd_pool: vk::CommandPool,
     main_cmd_buffers: Vec<vk::CommandBuffer>,
     frame_state: Vec<FrameState>,
-    current_frame: usize,
+    current_frame: u64,
     vertex_buffer: VkBuffer,
     index_buffer: VkBuffer,
     index_count: u32,
@@ -156,6 +156,10 @@ impl VulkanEngine {
         self.last_frame_time - self.prev_frame_time
     }
 
+    pub fn get_frame_count(&self) -> u64 {
+        self.current_frame
+    }
+
     fn record_primary_command_buffer(
         &self, cmd_buffer: vk::CommandBuffer, image_idx: usize, secondaries: &[vk::CommandBuffer],
     ) -> VulkanResult<()> {
@@ -250,8 +254,10 @@ impl VulkanEngine {
     pub fn draw_object(&mut self) -> VulkanResult<DrawPayload> {
         let cmd_buffer = self.begin_secondary_draw_commands()?;
 
-        self.update_uniforms()?;
-        let buffer_info = self.frame_state[self.current_frame].uniforms.descriptor();
+        let frame_idx = (self.current_frame % self.frame_state.len() as u64) as usize;
+        self.update_uniforms(frame_idx)?;
+
+        let buffer_info = self.frame_state[frame_idx].uniforms.descriptor();
         let image_info = self.texture.descriptor();
         unsafe {
             // object
@@ -320,11 +326,12 @@ impl VulkanEngine {
     }
 
     pub fn submit_draw_commands(&mut self, draw_commands: impl IntoIterator<Item = DrawPayload>) -> VulkanResult<bool> {
-        let frame = &mut self.frame_state[self.current_frame];
+        let frame_idx = (self.current_frame % self.frame_state.len() as u64) as usize;
+        let frame = &mut self.frame_state[frame_idx];
         let in_flight_fen = frame.in_flight_fen;
         let image_avail_sem = frame.image_avail_sem;
         let render_finish_sem = frame.render_finished_sem;
-        let command_buffer = self.main_cmd_buffers[self.current_frame];
+        let command_buffer = self.main_cmd_buffers[frame_idx];
 
         unsafe {
             self.device
@@ -387,7 +394,7 @@ impl VulkanEngine {
                 .describe_err("Failed to present queue")?
         };
 
-        self.current_frame = (self.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
+        self.current_frame += 1;
 
         if suboptimal || self.window_resized {
             eprintln!("swapchain suboptimal");
@@ -398,7 +405,7 @@ impl VulkanEngine {
         Ok(true)
     }
 
-    fn update_uniforms(&mut self) -> VulkanResult<()> {
+    fn update_uniforms(&mut self, frame_idx: usize) -> VulkanResult<()> {
         let view = self.camera.get_view_transform();
         let proj = self.camera.get_projection(self.swapchain.aspect());
         let viewproj = proj * view;
@@ -407,7 +414,7 @@ impl VulkanEngine {
             mvp: viewproj * self.model,
             viewproj_inv,
         };
-        self.frame_state[self.current_frame].uniforms.write_uniforms(&self.device, ubo)
+        self.frame_state[frame_idx].uniforms.write_uniforms(&self.device, ubo)
     }
 
     fn recreate_swapchain(&mut self) -> VulkanResult<()> {
