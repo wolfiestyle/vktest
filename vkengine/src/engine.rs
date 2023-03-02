@@ -317,12 +317,7 @@ impl VulkanEngine {
             self.device.debug(|d| d.cmd_end_label(cmd_buffer));
         }
 
-        Ok(DrawPayload {
-            cmd_buffer: self.end_secondary_draw_commands(cmd_buffer)?,
-            drop_cmdbuffer: true,
-            drop_buffers: vec![],
-            drop_textures: vec![],
-        })
+        Ok(DrawPayload::new(self.end_secondary_draw_commands(cmd_buffer)?, true))
     }
 
     pub fn submit_draw_commands(&mut self, draw_commands: impl IntoIterator<Item = DrawPayload>) -> VulkanResult<bool> {
@@ -675,12 +670,33 @@ impl PipelineMode {
     }
 }
 
-#[derive(Debug)]
 pub struct DrawPayload {
     pub cmd_buffer: vk::CommandBuffer,
     pub drop_cmdbuffer: bool,
-    pub drop_buffers: Vec<VkBuffer>,
-    pub drop_textures: Vec<Texture>,
+    pub on_frame_finish: Option<Box<dyn FnOnce(&VulkanDevice)>>,
+}
+
+impl DrawPayload {
+    #[inline]
+    pub fn new(cmd_buffer: vk::CommandBuffer, drop_cmdbuffer: bool) -> Self {
+        Self {
+            cmd_buffer,
+            drop_cmdbuffer,
+            on_frame_finish: None,
+        }
+    }
+
+    #[inline]
+    pub fn new_with_callback<F>(cmd_buffer: vk::CommandBuffer, drop_cmdbuffer: bool, on_frame_finish: F) -> Self
+    where
+        F: FnOnce(&VulkanDevice) + 'static,
+    {
+        Self {
+            cmd_buffer,
+            drop_cmdbuffer,
+            on_frame_finish: Some(Box::new(on_frame_finish)),
+        }
+    }
 }
 
 struct FrameState {
@@ -715,13 +731,12 @@ impl FrameState {
     }
 
     fn free_payload(&mut self, device: &VulkanDevice, cmd_pool: vk::CommandPool) {
-        for mut pl in self.payload.drain(..) {
-            unsafe {
-                if pl.drop_cmdbuffer {
-                    device.free_command_buffers(cmd_pool, &[pl.cmd_buffer]);
-                }
-                pl.drop_buffers.cleanup(device);
-                pl.drop_textures.cleanup(device);
+        for pl in self.payload.drain(..) {
+            if pl.drop_cmdbuffer {
+                unsafe { device.free_command_buffers(cmd_pool, &[pl.cmd_buffer]) };
+            }
+            if let Some(f) = pl.on_frame_finish {
+                f(device)
             }
         }
     }

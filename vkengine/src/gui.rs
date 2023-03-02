@@ -87,15 +87,18 @@ impl VkGui {
 
     pub fn draw(&mut self, run_output: FullOutput, engine: &VulkanEngine) -> VulkanResult<DrawPayload> {
         let primitives = self.context.tessellate(run_output.shapes);
-        let drop_textures = self.update_textures(run_output.textures_delta)?;
+        let mut drop_textures = self.update_textures(run_output.textures_delta)?;
         self.platform_output = Some(run_output.platform_output);
-        let (cmd_buffer, drop_buffers) = self.build_draw_commands(primitives, engine)?;
-        Ok(DrawPayload {
-            cmd_buffer,
-            drop_cmdbuffer: true,
-            drop_buffers,
-            drop_textures,
-        })
+        let (cmd_buffer, mut drop_buffers) = self.build_draw_commands(primitives, engine)?;
+        let payload = if drop_buffers.is_empty() && drop_buffers.is_empty() {
+            DrawPayload::new(cmd_buffer, true)
+        } else {
+            DrawPayload::new_with_callback(cmd_buffer, true, move |dev| unsafe {
+                drop_buffers.cleanup(dev);
+                drop_textures.cleanup(dev);
+            })
+        };
+        Ok(payload)
     }
 
     pub fn event_output(&mut self, window: &Window) {
