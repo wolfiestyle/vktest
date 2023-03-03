@@ -17,7 +17,7 @@ pub struct VulkanEngine {
     window_resized: bool,
     pub(crate) swapchain: Swapchain,
     main_cmd_pool: vk::CommandPool,
-    secondary_cmd_pool: vk::CommandPool,
+    pub(crate) secondary_cmd_pool: vk::CommandPool,
     main_cmd_buffers: Vec<vk::CommandBuffer>,
     frame_state: Vec<FrameState>,
     current_frame: u64,
@@ -180,24 +180,28 @@ impl VulkanEngine {
         Ok(())
     }
 
-    pub fn begin_secondary_draw_commands(&self) -> VulkanResult<vk::CommandBuffer> {
+    pub fn create_secondary_command_buffer(&self) -> VulkanResult<vk::CommandBuffer> {
         let cmd_buffer = self
             .device
-            .create_command_buffers(self.secondary_cmd_pool, 1, vk::CommandBufferLevel::SECONDARY)?[0];
+            .create_command_buffers(self.secondary_cmd_pool, 1, vk::CommandBufferLevel::SECONDARY)?;
+        Ok(cmd_buffer[0])
+    }
+
+    pub fn begin_secondary_draw_commands(&self, cmd_buffer: vk::CommandBuffer, flags: vk::CommandBufferUsageFlags) -> VulkanResult<()> {
         let mut render_info = vk::CommandBufferInheritanceRenderingInfo::builder()
             .color_attachment_formats(slice::from_ref(&self.swapchain.format))
             .depth_attachment_format(self.swapchain.depth_format)
             .rasterization_samples(vk::SampleCountFlags::TYPE_1);
         let inherit_info = vk::CommandBufferInheritanceInfo::builder().push_next(&mut render_info);
         let begin_info = vk::CommandBufferBeginInfo::builder()
-            .flags(vk::CommandBufferUsageFlags::RENDER_PASS_CONTINUE)
+            .flags(vk::CommandBufferUsageFlags::RENDER_PASS_CONTINUE | flags)
             .inheritance_info(&inherit_info);
         unsafe {
             self.device
                 .begin_command_buffer(cmd_buffer, &begin_info)
                 .describe_err("Failed to begin recording secondary command buffer")?;
         }
-        Ok(cmd_buffer)
+        Ok(())
     }
 
     pub fn end_secondary_draw_commands(&self, cmd_buffer: vk::CommandBuffer) -> VulkanResult<vk::CommandBuffer> {

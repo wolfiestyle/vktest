@@ -3,7 +3,7 @@ use crate::engine::{DrawPayload, Pipeline, PipelineMode, Shader, Texture, Vulkan
 use crate::types::{Cleanup, ErrorDescription, VulkanResult};
 use ash::vk;
 use egui::epaint::{Primitive, Vertex};
-use egui::{ClippedPrimitive, Context, FullOutput, PlatformOutput, TextureFilter, TextureId, TextureOptions, TexturesDelta};
+use egui::{ClippedPrimitive, Context, FullOutput, PlatformOutput, TextureId, TexturesDelta};
 use egui_winit::{EventResponse, State};
 use glam::Mat4;
 use inline_spirv::include_spirv;
@@ -11,21 +11,27 @@ use std::collections::{hash_map::Entry, HashMap};
 use std::mem::size_of;
 use std::slice;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use winit::event::WindowEvent;
 use winit::event_loop::EventLoopWindowTarget;
 use winit::window::Window;
 
 pub use egui; //FIXME: forward only what's needed to build UIs
 
+const MIN_FRAME_TIME: Duration = Duration::from_micros(1_000_000 / 60);
+
 pub struct UiRenderer {
     device: Arc<VulkanDevice>,
     context: Context,
     winit_state: State,
+    frame_output: Option<FullOutput>,
     platform_output: Option<PlatformOutput>,
     textures: HashMap<TextureId, Texture>,
     pipeline: Pipeline,
     set_layout: vk::DescriptorSetLayout,
     buffer: VkBuffer,
+    cmd_buffer: Option<vk::CommandBuffer>,
+    last_draw_time: Option<Instant>,
 }
 
 impl UiRenderer {
@@ -64,15 +70,19 @@ impl UiRenderer {
             vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::INDEX_BUFFER,
             ga::UsageFlags::UPLOAD,
         )?;
+
         Ok(Self {
             device,
             context: egui::Context::default(),
             winit_state: State::new(event_loop),
+            frame_output: None,
             platform_output: None,
             textures: Default::default(),
             pipeline,
             set_layout,
             buffer,
+            cmd_buffer: None,
+            last_draw_time: None,
         })
     }
 
@@ -80,24 +90,39 @@ impl UiRenderer {
         self.winit_state.on_event(&self.context, event)
     }
 
-    pub fn run(&mut self, window: &Window, run_ui: impl FnOnce(&Context)) -> FullOutput {
+    pub fn run(&mut self, window: &Window, run_ui: impl FnOnce(&Context)) {
+        let now = Instant::now();
+        if let Some(last_draw) = self.last_draw_time {
+            if now - last_draw < MIN_FRAME_TIME {
+                return;
+            }
+        }
+        self.last_draw_time = Some(now);
         let raw_input = self.winit_state.take_egui_input(window);
-        self.context.run(raw_input, run_ui)
+        self.frame_output = self.context.run(raw_input, run_ui).into();
     }
 
-    pub fn draw(&mut self, run_output: FullOutput, engine: &VulkanEngine) -> VulkanResult<DrawPayload> {
+    pub fn draw(&mut self, engine: &VulkanEngine) -> VulkanResult<DrawPayload> {
+        let Some(run_output) = self.frame_output.take() else {
+            return Ok(DrawPayload::new(self.cmd_buffer.expect("draw called before run"), false));
+        };
+
+        self.platform_output = Some(run_output.platform_output);
         let primitives = self.context.tessellate(run_output.shapes);
         let mut drop_textures = self.update_textures(run_output.textures_delta)?;
-        self.platform_output = Some(run_output.platform_output);
-        let (cmd_buffer, mut drop_buffers) = self.build_draw_commands(primitives, engine)?;
-        let payload = if drop_buffers.is_empty() && drop_buffers.is_empty() {
-            DrawPayload::new(cmd_buffer, true)
-        } else {
-            DrawPayload::new_with_callback(cmd_buffer, true, move |dev| unsafe {
-                drop_buffers.cleanup(dev);
-                drop_textures.cleanup(dev);
-            })
-        };
+
+        let cmd_buffer = engine.create_secondary_command_buffer()?;
+        let old_cmdbuf = self.cmd_buffer.replace(cmd_buffer);
+        let mut drop_buffers = self.build_draw_commands(cmd_buffer, primitives, engine)?;
+
+        let pool = engine.secondary_cmd_pool; //FIXME: use a separate command pool
+        let payload = DrawPayload::new_with_callback(cmd_buffer, false, move |dev| unsafe {
+            drop_buffers.cleanup(dev);
+            drop_textures.cleanup(dev);
+            if let Some(cmdbuf) = old_cmdbuf {
+                dev.free_command_buffers(pool, &[cmdbuf]);
+            }
+        });
         Ok(payload)
     }
 
@@ -138,8 +163,8 @@ impl UiRenderer {
     }
 
     fn build_draw_commands(
-        &mut self, primitives: Vec<ClippedPrimitive>, engine: &VulkanEngine,
-    ) -> VulkanResult<(vk::CommandBuffer, Vec<VkBuffer>)> {
+        &mut self, cmd_buffer: vk::CommandBuffer, primitives: Vec<ClippedPrimitive>, engine: &VulkanEngine,
+    ) -> VulkanResult<Vec<VkBuffer>> {
         // get combined buffer size for a single shared allocation
         let (total_verts, total_idx) = primitives.iter().fold((0, 0), |acc, prim| match prim.primitive {
             Primitive::Mesh(ref mesh) => (acc.0 + mesh.vertices.len(), acc.1 + mesh.indices.len()),
@@ -160,7 +185,7 @@ impl UiRenderer {
             drop_buffers.push(std::mem::replace(&mut self.buffer, new_buffer));
         }
         // build a command buffer from the primitives
-        let cmd_buffer = engine.begin_secondary_draw_commands()?;
+        engine.begin_secondary_draw_commands(cmd_buffer, vk::CommandBufferUsageFlags::SIMULTANEOUS_USE)?;
         unsafe {
             device.debug(|d| d.cmd_begin_label(cmd_buffer, "UI", [0.6, 0.2, 0.4, 1.0]));
             device.cmd_bind_pipeline(cmd_buffer, vk::PipelineBindPoint::GRAPHICS, *self.pipeline);
@@ -214,7 +239,8 @@ impl UiRenderer {
             }
         }
         device.debug(|d| d.cmd_end_label(cmd_buffer));
-        Ok((engine.end_secondary_draw_commands(cmd_buffer)?, drop_buffers))
+        engine.end_secondary_draw_commands(cmd_buffer)?;
+        Ok(drop_buffers)
     }
 }
 

@@ -74,7 +74,8 @@ impl MeshRenderer {
     }
 
     pub fn render(&mut self, engine: &VulkanEngine) -> VulkanResult<DrawPayload> {
-        let cmd_buffer = engine.begin_secondary_draw_commands()?;
+        let cmd_buffer = engine.create_secondary_command_buffer()?;
+        engine.begin_secondary_draw_commands(cmd_buffer, Default::default())?;
 
         //FIXME: sync uniform buffer updates after frame finished
         let ubo = self.calc_uniforms(engine);
@@ -201,7 +202,8 @@ impl SkyboxRenderer {
     }
 
     pub fn render(&mut self, engine: &VulkanEngine) -> VulkanResult<DrawPayload> {
-        let cmd_buffer = engine.begin_secondary_draw_commands()?;
+        let cmd_buffer = engine.create_secondary_command_buffer()?;
+        engine.begin_secondary_draw_commands(cmd_buffer, Default::default())?;
 
         let image_info = self.texture.descriptor();
         let view = engine.camera.get_view_transform();

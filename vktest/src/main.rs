@@ -126,7 +126,7 @@ fn main() -> VulkanResult<()> {
             window.request_redraw();
         }
         Event::RedrawRequested(_) => {
-            let ui_output = gui.run(&window, |ctx| {
+            gui.run(&window, |ctx| {
                 egui::panel::SidePanel::left("main")
                     .frame(egui::Frame::default().fill(egui::Color32::from_black_alpha(192)))
                     .resizable(false)
@@ -150,7 +150,7 @@ fn main() -> VulkanResult<()> {
             let draw_cmds = [
                 object.render(&vk_app).unwrap(),
                 skybox.render(&vk_app).unwrap(),
-                gui.draw(ui_output, &vk_app).unwrap(),
+                gui.draw(&vk_app).unwrap(),
             ];
 
             vk_app.submit_draw_commands(draw_cmds).unwrap();
