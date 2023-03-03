@@ -335,6 +335,7 @@ pub struct PipelineBuilder<'a> {
     pub color_format: vk::Format,
     pub depth_format: vk::Format,
     pub mode: PipelineMode,
+    pub topology: vk::PrimitiveTopology,
 }
 
 impl<'a> PipelineBuilder<'a> {
@@ -365,6 +366,11 @@ impl<'a> PipelineBuilder<'a> {
         self
     }
 
+    pub fn topology(mut self, topology: vk::PrimitiveTopology) -> Self {
+        self.topology = topology;
+        self
+    }
+
     pub fn build(self, device: &VulkanDevice) -> VulkanResult<Pipeline> {
         let layout = device.create_pipeline_layout(&self.desc_layouts, self.push_constants)?;
         let handle = Pipeline::create_pipeline(device, layout, self)?;
@@ -389,6 +395,7 @@ impl Pipeline {
             color_format: vk::Format::UNDEFINED,
             depth_format: vk::Format::UNDEFINED,
             mode: PipelineMode::Opaque,
+            topology: vk::PrimitiveTopology::TRIANGLE_LIST,
         }
     }
 
@@ -412,7 +419,7 @@ impl Pipeline {
             .vertex_attribute_descriptions(&params.attrib_desc);
 
         let input_assembly_ci = vk::PipelineInputAssemblyStateCreateInfo::builder()
-            .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
+            .topology(params.topology)
             .primitive_restart_enable(false);
 
         let viewport_state_ci = vk::PipelineViewportStateCreateInfo {

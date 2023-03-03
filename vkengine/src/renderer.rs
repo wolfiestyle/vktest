@@ -180,6 +180,7 @@ impl SkyboxRenderer {
             .push_constants(slice::from_ref(&push_constants))
             .render_to_swapchain(&engine.swapchain)
             .mode(PipelineMode::Background)
+            .topology(vk::PrimitiveTopology::TRIANGLE_STRIP)
             .build(&device)?;
         unsafe { bg_shader.cleanup(&device) };
 
@@ -234,7 +235,7 @@ impl SkyboxRenderer {
                 0,
                 bytemuck::bytes_of(&viewproj_inv),
             );
-            self.device.cmd_draw(cmd_buffer, 6, 1, 0, 0);
+            self.device.cmd_draw(cmd_buffer, 4, 1, 0, 0);
             self.device.debug(|d| d.cmd_end_label(cmd_buffer));
         }
 
