@@ -163,11 +163,13 @@ impl SkyboxRenderer {
             include_spirv!("src/shaders/skybox.vert.glsl", vert, glsl),
             include_spirv!("src/shaders/skybox.frag.glsl", frag, glsl),
         )?;
+        let sampler = engine.get_sampler(vk::Filter::LINEAR, vk::Filter::LINEAR, vk::SamplerAddressMode::REPEAT)?;
         let desc_layout = device.create_descriptor_set_layout(&[vk::DescriptorSetLayoutBinding::builder()
             .binding(0)
             .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
             .descriptor_count(1)
             .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+            .immutable_samplers(slice::from_ref(&sampler))
             .build()])?;
         let push_constants = vk::PushConstantRange::builder()
             .stage_flags(vk::ShaderStageFlags::VERTEX)
@@ -181,14 +183,13 @@ impl SkyboxRenderer {
             .build(&device)?;
         unsafe { bg_shader.cleanup(&device) };
 
-        let sampler = engine.get_sampler(vk::Filter::LINEAR, vk::Filter::LINEAR, vk::SamplerAddressMode::REPEAT)?;
         let texture = Texture::new_cubemap(
             &device,
             skybox_dims.0,
             skybox_dims.1,
             vk::Format::R8G8B8A8_SRGB,
             skybox_data,
-            sampler,
+            vk::Sampler::null(),
         )?;
 
         Ok(Self {

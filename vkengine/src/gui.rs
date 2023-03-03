@@ -36,6 +36,7 @@ impl UiRenderer {
             include_spirv!("src/shaders/gui.vert.glsl", vert, glsl),
             include_spirv!("src/shaders/gui.frag.glsl", frag, glsl),
         )?;
+        let sampler = engine.get_sampler(vk::Filter::LINEAR, vk::Filter::LINEAR, vk::SamplerAddressMode::CLAMP_TO_EDGE)?;
         let set_layout = device.create_descriptor_set_layout(&[
             // layout(binding = 0) uniform sampler2D texSampler
             vk::DescriptorSetLayoutBinding::builder()
@@ -43,6 +44,7 @@ impl UiRenderer {
                 .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                 .descriptor_count(1)
                 .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                .immutable_samplers(slice::from_ref(&sampler))
                 .build(),
         ])?;
         let push_constants = vk::PushConstantRange::builder()
@@ -85,7 +87,7 @@ impl UiRenderer {
 
     pub fn draw(&mut self, run_output: FullOutput, engine: &VulkanEngine) -> VulkanResult<DrawPayload> {
         let primitives = self.context.tessellate(run_output.shapes);
-        let mut drop_textures = self.update_textures(run_output.textures_delta, engine)?;
+        let mut drop_textures = self.update_textures(run_output.textures_delta)?;
         self.platform_output = Some(run_output.platform_output);
         let (cmd_buffer, mut drop_buffers) = self.build_draw_commands(primitives, engine)?;
         let payload = if drop_buffers.is_empty() && drop_buffers.is_empty() {
@@ -105,7 +107,7 @@ impl UiRenderer {
         }
     }
 
-    fn update_textures(&mut self, tex_delta: TexturesDelta, engine: &VulkanEngine) -> VulkanResult<Vec<Texture>> {
+    fn update_textures(&mut self, tex_delta: TexturesDelta) -> VulkanResult<Vec<Texture>> {
         // create or update textures
         for (id, image) in tex_delta.set {
             let (pixels, [width, height]) = match image.image {
@@ -115,18 +117,13 @@ impl UiRenderer {
             let bytes = bytemuck::cast_slice(&pixels);
             match self.textures.entry(id) {
                 Entry::Vacant(entry) => {
-                    let sampler = engine.get_sampler(
-                        vk_filter(image.options.magnification),
-                        vk_filter(image.options.minification),
-                        vk::SamplerAddressMode::CLAMP_TO_EDGE,
-                    )?;
                     entry.insert(Texture::new(
                         &self.device,
                         width,
                         height,
                         vk::Format::R8G8B8A8_SRGB,
                         bytes,
-                        sampler,
+                        vk::Sampler::null(),
                     )?);
                 }
                 Entry::Occupied(mut entry) => {
@@ -230,13 +227,6 @@ impl Drop for UiRenderer {
             self.device.destroy_descriptor_set_layout(self.set_layout, None);
             self.buffer.cleanup(&self.device);
         }
-    }
-}
-
-fn vk_filter(filter: TextureFilter) -> vk::Filter {
-    match filter {
-        TextureFilter::Nearest => vk::Filter::NEAREST,
-        TextureFilter::Linear => vk::Filter::LINEAR,
     }
 }
 
