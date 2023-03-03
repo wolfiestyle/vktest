@@ -23,7 +23,7 @@ fn main() -> VulkanResult<()> {
     let args = Arguments::from_args();
 
     let file = BufReader::new(File::open(args.model.unwrap_or_else(|| "data/model.obj".into())).unwrap());
-    let model = obj::load_obj(file).unwrap();
+    let model: obj::Obj<obj::TexturedVertex, u32> = obj::load_obj(file).unwrap();
     eprintln!("loaded {} vertices, {} indices", model.vertices.len(), model.indices.len());
     let image = image::open(args.texture.unwrap_or_else(|| "data/texture.png".into()))
         .unwrap()

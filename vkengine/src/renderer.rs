@@ -1,15 +1,12 @@
 use crate::device::{UniformBuffer, VkBuffer, VulkanDevice};
 use crate::engine::{DrawPayload, Pipeline, PipelineMode, Shader, Texture, VulkanEngine};
-use crate::types::{Cleanup, VulkanResult};
+use crate::types::{Cleanup, VertexInput, VulkanResult};
 use ash::vk;
 use bytemuck_derive::{Pod, Zeroable};
 use glam::{Affine3A, Mat4};
 use inline_spirv::include_spirv;
 use std::slice;
 use std::sync::Arc;
-
-//type Vertex = ([f32; 3], [f32; 3], [f32; 2]);
-type Vertex = obj::TexturedVertex;
 
 pub struct MeshRenderer {
     device: Arc<VulkanDevice>,
@@ -24,7 +21,9 @@ pub struct MeshRenderer {
 }
 
 impl MeshRenderer {
-    pub fn new(engine: &VulkanEngine, vertices: &[Vertex], indices: &[u32], img_dims: (u32, u32), img_data: &[u8]) -> VulkanResult<Self> {
+    pub fn new<V: VertexInput + Copy>(
+        engine: &VulkanEngine, vertices: &[V], indices: &[u32], img_dims: (u32, u32), img_data: &[u8],
+    ) -> VulkanResult<Self> {
         let device = engine.device.clone();
         let mut shader = Shader::new(
             &device,
@@ -46,7 +45,7 @@ impl MeshRenderer {
                 .build(),
         ])?;
         let pipeline = Pipeline::builder(&shader)
-            .vertex_input::<Vertex>()
+            .vertex_input::<V>()
             .descriptor_layout(desc_layout)
             .render_to_swapchain(&engine.swapchain)
             .build(&device)?;
