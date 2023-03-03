@@ -548,28 +548,28 @@ impl PipelineMode {
 
 pub struct DrawPayload {
     pub cmd_buffer: vk::CommandBuffer,
-    pub drop_cmdbuffer: bool,
+    pub one_time_submit: bool,
     pub on_frame_finish: Option<Box<dyn FnOnce(&VulkanDevice)>>,
 }
 
 impl DrawPayload {
     #[inline]
-    pub fn new(cmd_buffer: vk::CommandBuffer, drop_cmdbuffer: bool) -> Self {
+    pub fn new(cmd_buffer: vk::CommandBuffer, one_time_submit: bool) -> Self {
         Self {
             cmd_buffer,
-            drop_cmdbuffer,
+            one_time_submit,
             on_frame_finish: None,
         }
     }
 
     #[inline]
-    pub fn new_with_callback<F>(cmd_buffer: vk::CommandBuffer, drop_cmdbuffer: bool, on_frame_finish: F) -> Self
+    pub fn new_with_callback<F>(cmd_buffer: vk::CommandBuffer, one_time_submit: bool, on_frame_finish: F) -> Self
     where
         F: FnOnce(&VulkanDevice) + 'static,
     {
         Self {
             cmd_buffer,
-            drop_cmdbuffer,
+            one_time_submit,
             on_frame_finish: Some(Box::new(on_frame_finish)),
         }
     }
@@ -604,7 +604,7 @@ impl FrameState {
 
     fn free_payload(&mut self, device: &VulkanDevice, cmd_pool: vk::CommandPool) {
         for pl in self.payload.drain(..) {
-            if pl.drop_cmdbuffer {
+            if pl.one_time_submit {
                 unsafe { device.free_command_buffers(cmd_pool, &[pl.cmd_buffer]) };
             }
             if let Some(f) = pl.on_frame_finish {
