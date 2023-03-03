@@ -3,12 +3,14 @@ mod debug;
 mod device;
 mod engine;
 mod instance;
+mod renderer;
 mod types;
 
 pub use camera::{Camera, CameraController};
 pub use device::VulkanDevice;
 pub use engine::VulkanEngine;
 pub use instance::{DeviceSelection, DeviceType, VulkanInstance};
+pub use renderer::{MeshRenderer, SkyboxRenderer};
 pub use types::{VkError, VulkanResult};
 
 #[cfg(feature = "egui")]

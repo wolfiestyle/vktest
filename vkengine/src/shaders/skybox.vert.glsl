@@ -1,6 +1,5 @@
 #version 450
-layout(binding = 0) uniform UniformBufferObject {
-    mat4 mvp;
+layout(push_constant) uniform PushConstants {
     mat4 viewproj_inv;
 };
 

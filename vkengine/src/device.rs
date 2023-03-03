@@ -894,6 +894,7 @@ impl<T: bytemuck::Pod> UniformBuffer<T> {
     pub fn new(device: &VulkanDevice) -> VulkanResult<Self> {
         let size = size_of::<T>() as _;
         let buffer = device.allocate_buffer(size, vk::BufferUsageFlags::UNIFORM_BUFFER, ga::UsageFlags::UPLOAD)?;
+        device.debug(|d| d.set_object_name(device, &*buffer, "Uniform buffer"));
         Ok(Self { buffer, _p: PhantomData })
     }
 

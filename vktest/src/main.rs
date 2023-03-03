@@ -3,8 +3,8 @@ use std::io::BufReader;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use structopt::StructOpt;
-use vkengine::gui::{egui, VkGui};
-use vkengine::{CameraController, VulkanDevice, VulkanEngine, VulkanInstance, VulkanResult};
+use vkengine::gui::{egui, UiRenderer};
+use vkengine::{CameraController, MeshRenderer, SkyboxRenderer, VulkanDevice, VulkanEngine, VulkanInstance, VulkanResult};
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::Fullscreen;
@@ -61,20 +61,14 @@ fn main() -> VulkanResult<()> {
 
     let vk_instance = VulkanInstance::new(&window, "vulkan test")?;
     let vk_device = VulkanDevice::new(&window, vk_instance, Default::default())?;
-    let mut vk_app = VulkanEngine::new(
-        vk_device,
-        win_size.into(),
-        &model.vertices,
-        &model.indices,
-        image.dimensions(),
-        image.as_raw(),
-        skybox[0].dimensions(),
-        &skybox_raw,
-    )?;
+    let mut vk_app = VulkanEngine::new(vk_device, win_size.into())?;
     vk_app.camera.position = [2.0, 2.0, 2.0].into();
     vk_app.camera.look_at([0.0; 3]);
 
-    let mut gui = VkGui::new(&event_loop, &vk_app)?;
+    let mut object = MeshRenderer::new(&vk_app, &model.vertices, &model.indices, image.dimensions(), image.as_raw())?;
+    let mut skybox = SkyboxRenderer::new(&vk_app, skybox[0].dimensions(), &skybox_raw)?;
+
+    let mut gui = UiRenderer::new(&event_loop, &vk_app)?;
     let mut show_gui = true;
 
     let mut prev_time = Instant::now();
@@ -154,9 +148,8 @@ fn main() -> VulkanResult<()> {
             gui.event_output(&window);
 
             let draw_cmds = [
-                // 3D objects
-                vk_app.draw_object().unwrap(),
-                // user interface
+                object.render(&vk_app).unwrap(),
+                skybox.render(&vk_app).unwrap(),
                 gui.draw(ui_output, &vk_app).unwrap(),
             ];
 

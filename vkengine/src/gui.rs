@@ -17,7 +17,7 @@ use winit::window::Window;
 
 pub use egui; //FIXME: forward only what's needed to build UIs
 
-pub struct VkGui {
+pub struct UiRenderer {
     device: Arc<VulkanDevice>,
     context: Context,
     winit_state: State,
@@ -29,7 +29,7 @@ pub struct VkGui {
     buffer: VkBuffer,
 }
 
-impl VkGui {
+impl UiRenderer {
     pub fn new(event_loop: &EventLoopWindowTarget<()>, engine: &VulkanEngine) -> VulkanResult<Self> {
         let device = engine.device.clone();
         let mut shader = Shader::new(
@@ -230,7 +230,7 @@ impl VkGui {
     }
 }
 
-impl Drop for VkGui {
+impl Drop for UiRenderer {
     fn drop(&mut self) {
         unsafe {
             self.device.device_wait_idle().unwrap();

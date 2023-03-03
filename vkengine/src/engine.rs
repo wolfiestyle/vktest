@@ -1,50 +1,32 @@
 use crate::camera::Camera;
-use crate::device::{ImageData, Swapchain, UniformBuffer, VkBuffer, VkImage, VulkanDevice};
+use crate::device::{ImageData, Swapchain, VkImage, VulkanDevice};
 use crate::types::*;
 use ash::vk;
-use bytemuck_derive::{Pod, Zeroable};
 use cstr::cstr;
-use glam::{Affine3A, Mat4};
-use inline_spirv::include_spirv;
 use std::slice;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 const SWAPCHAIN_IMAGE_COUNT: u32 = 3;
 const MAX_FRAMES_IN_FLIGHT: usize = 2;
-//type Vertex = ([f32; 3], [f32; 3], [f32; 2]);
-type Vertex = obj::TexturedVertex;
 
 pub struct VulkanEngine {
     pub device: Arc<VulkanDevice>,
     window_size: WinSize,
     window_resized: bool,
     pub(crate) swapchain: Swapchain,
-    desc_layout: vk::DescriptorSetLayout,
-    pipeline: Pipeline,
-    bg_pipeline: Pipeline,
-    bg_texture: Texture,
     main_cmd_pool: vk::CommandPool,
     secondary_cmd_pool: vk::CommandPool,
     main_cmd_buffers: Vec<vk::CommandBuffer>,
     frame_state: Vec<FrameState>,
     current_frame: u64,
-    vertex_buffer: VkBuffer,
-    index_buffer: VkBuffer,
-    index_count: u32,
-    texture: Texture,
-    tex_sampler: vk::Sampler,
     prev_frame_time: Instant,
     last_frame_time: Instant,
     pub camera: Camera,
-    pub model: Affine3A,
 }
 
 impl VulkanEngine {
-    pub fn new(
-        device: VulkanDevice, window_size: WinSize, vertices: &[Vertex], indices: &[u32], img_dims: (u32, u32), img_data: &[u8],
-        skybox_dims: (u32, u32), skybox_data: &[&[u8]; 6],
-    ) -> VulkanResult<Self> {
+    pub fn new(device: VulkanDevice, window_size: WinSize) -> VulkanResult<Self> {
         let depth_format = device.find_depth_format(false)?;
         let swapchain = device.create_swapchain(window_size, SWAPCHAIN_IMAGE_COUNT, depth_format)?;
         eprintln!("color_format: {:?}, depth_format: {depth_format:?}", swapchain.format);
@@ -57,59 +39,6 @@ impl VulkanEngine {
             .map(|_| FrameState::new(&device))
             .collect::<Result<Vec<_>, _>>()?;
 
-        let tex_sampler = device.create_texture_sampler(vk::Filter::LINEAR, vk::Filter::LINEAR, vk::SamplerAddressMode::REPEAT)?;
-        let texture = Texture::new(&device, img_dims.0, img_dims.1, vk::Format::R8G8B8A8_SRGB, img_data, tex_sampler)?;
-
-        let mut shader = Shader::new(
-            &device,
-            include_spirv!("src/shaders/texture.vert.glsl", vert, glsl),
-            include_spirv!("src/shaders/texture.frag.glsl", frag, glsl),
-        )?;
-        let desc_layout = device.create_descriptor_set_layout(&[
-            vk::DescriptorSetLayoutBinding::builder()
-                .binding(0)
-                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                .descriptor_count(1)
-                .stage_flags(vk::ShaderStageFlags::VERTEX)
-                .build(),
-            vk::DescriptorSetLayoutBinding::builder()
-                .binding(1)
-                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .descriptor_count(1)
-                .stage_flags(vk::ShaderStageFlags::FRAGMENT)
-                .build(),
-        ])?;
-        let pipeline = Pipeline::builder(&shader)
-            .vertex_input::<Vertex>()
-            .descriptor_layout(desc_layout)
-            .render_to_swapchain(&swapchain)
-            .build(&device)?;
-        unsafe { shader.cleanup(&device) };
-
-        let mut bg_shader = Shader::new(
-            &device,
-            include_spirv!("src/shaders/skybox.vert.glsl", vert, glsl),
-            include_spirv!("src/shaders/skybox.frag.glsl", frag, glsl),
-        )?;
-        let bg_pipeline = Pipeline::builder(&bg_shader)
-            .descriptor_layout(desc_layout)
-            .render_to_swapchain(&swapchain)
-            .mode(PipelineMode::Background)
-            .build(&device)?;
-        unsafe { bg_shader.cleanup(&device) };
-
-        let bg_texture = Texture::new_cubemap(
-            &device,
-            skybox_dims.0,
-            skybox_dims.1,
-            vk::Format::R8G8B8A8_SRGB,
-            skybox_data,
-            tex_sampler,
-        )?;
-
-        let vertex_buffer = device.create_buffer_from_data(vertices, vk::BufferUsageFlags::VERTEX_BUFFER)?;
-        let index_buffer = device.create_buffer_from_data(indices, vk::BufferUsageFlags::INDEX_BUFFER)?;
-
         let camera = Camera::default();
         let now = Instant::now();
 
@@ -118,24 +47,14 @@ impl VulkanEngine {
             window_size,
             window_resized: false,
             swapchain,
-            desc_layout,
-            pipeline,
-            bg_pipeline,
-            bg_texture,
             main_cmd_pool,
             secondary_cmd_pool,
             main_cmd_buffers,
             frame_state,
             current_frame: 0,
-            vertex_buffer,
-            index_buffer,
-            index_count: indices.len() as _,
-            texture,
-            tex_sampler,
             prev_frame_time: now,
             last_frame_time: now,
             camera,
-            model: Affine3A::IDENTITY,
         })
     }
 
@@ -251,75 +170,6 @@ impl VulkanEngine {
         Ok(cmd_buffer)
     }
 
-    pub fn draw_object(&mut self) -> VulkanResult<DrawPayload> {
-        let cmd_buffer = self.begin_secondary_draw_commands()?;
-
-        let frame_idx = (self.current_frame % self.frame_state.len() as u64) as usize;
-        self.update_uniforms(frame_idx)?;
-
-        let buffer_info = self.frame_state[frame_idx].uniforms.descriptor();
-        let image_info = self.texture.descriptor();
-        unsafe {
-            // object
-            self.device
-                .debug(|d| d.cmd_begin_label(cmd_buffer, "3D object", [0.2, 0.6, 0.4, 1.0]));
-            self.device
-                .cmd_bind_pipeline(cmd_buffer, vk::PipelineBindPoint::GRAPHICS, self.pipeline.handle);
-            self.device
-                .cmd_set_viewport(cmd_buffer, 0, slice::from_ref(&self.swapchain.viewport()));
-            self.device
-                .cmd_set_scissor(cmd_buffer, 0, slice::from_ref(&self.swapchain.extent_rect()));
-            self.device.pushdesc_fn.cmd_push_descriptor_set(
-                cmd_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                self.pipeline.layout,
-                0,
-                &[
-                    vk::WriteDescriptorSet::builder()
-                        .dst_binding(0)
-                        .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                        .buffer_info(slice::from_ref(&buffer_info))
-                        .build(),
-                    vk::WriteDescriptorSet::builder()
-                        .dst_binding(1)
-                        .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                        .image_info(slice::from_ref(&image_info))
-                        .build(),
-                ],
-            );
-            self.device
-                .cmd_bind_vertex_buffers(cmd_buffer, 0, slice::from_ref(&*self.vertex_buffer), &[0]);
-            self.device
-                .cmd_bind_index_buffer(cmd_buffer, *self.index_buffer, 0, vk::IndexType::UINT32);
-            self.device.cmd_draw_indexed(cmd_buffer, self.index_count, 1, 0, 0, 0);
-            self.device.debug(|d| d.cmd_end_label(cmd_buffer));
-        }
-
-        let image_info = self.bg_texture.descriptor();
-        unsafe {
-            // background
-            self.device
-                .debug(|d| d.cmd_begin_label(cmd_buffer, "Background", [0.2, 0.4, 0.6, 1.0]));
-            self.device
-                .cmd_bind_pipeline(cmd_buffer, vk::PipelineBindPoint::GRAPHICS, self.bg_pipeline.handle);
-            self.device.pushdesc_fn.cmd_push_descriptor_set(
-                cmd_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                self.bg_pipeline.layout,
-                0,
-                &[vk::WriteDescriptorSet::builder()
-                    .dst_binding(1)
-                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                    .image_info(slice::from_ref(&image_info))
-                    .build()],
-            );
-            self.device.cmd_draw(cmd_buffer, 6, 1, 0, 0);
-            self.device.debug(|d| d.cmd_end_label(cmd_buffer));
-        }
-
-        Ok(DrawPayload::new(self.end_secondary_draw_commands(cmd_buffer)?, true))
-    }
-
     pub fn submit_draw_commands(&mut self, draw_commands: impl IntoIterator<Item = DrawPayload>) -> VulkanResult<bool> {
         let frame_idx = (self.current_frame % self.frame_state.len() as u64) as usize;
         let frame = &mut self.frame_state[frame_idx];
@@ -406,18 +256,6 @@ impl VulkanEngine {
         Ok(true)
     }
 
-    fn update_uniforms(&mut self, frame_idx: usize) -> VulkanResult<()> {
-        let view = self.camera.get_view_transform();
-        let proj = self.camera.get_projection(self.swapchain.aspect());
-        let viewproj = proj * view;
-        let viewproj_inv = viewproj.inverse();
-        let ubo = UniformBufferObject {
-            mvp: viewproj * self.model,
-            viewproj_inv,
-        };
-        self.frame_state[frame_idx].uniforms.write_uniforms(&self.device, ubo)
-    }
-
     fn recreate_swapchain(&mut self) -> VulkanResult<()> {
         let new_swapchain = self.device.recreate_swapchain(self.window_size, &self.swapchain)?;
         unsafe {
@@ -433,17 +271,9 @@ impl Drop for VulkanEngine {
     fn drop(&mut self) {
         unsafe {
             self.device.device_wait_idle().unwrap();
-            self.vertex_buffer.cleanup(&self.device);
-            self.index_buffer.cleanup(&self.device);
-            self.texture.cleanup(&self.device);
-            self.device.destroy_sampler(self.tex_sampler, None);
-            self.bg_texture.cleanup(&self.device);
             self.frame_state.cleanup(&self.device);
             self.device.destroy_command_pool(self.main_cmd_pool, None);
             self.device.destroy_command_pool(self.secondary_cmd_pool, None);
-            self.pipeline.cleanup(&self.device);
-            self.bg_pipeline.cleanup(&self.device);
-            self.device.destroy_descriptor_set_layout(self.desc_layout, None);
             self.swapchain.cleanup(&self.device);
         }
     }
@@ -704,7 +534,6 @@ struct FrameState {
     render_finished_sem: vk::Semaphore, // queue submit -> present
     in_flight_sem: vk::Semaphore,       // queue submit -> frame finished
     wait_frame: u64,
-    uniforms: UniformBuffer<UniformBufferObject>,
     payload: Vec<DrawPayload>,
 }
 
@@ -713,11 +542,9 @@ impl FrameState {
         let image_avail_sem = device.create_semaphore(vk::SemaphoreType::BINARY)?;
         let render_finished_sem = device.create_semaphore(vk::SemaphoreType::BINARY)?;
         let in_flight_sem = device.create_semaphore(vk::SemaphoreType::TIMELINE)?;
-        let uniforms = UniformBuffer::new(device)?;
         device.debug(|d| {
             d.set_object_name(device, &image_avail_sem, "Image available semaphore");
             d.set_object_name(device, &render_finished_sem, "Render finished semaphore");
-            d.set_object_name(device, &*uniforms.buffer, "Uniform buffer");
             d.set_object_name(&device, &in_flight_sem, "In-flight semaphore")
         });
         Ok(Self {
@@ -725,7 +552,6 @@ impl FrameState {
             render_finished_sem,
             in_flight_sem,
             wait_frame: 0,
-            uniforms,
             payload: vec![],
         })
     }
@@ -747,15 +573,7 @@ impl Cleanup<VulkanDevice> for FrameState {
         device.destroy_semaphore(self.image_avail_sem, None);
         device.destroy_semaphore(self.render_finished_sem, None);
         device.destroy_semaphore(self.in_flight_sem, None);
-        self.uniforms.cleanup(device);
     }
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, Copy, Default, Pod, Zeroable)]
-struct UniformBufferObject {
-    mvp: Mat4,
-    viewproj_inv: Mat4,
 }
 
 #[derive(Debug)]

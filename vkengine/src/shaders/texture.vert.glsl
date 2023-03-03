@@ -1,7 +1,6 @@
 #version 450
-layout(binding = 0) uniform UniformBufferObject {
+layout(binding = 0) uniform ObjectUniforms {
     mat4 mvp;
-    mat4 viewproj_inv;
 };
 
 layout(location = 0) in vec3 inPosition;
