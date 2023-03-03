@@ -523,29 +523,6 @@ impl VulkanDevice {
         }
     }
 
-    pub fn create_texture_sampler(
-        &self, mag_filter: vk::Filter, min_filter: vk::Filter, addr_mode: vk::SamplerAddressMode,
-    ) -> VulkanResult<vk::Sampler> {
-        let sampler_ci = vk::SamplerCreateInfo::builder()
-            .mag_filter(mag_filter)
-            .min_filter(min_filter)
-            .address_mode_u(addr_mode)
-            .address_mode_v(addr_mode)
-            .address_mode_w(addr_mode)
-            .anisotropy_enable(false)
-            .max_anisotropy(1.0)
-            .border_color(vk::BorderColor::INT_OPAQUE_BLACK)
-            .unnormalized_coordinates(false)
-            .compare_enable(false)
-            .compare_op(vk::CompareOp::ALWAYS)
-            .mipmap_mode(vk::SamplerMipmapMode::NEAREST);
-        unsafe {
-            self.device
-                .create_sampler(&sampler_ci, None)
-                .describe_err("Failed to create texture sampler")
-        }
-    }
-
     pub fn find_supported_format(
         &self, candidates: &[vk::Format], tiling: vk::ImageTiling, features: vk::FormatFeatureFlags,
     ) -> VulkanResult<vk::Format> {

@@ -23,7 +23,6 @@ pub struct UiRenderer {
     winit_state: State,
     platform_output: Option<PlatformOutput>,
     textures: HashMap<TextureId, Texture>,
-    samplers: HashMap<TextureOptions, vk::Sampler>,
     pipeline: Pipeline,
     set_layout: vk::DescriptorSetLayout,
     buffer: VkBuffer,
@@ -69,7 +68,6 @@ impl UiRenderer {
             winit_state: State::new(event_loop),
             platform_output: None,
             textures: Default::default(),
-            samplers: Default::default(),
             pipeline,
             set_layout,
             buffer,
@@ -87,7 +85,7 @@ impl UiRenderer {
 
     pub fn draw(&mut self, run_output: FullOutput, engine: &VulkanEngine) -> VulkanResult<DrawPayload> {
         let primitives = self.context.tessellate(run_output.shapes);
-        let mut drop_textures = self.update_textures(run_output.textures_delta)?;
+        let mut drop_textures = self.update_textures(run_output.textures_delta, engine)?;
         self.platform_output = Some(run_output.platform_output);
         let (cmd_buffer, mut drop_buffers) = self.build_draw_commands(primitives, engine)?;
         let payload = if drop_buffers.is_empty() && drop_buffers.is_empty() {
@@ -107,7 +105,7 @@ impl UiRenderer {
         }
     }
 
-    fn update_textures(&mut self, tex_delta: TexturesDelta) -> VulkanResult<Vec<Texture>> {
+    fn update_textures(&mut self, tex_delta: TexturesDelta, engine: &VulkanEngine) -> VulkanResult<Vec<Texture>> {
         // create or update textures
         for (id, image) in tex_delta.set {
             let (pixels, [width, height]) = match image.image {
@@ -117,18 +115,11 @@ impl UiRenderer {
             let bytes = bytemuck::cast_slice(&pixels);
             match self.textures.entry(id) {
                 Entry::Vacant(entry) => {
-                    let sampler = match self.samplers.entry(image.options) {
-                        Entry::Occupied(entry) => *entry.get(),
-                        Entry::Vacant(entry) => {
-                            let sampler = self.device.create_texture_sampler(
-                                vk_filter(image.options.magnification),
-                                vk_filter(image.options.minification),
-                                vk::SamplerAddressMode::CLAMP_TO_EDGE,
-                            )?;
-                            entry.insert(sampler);
-                            sampler
-                        }
-                    };
+                    let sampler = engine.get_sampler(
+                        vk_filter(image.options.magnification),
+                        vk_filter(image.options.minification),
+                        vk::SamplerAddressMode::CLAMP_TO_EDGE,
+                    )?;
                     entry.insert(Texture::new(
                         &self.device,
                         width,
@@ -235,9 +226,6 @@ impl Drop for UiRenderer {
         unsafe {
             self.device.device_wait_idle().unwrap();
             self.textures.cleanup(&self.device);
-            for &sampler in self.samplers.values() {
-                self.device.destroy_sampler(sampler, None);
-            }
             self.pipeline.cleanup(&self.device);
             self.device.destroy_descriptor_set_layout(self.set_layout, None);
             self.buffer.cleanup(&self.device);

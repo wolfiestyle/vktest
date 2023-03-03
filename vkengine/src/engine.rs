@@ -3,8 +3,9 @@ use crate::device::{ImageData, Swapchain, VkImage, VulkanDevice};
 use crate::types::*;
 use ash::vk;
 use cstr::cstr;
+use std::collections::HashMap;
 use std::slice;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 const SWAPCHAIN_IMAGE_COUNT: u32 = 3;
@@ -20,6 +21,7 @@ pub struct VulkanEngine {
     main_cmd_buffers: Vec<vk::CommandBuffer>,
     frame_state: Vec<FrameState>,
     current_frame: u64,
+    samplers: Mutex<HashMap<SamplerOptions, vk::Sampler>>,
     prev_frame_time: Instant,
     last_frame_time: Instant,
     pub camera: Camera,
@@ -52,6 +54,7 @@ impl VulkanEngine {
             main_cmd_buffers,
             frame_state,
             current_frame: 0,
+            samplers: Default::default(),
             prev_frame_time: now,
             last_frame_time: now,
             camera,
@@ -77,6 +80,42 @@ impl VulkanEngine {
 
     pub fn get_frame_count(&self) -> u64 {
         self.current_frame
+    }
+
+    pub fn get_sampler(
+        &self, mag_filter: vk::Filter, min_filter: vk::Filter, addr_mode: vk::SamplerAddressMode,
+    ) -> VulkanResult<vk::Sampler> {
+        use std::collections::hash_map::Entry;
+        let key = SamplerOptions {
+            mag_filter,
+            min_filter,
+            addr_mode,
+        };
+        match self.samplers.lock().unwrap().entry(key) {
+            Entry::Occupied(entry) => Ok(*entry.get()),
+            Entry::Vacant(entry) => {
+                let sampler_ci = vk::SamplerCreateInfo::builder()
+                    .mag_filter(mag_filter)
+                    .min_filter(min_filter)
+                    .address_mode_u(addr_mode)
+                    .address_mode_v(addr_mode)
+                    .address_mode_w(addr_mode)
+                    .anisotropy_enable(false)
+                    .max_anisotropy(1.0)
+                    .border_color(vk::BorderColor::INT_OPAQUE_BLACK)
+                    .unnormalized_coordinates(false)
+                    .compare_enable(false)
+                    .compare_op(vk::CompareOp::ALWAYS)
+                    .mipmap_mode(vk::SamplerMipmapMode::NEAREST);
+                let sampler = unsafe {
+                    self.device
+                        .create_sampler(&sampler_ci, None)
+                        .describe_err("Failed to create texture sampler")?
+                };
+                entry.insert(sampler);
+                Ok(sampler)
+            }
+        }
     }
 
     fn record_primary_command_buffer(
@@ -275,6 +314,9 @@ impl Drop for VulkanEngine {
             self.device.destroy_command_pool(self.main_cmd_pool, None);
             self.device.destroy_command_pool(self.secondary_cmd_pool, None);
             self.swapchain.cleanup(&self.device);
+            for &sampler in self.samplers.lock().unwrap().values() {
+                self.device.destroy_sampler(sampler, None);
+            }
         }
     }
 }
@@ -619,6 +661,13 @@ impl Cleanup<VulkanDevice> for Texture {
         device.destroy_image_view(self.imgview, None);
         self.image.cleanup(device);
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct SamplerOptions {
+    mag_filter: vk::Filter,
+    min_filter: vk::Filter,
+    addr_mode: vk::SamplerAddressMode,
 }
 
 #[derive(Debug)]

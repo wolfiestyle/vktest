@@ -19,7 +19,6 @@ pub struct MeshRenderer {
     index_buffer: VkBuffer,
     index_count: u32,
     texture: Texture,
-    sampler: vk::Sampler,
     uniforms: UniformBuffer<ObjectUniforms>,
     pub model: Affine3A,
 }
@@ -56,7 +55,7 @@ impl MeshRenderer {
         let vertex_buffer = device.create_buffer_from_data(vertices, vk::BufferUsageFlags::VERTEX_BUFFER)?;
         let index_buffer = device.create_buffer_from_data(indices, vk::BufferUsageFlags::INDEX_BUFFER)?;
 
-        let sampler = device.create_texture_sampler(vk::Filter::LINEAR, vk::Filter::LINEAR, vk::SamplerAddressMode::REPEAT)?;
+        let sampler = engine.get_sampler(vk::Filter::LINEAR, vk::Filter::LINEAR, vk::SamplerAddressMode::REPEAT)?;
         let texture = Texture::new(&device, img_dims.0, img_dims.1, vk::Format::R8G8B8A8_SRGB, img_data, sampler)?;
 
         let uniforms = UniformBuffer::new(&device)?;
@@ -69,7 +68,6 @@ impl MeshRenderer {
             index_buffer,
             index_count: indices.len() as _,
             texture,
-            sampler,
             uniforms,
             model: Affine3A::IDENTITY,
         })
@@ -137,7 +135,6 @@ impl Drop for MeshRenderer {
             self.vertex_buffer.cleanup(&self.device);
             self.index_buffer.cleanup(&self.device);
             self.texture.cleanup(&self.device);
-            self.device.destroy_sampler(self.sampler, None);
             self.pipeline.cleanup(&self.device);
             self.device.destroy_descriptor_set_layout(self.desc_layout, None);
             self.uniforms.cleanup(&self.device);
@@ -156,7 +153,6 @@ pub struct SkyboxRenderer {
     desc_layout: vk::DescriptorSetLayout,
     pipeline: Pipeline,
     texture: Texture,
-    sampler: vk::Sampler,
 }
 
 impl SkyboxRenderer {
@@ -185,7 +181,7 @@ impl SkyboxRenderer {
             .build(&device)?;
         unsafe { bg_shader.cleanup(&device) };
 
-        let sampler = device.create_texture_sampler(vk::Filter::LINEAR, vk::Filter::LINEAR, vk::SamplerAddressMode::REPEAT)?;
+        let sampler = engine.get_sampler(vk::Filter::LINEAR, vk::Filter::LINEAR, vk::SamplerAddressMode::REPEAT)?;
         let texture = Texture::new_cubemap(
             &device,
             skybox_dims.0,
@@ -200,7 +196,6 @@ impl SkyboxRenderer {
             desc_layout,
             pipeline,
             texture,
-            sampler,
         })
     }
 
@@ -250,7 +245,6 @@ impl Drop for SkyboxRenderer {
         unsafe {
             self.device.device_wait_idle().unwrap();
             self.texture.cleanup(&self.device);
-            self.device.destroy_sampler(self.sampler, None);
             self.pipeline.cleanup(&self.device);
             self.device.destroy_descriptor_set_layout(self.desc_layout, None);
         }
