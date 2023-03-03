@@ -123,9 +123,6 @@ fn main() -> VulkanResult<()> {
             let dt = (vk_app.get_frame_time().as_micros() as f64 / 1e6) as f32;
             controller.update_camera(&mut vk_app.camera, dt);
 
-            window.request_redraw();
-        }
-        Event::RedrawRequested(_) => {
             gui.run(&window, |ctx| {
                 egui::panel::SidePanel::left("main")
                     .frame(egui::Frame::default().fill(egui::Color32::from_black_alpha(192)))
@@ -147,6 +144,9 @@ fn main() -> VulkanResult<()> {
             });
             gui.event_output(&window);
 
+            window.request_redraw();
+        }
+        Event::RedrawRequested(_) => {
             let draw_cmds = [
                 object.render(&vk_app).unwrap(),
                 skybox.render(&vk_app).unwrap(),
