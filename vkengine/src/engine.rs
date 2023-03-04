@@ -641,7 +641,7 @@ impl Texture {
         device: &VulkanDevice, width: u32, height: u32, format: vk::Format, data: &[u8], sampler: vk::Sampler,
     ) -> VulkanResult<Self> {
         let image = device.create_image_from_data(width, height, format, ImageData::Single(data), Default::default())?;
-        let imgview = device.create_image_view(*image, format, vk::ImageViewType::TYPE_2D, vk::ImageAspectFlags::COLOR)?;
+        let imgview = device.create_image_view(*image, format, 0, vk::ImageViewType::TYPE_2D, vk::ImageAspectFlags::COLOR)?;
         Ok(Self { image, imgview, sampler })
     }
 
@@ -649,7 +649,7 @@ impl Texture {
         device: &VulkanDevice, width: u32, height: u32, format: vk::Format, data: &[&[u8]; 6], sampler: vk::Sampler,
     ) -> VulkanResult<Self> {
         let image = device.create_image_from_data(width, height, format, ImageData::Array(data), vk::ImageCreateFlags::CUBE_COMPATIBLE)?;
-        let imgview = device.create_image_view(*image, format, vk::ImageViewType::CUBE, vk::ImageAspectFlags::COLOR)?;
+        let imgview = device.create_image_view(*image, format, 0, vk::ImageViewType::CUBE, vk::ImageAspectFlags::COLOR)?;
         Ok(Self { image, imgview, sampler })
     }
 

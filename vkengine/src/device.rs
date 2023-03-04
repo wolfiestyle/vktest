@@ -72,13 +72,13 @@ impl VulkanDevice {
 
     pub fn create_swapchain(&self, win_size: WinSize, image_count: u32, depth_format: vk::Format) -> VulkanResult<Swapchain> {
         let mut swapchain = Swapchain::new(self, win_size, image_count, vk::SwapchainKHR::null())?;
-        swapchain.create_depth_attachments(self, depth_format, swapchain.images.len())?;
+        swapchain.create_depth_attachments(self, depth_format, swapchain.images.len() as _)?;
         Ok(swapchain)
     }
 
     pub fn recreate_swapchain(&self, win_size: WinSize, old_swapchain: &Swapchain) -> VulkanResult<Swapchain> {
         let mut swapchain = Swapchain::new(self, win_size, old_swapchain.images.len() as u32, old_swapchain.handle)?;
-        swapchain.create_depth_attachments(self, old_swapchain.depth_format, swapchain.images.len())?;
+        swapchain.create_depth_attachments(self, old_swapchain.depth_format, swapchain.images.len() as _)?;
         Ok(swapchain)
     }
 
@@ -505,7 +505,7 @@ impl VulkanDevice {
     }
 
     pub fn create_image_view(
-        &self, image: vk::Image, format: vk::Format, view_type: vk::ImageViewType, aspect_mask: vk::ImageAspectFlags,
+        &self, image: vk::Image, format: vk::Format, layer: u32, view_type: vk::ImageViewType, aspect_mask: vk::ImageAspectFlags,
     ) -> VulkanResult<vk::ImageView> {
         let layer_count = if view_type == vk::ImageViewType::CUBE { 6 } else { 1 };
         let imageview_ci = vk::ImageViewCreateInfo::builder()
@@ -516,7 +516,7 @@ impl VulkanDevice {
                 aspect_mask,
                 base_mip_level: 0,
                 level_count: 1,
-                base_array_layer: 0,
+                base_array_layer: layer,
                 layer_count,
             });
 
@@ -601,7 +601,7 @@ pub struct Swapchain {
     pub image_views: Vec<vk::ImageView>,
     pub format: vk::Format,
     pub extent: vk::Extent2D,
-    pub depth_images: Vec<VkImage>,
+    pub depth_images: Option<VkImage>,
     pub depth_imgviews: Vec<vk::ImageView>,
     pub depth_format: vk::Format,
 }
@@ -655,6 +655,7 @@ impl Swapchain {
                 device.create_image_view(
                     image,
                     surface_format.format,
+                    0,
                     vk::ImageViewType::TYPE_2D,
                     vk::ImageAspectFlags::COLOR,
                 )
@@ -667,59 +668,58 @@ impl Swapchain {
             image_views,
             format: surface_format.format,
             extent,
-            depth_images: vec![],
+            depth_images: None,
             depth_imgviews: vec![],
             depth_format: vk::Format::UNDEFINED,
         })
     }
 
-    fn create_depth_attachments(&mut self, device: &VulkanDevice, depth_format: vk::Format, image_count: usize) -> VulkanResult<()> {
+    fn create_depth_attachments(&mut self, device: &VulkanDevice, depth_format: vk::Format, image_count: u32) -> VulkanResult<()> {
         if depth_format == vk::Format::UNDEFINED {
             return Ok(());
         }
-        let depth_images = (0..image_count)
-            .map(|_| {
-                device.allocate_image(
-                    self.extent.width,
-                    self.extent.height,
-                    1,
+        let depth_images = device.allocate_image(
+            self.extent.width,
+            self.extent.height,
+            image_count,
+            depth_format,
+            vk::ImageCreateFlags::empty(),
+            vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+            MemoryLocation::GpuOnly,
+            "Depth image array",
+        )?;
+
+        let depth_imgviews = (0..image_count)
+            .map(|layer| {
+                device.create_image_view(
+                    *depth_images,
                     depth_format,
-                    vk::ImageCreateFlags::empty(),
-                    vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-                    MemoryLocation::GpuOnly,
-                    "Depth image",
+                    layer,
+                    vk::ImageViewType::TYPE_2D,
+                    vk::ImageAspectFlags::DEPTH,
                 )
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        let depth_imgviews = depth_images
-            .iter()
-            .map(|image| device.create_image_view(**image, depth_format, vk::ImageViewType::TYPE_2D, vk::ImageAspectFlags::DEPTH))
-            .collect::<Result<Vec<_>, _>>()?;
-
         let cmd_buffer = device.begin_one_time_commands()?;
-        for img in &depth_images {
-            device.transition_image_layout(
-                cmd_buffer,
-                img.handle,
-                depth_format,
-                1,
-                vk::ImageLayout::UNDEFINED,
-                vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            );
-        }
+        device.transition_image_layout(
+            cmd_buffer,
+            *depth_images,
+            depth_format,
+            image_count,
+            vk::ImageLayout::UNDEFINED,
+            vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        );
         device.end_one_time_commands(cmd_buffer)?;
 
         device.debug(|d| {
-            depth_images
-                .iter()
-                .for_each(|img| d.set_object_name(device, &img.handle, "Depth image"));
+            d.set_object_name(device, &*depth_images, "Depth image array");
             depth_imgviews
                 .iter()
                 .for_each(|view| d.set_object_name(device, view, "Depth image view"));
         });
 
-        self.depth_images = depth_images;
+        self.depth_images = Some(depth_images);
         self.depth_imgviews = depth_imgviews;
         self.depth_format = depth_format;
         Ok(())
