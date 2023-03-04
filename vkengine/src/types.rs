@@ -10,8 +10,7 @@ pub enum VkError {
     LoadingFailed(ash::LoadingError),
     Vulkan(vk::Result),
     VulkanMsg(&'static str, vk::Result),
-    MemoryAlloc(ga::AllocationError),
-    MemoryMap(ga::MapError),
+    MemoryAlloc(gpu_allocator::AllocationError),
     EngineError(&'static str),
     UnsuitableDevice, // used internally
 }
@@ -23,7 +22,6 @@ impl std::fmt::Display for VkError {
             Self::Vulkan(err) => write!(f, "Vulkan error: {err}"),
             Self::VulkanMsg(msg, err) => write!(f, "{msg}: {err}"),
             Self::MemoryAlloc(err) => write!(f, "Memory allocation error: {err}"),
-            Self::MemoryMap(err) => write!(f, "Failed to map memory: {err}"),
             Self::EngineError(desc) => write!(f, "{desc}"),
             Self::UnsuitableDevice => write!(f, "Unsuitable device"),
         }
@@ -36,7 +34,6 @@ impl std::error::Error for VkError {
             Self::LoadingFailed(err) => Some(err),
             Self::Vulkan(err) | Self::VulkanMsg(_, err) => Some(err),
             Self::MemoryAlloc(err) => Some(err),
-            Self::MemoryMap(err) => Some(err),
             _ => None,
         }
     }
@@ -54,15 +51,9 @@ impl From<vk::Result> for VkError {
     }
 }
 
-impl From<ga::AllocationError> for VkError {
-    fn from(err: ga::AllocationError) -> Self {
+impl From<gpu_allocator::AllocationError> for VkError {
+    fn from(err: gpu_allocator::AllocationError) -> Self {
         Self::MemoryAlloc(err)
-    }
-}
-
-impl From<ga::MapError> for VkError {
-    fn from(err: ga::MapError) -> Self {
-        Self::MemoryMap(err)
     }
 }
 

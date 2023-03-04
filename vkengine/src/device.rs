@@ -3,7 +3,8 @@ use crate::instance::{DeviceInfo, DeviceSelection, VulkanInstance};
 use crate::types::*;
 use ash::extensions::khr;
 use ash::vk;
-use gpu_alloc_ash::AshMemoryDevice;
+use gpu_allocator::vulkan::{Allocation, AllocationCreateDesc, AllocationScheme, Allocator, AllocatorCreateDesc};
+use gpu_allocator::MemoryLocation;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use std::marker::PhantomData;
 use std::mem::ManuallyDrop;
@@ -22,7 +23,7 @@ pub struct VulkanDevice {
     pub swapchain_fn: khr::Swapchain,
     pub dynrender_fn: khr::DynamicRendering,
     pub pushdesc_fn: khr::PushDescriptor,
-    allocator: Mutex<ga::GpuAllocator<vk::DeviceMemory>>,
+    allocator: ManuallyDrop<Mutex<Allocator>>,
 }
 
 impl VulkanDevice {
@@ -40,9 +41,13 @@ impl VulkanDevice {
         let dynrender_fn = khr::DynamicRendering::new(&instance, &device);
         let pushdesc_fn = khr::PushDescriptor::new(&instance, &device);
 
-        let alloc_config = ga::Config::i_am_prototyping();
-        let dev_props = unsafe { gpu_alloc_ash::device_properties(&instance, 0, dev_info.phys_dev)? };
-        let allocator = Mutex::new(ga::GpuAllocator::new(alloc_config, dev_props));
+        let allocator = Allocator::new(&AllocatorCreateDesc {
+            instance: (*instance).clone(),
+            device: device.clone(),
+            physical_device: dev_info.phys_dev,
+            debug_settings: Default::default(),
+            buffer_device_address: false,
+        })?;
 
         let family = dev_info.graphics_idx;
 
@@ -57,7 +62,7 @@ impl VulkanDevice {
             swapchain_fn,
             dynrender_fn,
             pushdesc_fn,
-            allocator,
+            allocator: ManuallyDrop::new(allocator.into()),
         };
 
         this.transfer_pool = this.create_command_pool(family, vk::CommandPoolCreateFlags::TRANSIENT)?;
@@ -184,7 +189,7 @@ impl VulkanDevice {
     }
 
     pub fn allocate_buffer(
-        &self, size: vk::DeviceSize, buf_usage: vk::BufferUsageFlags, mem_usage: ga::UsageFlags,
+        &self, size: vk::DeviceSize, buf_usage: vk::BufferUsageFlags, location: MemoryLocation,
     ) -> VulkanResult<VkBuffer> {
         let buffer_ci = vk::BufferCreateInfo::builder()
             .size(size)
@@ -197,27 +202,22 @@ impl VulkanDevice {
                 .describe_err("Failed to create buffer")?
         };
 
-        let mem_reqs = unsafe { self.device.get_buffer_memory_requirements(buffer) };
-        let memory = unsafe {
-            self.allocator.lock().unwrap().alloc(
-                AshMemoryDevice::wrap(&self.device),
-                ga::Request {
-                    size: mem_reqs.size,
-                    align_mask: mem_reqs.alignment - 1,
-                    usage: mem_usage,
-                    memory_types: mem_reqs.memory_type_bits,
-                },
-            )?
-        };
-        //eprintln!("buffer alloc: usage = {buf_usage:?}\n{memory:#?}");
+        let requirements = unsafe { self.device.get_buffer_memory_requirements(buffer) };
+        let allocation = self.allocator.lock().unwrap().allocate(&AllocationCreateDesc {
+            name: "Buffer",
+            requirements,
+            location,
+            linear: true,
+            allocation_scheme: AllocationScheme::GpuAllocatorManaged,
+        })?;
 
         unsafe {
             self.device
-                .bind_buffer_memory(buffer, *memory.memory(), memory.offset())
+                .bind_buffer_memory(buffer, allocation.memory(), allocation.offset())
                 .describe_err("Failed to bind buffer memory")?
         };
 
-        Ok(VkBuffer::new(buffer, memory))
+        Ok(VkBuffer::new(buffer, allocation))
     }
 
     fn copy_buffer(&self, dst_buffer: vk::Buffer, src_buffer: vk::Buffer, size: vk::DeviceSize) -> VulkanResult<()> {
@@ -235,14 +235,10 @@ impl VulkanDevice {
 
     pub fn create_buffer_from_data<T: Copy>(&self, data: &[T], usage: vk::BufferUsageFlags) -> VulkanResult<VkBuffer> {
         let size = size_of_val(data) as _;
-        let mut src_buffer = self.allocate_buffer(
-            size,
-            vk::BufferUsageFlags::TRANSFER_SRC,
-            ga::UsageFlags::UPLOAD | ga::UsageFlags::TRANSIENT,
-        )?;
-        let dst_buffer = self.allocate_buffer(size, vk::BufferUsageFlags::TRANSFER_DST | usage, ga::UsageFlags::FAST_DEVICE_ACCESS)?;
+        let mut src_buffer = self.allocate_buffer(size, vk::BufferUsageFlags::TRANSFER_SRC, MemoryLocation::CpuToGpu)?;
+        let dst_buffer = self.allocate_buffer(size, vk::BufferUsageFlags::TRANSFER_DST | usage, MemoryLocation::GpuOnly)?;
 
-        src_buffer.map(self)?.write_slice(data, 0);
+        src_buffer.map()?.write_slice(data, 0);
         self.copy_buffer(*dst_buffer, *src_buffer, size)?;
 
         unsafe { src_buffer.cleanup(self) };
@@ -252,7 +248,7 @@ impl VulkanDevice {
 
     pub fn allocate_image(
         &self, width: u32, height: u32, layers: u32, format: vk::Format, flags: vk::ImageCreateFlags, img_usage: vk::ImageUsageFlags,
-        mem_usage: ga::UsageFlags,
+        location: MemoryLocation,
     ) -> VulkanResult<VkImage> {
         let image_ci = vk::ImageCreateInfo::builder()
             .image_type(vk::ImageType::TYPE_2D)
@@ -269,27 +265,22 @@ impl VulkanDevice {
 
         let image = unsafe { self.device.create_image(&image_ci, None).describe_err("Failed to create image")? };
 
-        let mem_reqs = unsafe { self.device.get_image_memory_requirements(image) };
-        let memory = unsafe {
-            self.allocator.lock().unwrap().alloc(
-                AshMemoryDevice::wrap(&self.device),
-                ga::Request {
-                    size: mem_reqs.size,
-                    align_mask: mem_reqs.alignment - 1,
-                    usage: mem_usage,
-                    memory_types: mem_reqs.memory_type_bits,
-                },
-            )?
-        };
-        //eprintln!("image alloc: usage = {img_usage:?}\n{memory:#?}");
+        let requirements = unsafe { self.device.get_image_memory_requirements(image) };
+        let allocation = self.allocator.lock().unwrap().allocate(&AllocationCreateDesc {
+            name: "Image",
+            requirements,
+            location,
+            linear: false,
+            allocation_scheme: AllocationScheme::GpuAllocatorManaged,
+        })?;
 
         unsafe {
             self.device
-                .bind_image_memory(image, *memory.memory(), memory.offset())
+                .bind_image_memory(image, allocation.memory(), allocation.offset())
                 .describe_err("Failed to bind image memory")?;
         }
 
-        Ok(VkImage::new(image, memory))
+        Ok(VkImage::new(image, allocation))
     }
 
     pub fn transition_image_layout(
@@ -386,11 +377,7 @@ impl VulkanDevice {
         let layer_size = width as usize * height as usize * 4;
         let layers = data.layer_count();
         let size = layer_size as vk::DeviceSize * layers as vk::DeviceSize;
-        let mut src_buffer = self.allocate_buffer(
-            size,
-            vk::BufferUsageFlags::TRANSFER_SRC,
-            ga::UsageFlags::UPLOAD | ga::UsageFlags::TRANSIENT,
-        )?;
+        let mut src_buffer = self.allocate_buffer(size, vk::BufferUsageFlags::TRANSFER_SRC, MemoryLocation::CpuToGpu)?;
         let tex_image = self.allocate_image(
             width,
             height,
@@ -398,15 +385,15 @@ impl VulkanDevice {
             format,
             flags,
             vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
-            ga::UsageFlags::FAST_DEVICE_ACCESS,
+            MemoryLocation::GpuOnly,
         )?;
 
         match data {
             ImageData::Single(bytes) => {
-                src_buffer.map(self)?.write_bytes(bytes, 0);
+                src_buffer.map()?.write_bytes(bytes, 0);
             }
             ImageData::Array(bytes_arr) => {
-                let mut mem = src_buffer.map(self)?;
+                let mut mem = src_buffer.map()?;
                 for (i, &bytes) in bytes_arr.iter().enumerate() {
                     mem.write_bytes(bytes, layer_size * i);
                 }
@@ -440,7 +427,7 @@ impl VulkanDevice {
         self.end_one_time_commands(cmd_buffer)?;
 
         unsafe { src_buffer.cleanup(self) };
-        self.debug(|d| d.set_object_name(&self.device, &tex_image.handle, "Texture image"));
+        self.debug(|d| d.set_object_name(&self.device, &tex_image.handle, &format!("Texture image {width}x{height}x{layers}")));
 
         Ok(tex_image)
     }
@@ -451,18 +438,14 @@ impl VulkanDevice {
         let layer_size = width as usize * height as usize * 4;
         let layers = data.layer_count();
         let size = layer_size as vk::DeviceSize * layers as vk::DeviceSize;
-        let mut src_buffer = self.allocate_buffer(
-            size,
-            vk::BufferUsageFlags::TRANSFER_SRC,
-            ga::UsageFlags::UPLOAD | ga::UsageFlags::TRANSIENT,
-        )?;
+        let mut src_buffer = self.allocate_buffer(size, vk::BufferUsageFlags::TRANSFER_SRC, MemoryLocation::CpuToGpu)?;
 
         match data {
             ImageData::Single(bytes) => {
-                src_buffer.map(self)?.write_bytes(bytes, 0);
+                src_buffer.map()?.write_bytes(bytes, 0);
             }
             ImageData::Array(bytes_arr) => {
-                let mut mem = src_buffer.map(self)?;
+                let mut mem = src_buffer.map()?;
                 for (i, &bytes) in bytes_arr.iter().enumerate() {
                     mem.write_bytes(bytes, layer_size * i);
                 }
@@ -578,7 +561,7 @@ impl std::ops::Deref for VulkanDevice {
 impl Drop for VulkanDevice {
     fn drop(&mut self) {
         unsafe {
-            self.allocator.lock().unwrap().cleanup(AshMemoryDevice::wrap(&self.device));
+            ManuallyDrop::drop(&mut self.allocator);
             self.device.destroy_command_pool(self.transfer_pool, None);
             self.instance.surface_utils.destroy_surface(self.surface, None);
             self.device.destroy_device(None);
@@ -678,7 +661,7 @@ impl Swapchain {
                     depth_format,
                     vk::ImageCreateFlags::empty(),
                     vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-                    ga::UsageFlags::FAST_DEVICE_ACCESS,
+                    MemoryLocation::GpuOnly,
                 )
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -761,57 +744,40 @@ impl Cleanup<VulkanDevice> for Swapchain {
     }
 }
 
-pub type MemoryBlock = ga::MemoryBlock<vk::DeviceMemory>;
 pub type VkBuffer = MemoryObject<vk::Buffer>;
 pub type VkImage = MemoryObject<vk::Image>;
 
 #[derive(Debug)]
 pub struct MemoryObject<T> {
     pub handle: T,
-    pub memory: ManuallyDrop<MemoryBlock>,
-    mapped: Option<std::ptr::NonNull<u8>>,
+    memory: ManuallyDrop<Allocation>,
 }
 
 impl<T> MemoryObject<T> {
-    fn new(handle: T, memory: MemoryBlock) -> Self {
+    fn new(handle: T, memory: Allocation) -> Self {
         Self {
             handle,
             memory: ManuallyDrop::new(memory),
-            mapped: None,
         }
     }
 
-    pub fn map<'a>(&'a mut self, device: &ash::Device) -> VulkanResult<MappedMemory<'a>> {
-        let size = self.memory.size() as _;
-        let mapped = match self.mapped {
-            Some(ptr) => ptr,
-            None => {
-                let ptr = unsafe { self.memory.map(AshMemoryDevice::wrap(device), 0, size)? };
-                self.mapped = Some(ptr);
-                ptr
-            }
-        };
-        Ok(MappedMemory {
-            mapped,
-            size,
-            _p: PhantomData,
-        })
+    #[inline]
+    pub fn size(&self) -> u64 {
+        self.memory.size()
     }
 
-    pub fn unmap(&mut self, device: &ash::Device) {
-        if self.mapped.is_some() {
-            unsafe { self.memory.unmap(AshMemoryDevice::wrap(device)) };
-            self.mapped = None;
-        }
+    pub fn map<'a>(&'a mut self) -> VulkanResult<MappedMemory<'a>> {
+        let mapped = self.memory.mapped_slice_mut().describe_err("Failed to map memory")?;
+        Ok(MappedMemory { mapped })
     }
 
     unsafe fn free_memory(&mut self, device: &VulkanDevice) {
-        self.unmap(device);
         device
             .allocator
             .lock()
             .unwrap()
-            .dealloc(AshMemoryDevice::wrap(&device.device), ManuallyDrop::take(&mut self.memory));
+            .free(ManuallyDrop::take(&mut self.memory))
+            .expect("Failed to free memory");
     }
 }
 
@@ -837,16 +803,13 @@ impl Cleanup<VulkanDevice> for MemoryObject<vk::Image> {
 }
 
 pub struct MappedMemory<'a> {
-    mapped: std::ptr::NonNull<u8>,
-    size: usize,
-    _p: PhantomData<&'a ()>,
+    mapped: &'a mut [u8],
 }
 
 impl MappedMemory<'_> {
     #[inline]
     pub fn write_bytes(&mut self, bytes: &[u8], offset: usize) {
-        assert!(offset + bytes.len() <= self.size, "memory write out of bounds");
-        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), self.mapped.as_ptr().add(offset), bytes.len()) }
+        self.mapped[offset..offset + bytes.len()].copy_from_slice(bytes);
     }
 
     #[inline]
@@ -870,13 +833,13 @@ pub struct UniformBuffer<T> {
 impl<T: bytemuck::Pod> UniformBuffer<T> {
     pub fn new(device: &VulkanDevice) -> VulkanResult<Self> {
         let size = size_of::<T>() as _;
-        let buffer = device.allocate_buffer(size, vk::BufferUsageFlags::UNIFORM_BUFFER, ga::UsageFlags::UPLOAD)?;
+        let buffer = device.allocate_buffer(size, vk::BufferUsageFlags::UNIFORM_BUFFER, MemoryLocation::CpuToGpu)?;
         device.debug(|d| d.set_object_name(device, &*buffer, "Uniform buffer"));
         Ok(Self { buffer, _p: PhantomData })
     }
 
-    pub fn write_uniforms(&mut self, device: &ash::Device, ubo: T) -> VulkanResult<()> {
-        self.buffer.map(device)?.write_object(&ubo);
+    pub fn write_uniforms(&mut self, ubo: T) -> VulkanResult<()> {
+        self.buffer.map()?.write_object(&ubo);
         Ok(())
     }
 

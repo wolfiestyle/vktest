@@ -78,7 +78,7 @@ impl MeshRenderer {
 
         //FIXME: sync uniform buffer updates after frame finished
         let ubo = self.calc_uniforms(engine);
-        self.uniforms.write_uniforms(&self.device, ubo)?;
+        self.uniforms.write_uniforms(ubo)?;
 
         let buffer_info = self.uniforms.descriptor();
         let image_info = self.texture.descriptor();

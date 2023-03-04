@@ -6,6 +6,7 @@ use egui::epaint::{Primitive, Vertex};
 use egui::{ClippedPrimitive, Context, FullOutput, PlatformOutput, TextureId, TexturesDelta};
 use egui_winit::{EventResponse, State};
 use glam::Mat4;
+use gpu_allocator::MemoryLocation;
 use inline_spirv::include_spirv;
 use std::collections::{hash_map::Entry, HashMap};
 use std::mem::size_of;
@@ -68,7 +69,7 @@ impl UiRenderer {
         let buffer = device.allocate_buffer(
             65536,
             vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::INDEX_BUFFER,
-            ga::UsageFlags::UPLOAD,
+            MemoryLocation::CpuToGpu,
         )?;
 
         Ok(Self {
@@ -175,12 +176,12 @@ impl UiRenderer {
         // allocate nearest power of two sized buffer if necessary
         let device = &*self.device;
         let mut drop_buffers = vec![];
-        if total_bytes as u64 > self.buffer.memory.size() {
+        if total_bytes as u64 > self.buffer.size() {
             let new_size = 1u64 << ((total_bytes - 1).ilog2() + 1);
             let new_buffer = device.allocate_buffer(
                 new_size,
                 vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::INDEX_BUFFER,
-                ga::UsageFlags::UPLOAD,
+                MemoryLocation::CpuToGpu,
             )?;
             drop_buffers.push(std::mem::replace(&mut self.buffer, new_buffer));
         }
@@ -196,7 +197,7 @@ impl UiRenderer {
         let mut vert_offset = 0;
         let mut idx_offset = 0;
         let idx_base = total_vert_size / 4;
-        let mut mem = self.buffer.map(device)?;
+        let mut mem = self.buffer.map()?;
         for prim in primitives {
             match prim.primitive {
                 Primitive::Mesh(mesh) => {
