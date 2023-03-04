@@ -202,13 +202,23 @@ impl VulkanDevice {
                 .describe_err("Failed to create buffer")?
         };
 
-        let requirements = unsafe { self.device.get_buffer_memory_requirements(buffer) };
+        let buffer_info = vk::BufferMemoryRequirementsInfo2::builder().buffer(buffer);
+        let mut ded_reqs = vk::MemoryDedicatedRequirements::default();
+        let mut mem_reqs = vk::MemoryRequirements2::builder().push_next(&mut ded_reqs);
+        unsafe { self.device.get_buffer_memory_requirements2(&buffer_info, &mut mem_reqs) };
+
+        let requirements = mem_reqs.memory_requirements;
+        let allocation_scheme = if ded_reqs.prefers_dedicated_allocation != vk::FALSE {
+            AllocationScheme::DedicatedBuffer(buffer)
+        } else {
+            AllocationScheme::GpuAllocatorManaged
+        };
         let allocation = self.allocator.lock().unwrap().allocate(&AllocationCreateDesc {
             name: "Buffer",
             requirements,
             location,
             linear: true,
-            allocation_scheme: AllocationScheme::GpuAllocatorManaged,
+            allocation_scheme,
         })?;
 
         unsafe {
@@ -265,13 +275,23 @@ impl VulkanDevice {
 
         let image = unsafe { self.device.create_image(&image_ci, None).describe_err("Failed to create image")? };
 
-        let requirements = unsafe { self.device.get_image_memory_requirements(image) };
+        let image_info = vk::ImageMemoryRequirementsInfo2::builder().image(image);
+        let mut ded_reqs = vk::MemoryDedicatedRequirements::default();
+        let mut mem_reqs = vk::MemoryRequirements2::builder().push_next(&mut ded_reqs);
+        unsafe { self.device.get_image_memory_requirements2(&image_info, &mut mem_reqs) };
+
+        let requirements = mem_reqs.memory_requirements;
+        let allocation_scheme = if ded_reqs.prefers_dedicated_allocation != vk::FALSE {
+            AllocationScheme::DedicatedImage(image)
+        } else {
+            AllocationScheme::GpuAllocatorManaged
+        };
         let allocation = self.allocator.lock().unwrap().allocate(&AllocationCreateDesc {
             name: "Image",
             requirements,
             location,
             linear: false,
-            allocation_scheme: AllocationScheme::GpuAllocatorManaged,
+            allocation_scheme,
         })?;
 
         unsafe {
