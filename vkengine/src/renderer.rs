@@ -51,8 +51,8 @@ impl MeshRenderer {
             .build(&device)?;
         unsafe { shader.cleanup(&device) };
 
-        let vertex_buffer = device.create_buffer_from_data(vertices, vk::BufferUsageFlags::VERTEX_BUFFER)?;
-        let index_buffer = device.create_buffer_from_data(indices, vk::BufferUsageFlags::INDEX_BUFFER)?;
+        let vertex_buffer = device.create_buffer_from_data(vertices, vk::BufferUsageFlags::VERTEX_BUFFER, "Vertex buffer")?;
+        let index_buffer = device.create_buffer_from_data(indices, vk::BufferUsageFlags::INDEX_BUFFER, "Index buffer")?;
 
         let sampler = engine.get_sampler(vk::Filter::LINEAR, vk::Filter::LINEAR, vk::SamplerAddressMode::REPEAT)?;
         let texture = Texture::new(&device, img_dims.0, img_dims.1, vk::Format::R8G8B8A8_SRGB, img_data, sampler)?;

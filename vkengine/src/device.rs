@@ -189,7 +189,7 @@ impl VulkanDevice {
     }
 
     pub fn allocate_buffer(
-        &self, size: vk::DeviceSize, buf_usage: vk::BufferUsageFlags, location: MemoryLocation,
+        &self, size: vk::DeviceSize, buf_usage: vk::BufferUsageFlags, location: MemoryLocation, name: &str,
     ) -> VulkanResult<VkBuffer> {
         let buffer_ci = vk::BufferCreateInfo::builder()
             .size(size)
@@ -214,7 +214,7 @@ impl VulkanDevice {
             AllocationScheme::GpuAllocatorManaged
         };
         let allocation = self.allocator.lock().unwrap().allocate(&AllocationCreateDesc {
-            name: "Buffer",
+            name,
             requirements,
             location,
             linear: true,
@@ -243,10 +243,10 @@ impl VulkanDevice {
         self.end_one_time_commands(cmd_buffer)
     }
 
-    pub fn create_buffer_from_data<T: Copy>(&self, data: &[T], usage: vk::BufferUsageFlags) -> VulkanResult<VkBuffer> {
+    pub fn create_buffer_from_data<T: Copy>(&self, data: &[T], usage: vk::BufferUsageFlags, name: &str) -> VulkanResult<VkBuffer> {
         let size = size_of_val(data) as _;
-        let mut src_buffer = self.allocate_buffer(size, vk::BufferUsageFlags::TRANSFER_SRC, MemoryLocation::CpuToGpu)?;
-        let dst_buffer = self.allocate_buffer(size, vk::BufferUsageFlags::TRANSFER_DST | usage, MemoryLocation::GpuOnly)?;
+        let mut src_buffer = self.allocate_buffer(size, vk::BufferUsageFlags::TRANSFER_SRC, MemoryLocation::CpuToGpu, "Staging")?;
+        let dst_buffer = self.allocate_buffer(size, vk::BufferUsageFlags::TRANSFER_DST | usage, MemoryLocation::GpuOnly, name)?;
 
         src_buffer.map()?.write_slice(data, 0);
         self.copy_buffer(*dst_buffer, *src_buffer, size)?;
@@ -258,7 +258,7 @@ impl VulkanDevice {
 
     pub fn allocate_image(
         &self, width: u32, height: u32, layers: u32, format: vk::Format, flags: vk::ImageCreateFlags, img_usage: vk::ImageUsageFlags,
-        location: MemoryLocation,
+        location: MemoryLocation, name: &str,
     ) -> VulkanResult<VkImage> {
         let image_ci = vk::ImageCreateInfo::builder()
             .image_type(vk::ImageType::TYPE_2D)
@@ -287,7 +287,7 @@ impl VulkanDevice {
             AllocationScheme::GpuAllocatorManaged
         };
         let allocation = self.allocator.lock().unwrap().allocate(&AllocationCreateDesc {
-            name: "Image",
+            name,
             requirements,
             location,
             linear: false,
@@ -397,7 +397,7 @@ impl VulkanDevice {
         let layer_size = width as usize * height as usize * 4;
         let layers = data.layer_count();
         let size = layer_size as vk::DeviceSize * layers as vk::DeviceSize;
-        let mut src_buffer = self.allocate_buffer(size, vk::BufferUsageFlags::TRANSFER_SRC, MemoryLocation::CpuToGpu)?;
+        let mut src_buffer = self.allocate_buffer(size, vk::BufferUsageFlags::TRANSFER_SRC, MemoryLocation::CpuToGpu, "Staging")?;
         let tex_image = self.allocate_image(
             width,
             height,
@@ -406,6 +406,7 @@ impl VulkanDevice {
             flags,
             vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
             MemoryLocation::GpuOnly,
+            "Texture image",
         )?;
 
         match data {
@@ -458,7 +459,7 @@ impl VulkanDevice {
         let layer_size = width as usize * height as usize * 4;
         let layers = data.layer_count();
         let size = layer_size as vk::DeviceSize * layers as vk::DeviceSize;
-        let mut src_buffer = self.allocate_buffer(size, vk::BufferUsageFlags::TRANSFER_SRC, MemoryLocation::CpuToGpu)?;
+        let mut src_buffer = self.allocate_buffer(size, vk::BufferUsageFlags::TRANSFER_SRC, MemoryLocation::CpuToGpu, "Staging")?;
 
         match data {
             ImageData::Single(bytes) => {
@@ -566,6 +567,10 @@ impl VulkanDevice {
     #[inline]
     pub fn debug<F: FnOnce(&DebugUtils)>(&self, debug_f: F) {
         self.instance.debug(debug_f)
+    }
+
+    pub fn get_memory_info(&self) -> String {
+        format!("{:#?}", self.allocator.lock().unwrap())
     }
 }
 
@@ -682,6 +687,7 @@ impl Swapchain {
                     vk::ImageCreateFlags::empty(),
                     vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
                     MemoryLocation::GpuOnly,
+                    "Depth image",
                 )
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -853,7 +859,12 @@ pub struct UniformBuffer<T> {
 impl<T: bytemuck::Pod> UniformBuffer<T> {
     pub fn new(device: &VulkanDevice) -> VulkanResult<Self> {
         let size = size_of::<T>() as _;
-        let buffer = device.allocate_buffer(size, vk::BufferUsageFlags::UNIFORM_BUFFER, MemoryLocation::CpuToGpu)?;
+        let buffer = device.allocate_buffer(
+            size,
+            vk::BufferUsageFlags::UNIFORM_BUFFER,
+            MemoryLocation::CpuToGpu,
+            "Uniform buffer",
+        )?;
         device.debug(|d| d.set_object_name(device, &*buffer, "Uniform buffer"));
         Ok(Self { buffer, _p: PhantomData })
     }

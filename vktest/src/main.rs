@@ -104,6 +104,17 @@ fn main() -> VulkanResult<()> {
                     input:
                         KeyboardInput {
                             state: ElementState::Pressed,
+                            virtual_keycode: Some(VirtualKeyCode::F1),
+                            ..
+                        },
+                    ..
+                } => {
+                    eprintln!("{}", vk_app.device.get_memory_info());
+                }
+                WindowEvent::KeyboardInput {
+                    input:
+                        KeyboardInput {
+                            state: ElementState::Pressed,
                             virtual_keycode: Some(VirtualKeyCode::F11),
                             ..
                         },

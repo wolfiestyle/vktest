@@ -70,6 +70,7 @@ impl UiRenderer {
             65536,
             vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::INDEX_BUFFER,
             MemoryLocation::CpuToGpu,
+            "UiRenderer buffer",
         )?;
 
         Ok(Self {
@@ -182,6 +183,7 @@ impl UiRenderer {
                 new_size,
                 vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::INDEX_BUFFER,
                 MemoryLocation::CpuToGpu,
+                "UiRenderer buffer",
             )?;
             drop_buffers.push(std::mem::replace(&mut self.buffer, new_buffer));
         }
