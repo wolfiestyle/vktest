@@ -598,7 +598,7 @@ impl FrameState {
         device.debug(|d| {
             d.set_object_name(device, &image_avail_sem, "Image available semaphore");
             d.set_object_name(device, &render_finished_sem, "Render finished semaphore");
-            d.set_object_name(&device, &in_flight_sem, "In-flight semaphore")
+            d.set_object_name(device, &in_flight_sem, "In-flight semaphore")
         });
         Ok(Self {
             image_avail_sem,
