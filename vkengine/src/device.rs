@@ -10,10 +10,10 @@ use std::marker::PhantomData;
 use std::mem::ManuallyDrop;
 use std::mem::{size_of, size_of_val};
 use std::slice;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 pub struct VulkanDevice {
-    instance: Arc<VulkanInstance>,
+    instance: VulkanInstance,
     surface: vk::SurfaceKHR,
     pub dev_info: DeviceInfo,
     pub device: ash::Device,
@@ -27,10 +27,11 @@ pub struct VulkanDevice {
 }
 
 impl VulkanDevice {
-    pub fn new<W>(window: &W, instance: Arc<VulkanInstance>, selection: DeviceSelection) -> VulkanResult<Self>
+    pub fn new<W>(window: &W, app_name: &str, selection: DeviceSelection) -> VulkanResult<Self>
     where
         W: HasRawDisplayHandle + HasRawWindowHandle,
     {
+        let instance = VulkanInstance::new(window, app_name)?;
         let surface = instance.create_surface(window)?;
         let dev_info = instance.pick_physical_device(surface, selection)?;
         eprintln!("Selected device: {:?}", dev_info.name);

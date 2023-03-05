@@ -7,7 +7,6 @@ use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use std::collections::HashSet;
 use std::convert::identity;
 use std::ffi::{c_char, CStr, CString};
-use std::sync::Arc;
 
 const VALIDATION_ENABLED: bool = cfg!(debug_assertions);
 const VALIDATION_LAYER: &CStr = cstr!("VK_LAYER_KHRONOS_validation");
@@ -19,7 +18,7 @@ const DEVICE_EXTENSIONS: [(&CStr, bool); 4] = [
 ];
 const VULKAN_VERSION: u32 = vk::API_VERSION_1_2;
 
-pub struct VulkanInstance {
+pub(crate) struct VulkanInstance {
     entry: ash::Entry,
     instance: ash::Instance,
     pub surface_utils: khr::Surface,
@@ -28,7 +27,7 @@ pub struct VulkanInstance {
 }
 
 impl VulkanInstance {
-    pub fn new<W: HasRawDisplayHandle>(window: &W, app_name: &str) -> VulkanResult<Arc<Self>> {
+    pub fn new<W: HasRawDisplayHandle>(window: &W, app_name: &str) -> VulkanResult<Self> {
         let entry = unsafe { ash::Entry::load()? };
         if VALIDATION_ENABLED {
             Self::check_validation_support(&entry)?;
@@ -38,13 +37,13 @@ impl VulkanInstance {
         let instance = Self::create_instance(&entry, window, &app_name, &engine_name)?;
         let surface_utils = khr::Surface::new(&entry, &instance);
 
-        Ok(Arc::new(Self {
+        Ok(Self {
             #[cfg(debug_assertions)]
             debug_utils: DebugUtils::new(&entry, &instance),
             entry,
             instance,
             surface_utils,
-        }))
+        })
     }
 
     fn check_validation_support(entry: &ash::Entry) -> VulkanResult<()> {
@@ -352,7 +351,7 @@ pub struct DeviceInfo {
 }
 
 #[derive(Debug, Clone)]
-pub struct SurfaceInfo {
+pub(crate) struct SurfaceInfo {
     pub capabilities: vk::SurfaceCapabilitiesKHR,
     pub formats: Vec<vk::SurfaceFormatKHR>,
     pub present_modes: Vec<vk::PresentModeKHR>,

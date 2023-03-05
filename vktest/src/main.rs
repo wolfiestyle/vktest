@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use structopt::StructOpt;
 use vkengine::gui::{egui, UiRenderer};
-use vkengine::{CameraController, MeshRenderer, SkyboxRenderer, VulkanDevice, VulkanEngine, VulkanInstance, VulkanResult};
+use vkengine::{CameraController, MeshRenderer, SkyboxRenderer, VulkanDevice, VulkanEngine, VulkanResult};
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::Fullscreen;
@@ -59,8 +59,7 @@ fn main() -> VulkanResult<()> {
         .build(&event_loop)
         .unwrap();
 
-    let vk_instance = VulkanInstance::new(&window, "vulkan test")?;
-    let vk_device = VulkanDevice::new(&window, vk_instance, Default::default())?;
+    let vk_device = VulkanDevice::new(&window, "vulkan test", Default::default())?;
     let mut vk_app = VulkanEngine::new(vk_device, win_size.into())?;
     vk_app.camera.position = [2.0, 2.0, 2.0].into();
     vk_app.camera.look_at([0.0; 3]);
