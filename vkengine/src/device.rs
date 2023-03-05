@@ -120,6 +120,15 @@ impl VulkanDevice {
         }
     }
 
+    pub fn create_pipeline_cache(&self, initial_data: &[u8]) -> VulkanResult<vk::PipelineCache> {
+        let cache_ci = vk::PipelineCacheCreateInfo::builder().initial_data(initial_data);
+        unsafe {
+            self.device
+                .create_pipeline_cache(&cache_ci, None)
+                .describe_err("Failed to create pipeline cache")
+        }
+    }
+
     pub fn create_command_pool(&self, family_idx: u32, flags: vk::CommandPoolCreateFlags) -> VulkanResult<vk::CommandPool> {
         let command_pool_ci = vk::CommandPoolCreateInfo::builder().flags(flags).queue_family_index(family_idx);
 

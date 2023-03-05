@@ -48,7 +48,7 @@ impl MeshRenderer {
             .vertex_input::<V>()
             .descriptor_layout(desc_layout)
             .render_to_swapchain(&engine.swapchain)
-            .build(&device)?;
+            .build(engine)?;
         unsafe { shader.cleanup(&device) };
 
         let vertex_buffer = device.create_buffer_from_data(vertices, vk::BufferUsageFlags::VERTEX_BUFFER, "Vertex buffer")?;
@@ -181,7 +181,7 @@ impl SkyboxRenderer {
             .render_to_swapchain(&engine.swapchain)
             .mode(PipelineMode::Background)
             .topology(vk::PrimitiveTopology::TRIANGLE_STRIP)
-            .build(&device)?;
+            .build(engine)?;
         unsafe { bg_shader.cleanup(&device) };
 
         let texture = Texture::new_cubemap(

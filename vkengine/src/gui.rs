@@ -64,7 +64,7 @@ impl UiRenderer {
             .push_constants(slice::from_ref(&push_constants))
             .render_to_swapchain(&engine.swapchain)
             .mode(PipelineMode::Overlay)
-            .build(&device)?;
+            .build(engine)?;
         unsafe { shader.cleanup(&device) };
         let buffer = device.allocate_buffer(
             65536,

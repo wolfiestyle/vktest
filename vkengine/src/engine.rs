@@ -22,6 +22,7 @@ pub struct VulkanEngine {
     frame_state: Vec<FrameState>,
     current_frame: u64,
     samplers: Mutex<HashMap<SamplerOptions, vk::Sampler>>,
+    pub(crate) pipeline_cache: vk::PipelineCache,
     prev_frame_time: Instant,
     last_frame_time: Instant,
     pub camera: Camera,
@@ -41,6 +42,8 @@ impl VulkanEngine {
             .map(|_| FrameState::new(&device))
             .collect::<Result<Vec<_>, _>>()?;
 
+        let pipeline_cache = device.create_pipeline_cache(&[])?; //TODO: save/load cache data
+
         let camera = Camera::default();
         let now = Instant::now();
 
@@ -55,6 +58,7 @@ impl VulkanEngine {
             frame_state,
             current_frame: 0,
             samplers: Default::default(),
+            pipeline_cache,
             prev_frame_time: now,
             last_frame_time: now,
             camera,
@@ -321,6 +325,7 @@ impl Drop for VulkanEngine {
             for &sampler in self.samplers.lock().unwrap().values() {
                 self.device.destroy_sampler(sampler, None);
             }
+            self.device.destroy_pipeline_cache(self.pipeline_cache, None);
         }
     }
 }
@@ -339,6 +344,20 @@ pub struct PipelineBuilder<'a> {
 }
 
 impl<'a> PipelineBuilder<'a> {
+    pub fn new(shader: &'a Shader) -> Self {
+        Self {
+            shader,
+            desc_layouts: vec![],
+            push_constants: &[],
+            binding_desc: vec![],
+            attrib_desc: vec![],
+            color_format: vk::Format::UNDEFINED,
+            depth_format: vk::Format::UNDEFINED,
+            mode: PipelineMode::Opaque,
+            topology: vk::PrimitiveTopology::TRIANGLE_LIST,
+        }
+    }
+
     pub fn vertex_input<V: VertexInput>(mut self) -> Self {
         self.binding_desc = vec![V::binding_desc(0)];
         self.attrib_desc = V::attr_desc(0);
@@ -371,9 +390,9 @@ impl<'a> PipelineBuilder<'a> {
         self
     }
 
-    pub fn build(self, device: &VulkanDevice) -> VulkanResult<Pipeline> {
-        let layout = device.create_pipeline_layout(&self.desc_layouts, self.push_constants)?;
-        let handle = Pipeline::create_pipeline(device, layout, self)?;
+    pub fn build(self, engine: &VulkanEngine) -> VulkanResult<Pipeline> {
+        let layout = engine.device.create_pipeline_layout(&self.desc_layouts, self.push_constants)?;
+        let handle = Pipeline::create_pipeline(&engine.device, layout, self, engine.pipeline_cache)?;
         Ok(Pipeline { handle, layout })
     }
 }
@@ -385,21 +404,14 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
+    #[inline]
     pub fn builder(shader: &Shader) -> PipelineBuilder {
-        PipelineBuilder {
-            shader,
-            desc_layouts: vec![],
-            push_constants: &[],
-            binding_desc: vec![],
-            attrib_desc: vec![],
-            color_format: vk::Format::UNDEFINED,
-            depth_format: vk::Format::UNDEFINED,
-            mode: PipelineMode::Opaque,
-            topology: vk::PrimitiveTopology::TRIANGLE_LIST,
-        }
+        PipelineBuilder::new(shader)
     }
 
-    fn create_pipeline(device: &VulkanDevice, layout: vk::PipelineLayout, params: PipelineBuilder) -> VulkanResult<vk::Pipeline> {
+    fn create_pipeline(
+        device: &ash::Device, layout: vk::PipelineLayout, params: PipelineBuilder, cache: vk::PipelineCache,
+    ) -> VulkanResult<vk::Pipeline> {
         let entry_point = cstr!("main");
         let shader_stages_ci = [
             vk::PipelineShaderStageCreateInfo::builder()
@@ -483,7 +495,7 @@ impl Pipeline {
 
         let pipeline = unsafe {
             device
-                .create_graphics_pipelines(vk::PipelineCache::null(), slice::from_ref(&pipeline_ci), None)
+                .create_graphics_pipelines(cache, slice::from_ref(&pipeline_ci), None)
                 .map_err(|(_, err)| VkError::VulkanMsg("Error creating pipeline", err))?
         };
 
