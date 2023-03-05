@@ -3,6 +3,7 @@ use crate::instance::{DeviceInfo, DeviceSelection, VulkanInstance};
 use crate::types::*;
 use ash::extensions::khr;
 use ash::vk;
+use glam::UVec2;
 use gpu_allocator::vulkan::{Allocation, AllocationCreateDesc, AllocationScheme, Allocator, AllocatorCreateDesc};
 use gpu_allocator::MemoryLocation;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
@@ -13,7 +14,7 @@ use std::slice;
 use std::sync::Mutex;
 
 pub struct VulkanDevice {
-    instance: VulkanInstance,
+    pub(crate) instance: VulkanInstance,
     surface: vk::SurfaceKHR,
     pub dev_info: DeviceInfo,
     pub device: ash::Device,
@@ -27,7 +28,7 @@ pub struct VulkanDevice {
 }
 
 impl VulkanDevice {
-    pub fn new<W>(window: &W, app_name: &str, selection: DeviceSelection) -> VulkanResult<Self>
+    pub(crate) fn new<W>(window: &W, app_name: &str, selection: DeviceSelection) -> VulkanResult<Self>
     where
         W: HasRawDisplayHandle + HasRawWindowHandle,
     {
@@ -71,14 +72,20 @@ impl VulkanDevice {
         Ok(this)
     }
 
-    pub fn create_swapchain(&self, win_size: WinSize, image_count: u32, depth_format: vk::Format) -> VulkanResult<Swapchain> {
-        let mut swapchain = Swapchain::new(self, win_size, image_count, vk::SwapchainKHR::null())?;
+    pub fn create_swapchain(&self, win_size: UVec2, image_count: u32, depth_format: vk::Format) -> VulkanResult<Swapchain> {
+        let mut swapchain = Swapchain::new(self, win_size.x, win_size.y, image_count, vk::SwapchainKHR::null())?;
         swapchain.create_depth_attachments(self, depth_format, swapchain.images.len() as _)?;
         Ok(swapchain)
     }
 
-    pub fn recreate_swapchain(&self, win_size: WinSize, old_swapchain: &Swapchain) -> VulkanResult<Swapchain> {
-        let mut swapchain = Swapchain::new(self, win_size, old_swapchain.images.len() as u32, old_swapchain.handle)?;
+    pub fn recreate_swapchain(&self, win_size: UVec2, old_swapchain: &Swapchain) -> VulkanResult<Swapchain> {
+        let mut swapchain = Swapchain::new(
+            self,
+            win_size.x,
+            win_size.y,
+            old_swapchain.images.len() as u32,
+            old_swapchain.handle,
+        )?;
         swapchain.create_depth_attachments(self, old_swapchain.depth_format, swapchain.images.len() as _)?;
         Ok(swapchain)
     }
@@ -617,11 +624,11 @@ pub struct Swapchain {
 }
 
 impl Swapchain {
-    fn new(device: &VulkanDevice, win_size: WinSize, image_count: u32, old_swapchain: vk::SwapchainKHR) -> VulkanResult<Self> {
+    fn new(device: &VulkanDevice, width: u32, height: u32, image_count: u32, old_swapchain: vk::SwapchainKHR) -> VulkanResult<Self> {
         let surface_info = device.instance.query_surface_info(device.dev_info.phys_dev, device.surface)?;
         let surface_format = surface_info.find_surface_format();
         let present_mode = surface_info.find_present_mode(vk::PresentModeKHR::IMMEDIATE);
-        let extent = surface_info.calc_extent(win_size.width, win_size.height);
+        let extent = surface_info.calc_extent(width, height);
         let img_count = surface_info.calc_image_count(image_count);
         let img_sharing_mode = if device.dev_info.unique_families.len() > 1 {
             vk::SharingMode::CONCURRENT

@@ -4,7 +4,8 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use structopt::StructOpt;
 use vkengine::gui::{egui, UiRenderer};
-use vkengine::{CameraController, MeshRenderer, SkyboxRenderer, VulkanDevice, VulkanEngine, VulkanResult};
+use vkengine::{CameraController, MeshRenderer, SkyboxRenderer, VulkanEngine, VulkanResult};
+use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::Fullscreen;
@@ -52,15 +53,13 @@ fn main() -> VulkanResult<()> {
         .unwrap();
 
     let event_loop = EventLoop::new();
-    let win_size = winit::dpi::PhysicalSize::new(1024, 768);
     let window = winit::window::WindowBuilder::new()
         .with_title("vulkan test")
-        .with_inner_size(win_size)
+        .with_inner_size(PhysicalSize::new(1024, 768))
         .build(&event_loop)
         .unwrap();
 
-    let vk_device = VulkanDevice::new(&window, "vulkan test", Default::default())?;
-    let mut vk_app = VulkanEngine::new(vk_device, win_size.into())?;
+    let mut vk_app = VulkanEngine::new(&window, "vulkan test", Default::default())?;
     vk_app.camera.position = [2.0, 2.0, 2.0].into();
     vk_app.camera.look_at([0.0; 3]);
 
@@ -108,7 +107,7 @@ fn main() -> VulkanResult<()> {
                         },
                     ..
                 } => {
-                    eprintln!("{}", vk_app.device.get_memory_info());
+                    eprintln!("{}", vk_app.device().get_memory_info());
                 }
                 WindowEvent::KeyboardInput {
                     input:
@@ -123,7 +122,7 @@ fn main() -> VulkanResult<()> {
                     window.set_fullscreen(fullscreen.then_some(Fullscreen::Borderless(None)));
                 }
                 WindowEvent::Resized(size) => {
-                    vk_app.resize(size);
+                    vk_app.resize(size.width, size.height);
                 }
                 _ => controller.update_from_window_event(&event),
             }

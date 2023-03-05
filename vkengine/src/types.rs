@@ -107,31 +107,16 @@ impl<C, T: Cleanup<C>> Cleanup<C> for Option<T> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct WinSize {
-    pub width: u32,
-    pub height: u32,
-}
-
-impl From<[u32; 2]> for WinSize {
-    #[inline]
-    fn from([width, height]: [u32; 2]) -> Self {
-        Self { width, height }
-    }
-}
-
-impl From<(u32, u32)> for WinSize {
-    #[inline]
-    fn from((width, height): (u32, u32)) -> Self {
-        Self { width, height }
-    }
+pub trait WindowSize {
+    fn window_size(&self) -> [u32; 2];
 }
 
 #[cfg(feature = "winit")]
-impl From<PhysicalSize<u32>> for WinSize {
+impl WindowSize for winit::window::Window {
     #[inline]
-    fn from(PhysicalSize { width, height }: PhysicalSize<u32>) -> Self {
-        Self { width, height }
+    fn window_size(&self) -> [u32; 2] {
+        let PhysicalSize { width, height } = self.inner_size();
+        [width, height]
     }
 }
 

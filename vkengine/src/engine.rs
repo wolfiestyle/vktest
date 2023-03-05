@@ -1,8 +1,11 @@
 use crate::camera::Camera;
 use crate::device::{ImageData, Swapchain, VkImage, VulkanDevice};
+use crate::instance::DeviceSelection;
 use crate::types::*;
 use ash::vk;
 use cstr::cstr;
+use glam::UVec2;
+use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use std::collections::HashMap;
 use std::slice;
 use std::sync::{Arc, Mutex};
@@ -12,8 +15,8 @@ const SWAPCHAIN_IMAGE_COUNT: u32 = 3;
 const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
 pub struct VulkanEngine {
-    pub device: Arc<VulkanDevice>,
-    window_size: WinSize,
+    pub(crate) device: Arc<VulkanDevice>,
+    window_size: UVec2,
     window_resized: bool,
     pub(crate) swapchain: Swapchain,
     main_cmd_pool: vk::CommandPool,
@@ -29,8 +32,13 @@ pub struct VulkanEngine {
 }
 
 impl VulkanEngine {
-    pub fn new(device: VulkanDevice, window_size: WinSize) -> VulkanResult<Self> {
+    pub fn new<W>(window: &W, app_name: &str, device_selection: DeviceSelection) -> VulkanResult<Self>
+    where
+        W: HasRawDisplayHandle + HasRawWindowHandle + WindowSize,
+    {
+        let device = VulkanDevice::new(window, app_name, device_selection)?;
         let depth_format = device.find_depth_format(false)?;
+        let window_size = window.window_size().into();
         let swapchain = device.create_swapchain(window_size, SWAPCHAIN_IMAGE_COUNT, depth_format)?;
         eprintln!("color_format: {:?}, depth_format: {depth_format:?}", swapchain.format);
 
@@ -65,23 +73,36 @@ impl VulkanEngine {
         })
     }
 
-    pub fn resize(&mut self, window_size: impl Into<WinSize>) {
-        let window_size = window_size.into();
-        eprintln!("window size: {} x {}", window_size.width, window_size.height);
-        if window_size != self.window_size {
-            self.window_size = window_size;
+    #[inline]
+    pub fn instance(&self) -> &ash::Instance {
+        &self.device.instance
+    }
+
+    #[inline]
+    pub fn device(&self) -> &VulkanDevice {
+        &self.device
+    }
+
+    pub fn resize(&mut self, width: u32, height: u32) {
+        let new_size = UVec2::new(width, height);
+        eprintln!("window size: {new_size}");
+        if new_size != self.window_size {
+            self.window_size = new_size;
             self.window_resized = true;
         }
     }
 
+    #[inline]
     pub fn get_frame_timestamp(&self) -> Instant {
         self.last_frame_time
     }
 
+    #[inline]
     pub fn get_frame_time(&self) -> Duration {
         self.last_frame_time - self.prev_frame_time
     }
 
+    #[inline]
     pub fn get_frame_count(&self) -> u64 {
         self.current_frame
     }
