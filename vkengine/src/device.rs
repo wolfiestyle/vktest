@@ -72,24 +72,6 @@ impl VulkanDevice {
         Ok(this)
     }
 
-    pub fn create_swapchain(&self, win_size: UVec2, image_count: u32, depth_format: vk::Format) -> VulkanResult<Swapchain> {
-        let mut swapchain = Swapchain::new(self, win_size.x, win_size.y, image_count, vk::SwapchainKHR::null())?;
-        swapchain.create_depth_attachments(self, depth_format, swapchain.images.len() as _)?;
-        Ok(swapchain)
-    }
-
-    pub fn recreate_swapchain(&self, win_size: UVec2, old_swapchain: &Swapchain) -> VulkanResult<Swapchain> {
-        let mut swapchain = Swapchain::new(
-            self,
-            win_size.x,
-            win_size.y,
-            old_swapchain.images.len() as u32,
-            old_swapchain.handle,
-        )?;
-        swapchain.create_depth_attachments(self, old_swapchain.depth_format, swapchain.images.len() as _)?;
-        Ok(swapchain)
-    }
-
     pub fn create_shader_module(&self, spirv_code: &[u32]) -> VulkanResult<vk::ShaderModule> {
         let shader_ci = vk::ShaderModuleCreateInfo::builder().code(spirv_code);
 
@@ -624,7 +606,24 @@ pub struct Swapchain {
 }
 
 impl Swapchain {
-    fn new(device: &VulkanDevice, width: u32, height: u32, image_count: u32, old_swapchain: vk::SwapchainKHR) -> VulkanResult<Self> {
+    pub fn new(device: &VulkanDevice, win_size: UVec2, image_count: u32, depth_format: vk::Format) -> VulkanResult<Self> {
+        let mut swapchain = Swapchain::create(device, win_size.x, win_size.y, image_count, vk::SwapchainKHR::null())?;
+        swapchain.create_depth_attachments(device, depth_format, swapchain.images.len() as _)?;
+        Ok(swapchain)
+    }
+
+    pub fn recreate(&mut self, device: &VulkanDevice, win_size: UVec2) -> VulkanResult<()> {
+        let mut swapchain = Swapchain::create(device, win_size.x, win_size.y, self.images.len() as _, self.handle)?;
+        swapchain.create_depth_attachments(device, self.depth_format, self.images.len() as _)?;
+        let mut old_swapchain = std::mem::replace(self, swapchain);
+        unsafe {
+            device.device_wait_idle()?;
+            old_swapchain.cleanup(device);
+        }
+        Ok(())
+    }
+
+    fn create(device: &VulkanDevice, width: u32, height: u32, image_count: u32, old_swapchain: vk::SwapchainKHR) -> VulkanResult<Self> {
         let surface_info = device.instance.query_surface_info(device.dev_info.phys_dev, device.surface)?;
         let surface_format = surface_info.find_surface_format();
         let present_mode = surface_info.find_present_mode(vk::PresentModeKHR::IMMEDIATE);

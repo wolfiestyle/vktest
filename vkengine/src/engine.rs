@@ -39,7 +39,7 @@ impl VulkanEngine {
         let device = VulkanDevice::new(window, app_name, device_selection)?;
         let depth_format = device.find_depth_format(false)?;
         let window_size = window.window_size().into();
-        let swapchain = device.create_swapchain(window_size, SWAPCHAIN_IMAGE_COUNT, depth_format)?;
+        let swapchain = Swapchain::new(&device, window_size, SWAPCHAIN_IMAGE_COUNT, depth_format)?;
         eprintln!("color_format: {:?}, depth_format: {depth_format:?}", swapchain.format);
 
         let main_cmd_pool = device.create_command_pool(device.dev_info.graphics_idx, vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)?;
@@ -268,7 +268,7 @@ impl VulkanEngine {
                 Ok((idx, _)) => idx,
                 Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
                     eprintln!("swapchain out of date");
-                    self.recreate_swapchain()?;
+                    self.swapchain.recreate(&self.device, self.window_size)?;
                     return Ok(false);
                 }
                 Err(e) => return Err(VkError::VulkanMsg("Failed to acquire swapchain image", e)),
@@ -317,21 +317,11 @@ impl VulkanEngine {
 
         if suboptimal || self.window_resized {
             eprintln!("swapchain suboptimal");
-            self.recreate_swapchain()?;
+            self.swapchain.recreate(&self.device, self.window_size)?;
             self.window_resized = false;
         }
 
         Ok(true)
-    }
-
-    fn recreate_swapchain(&mut self) -> VulkanResult<()> {
-        let new_swapchain = self.device.recreate_swapchain(self.window_size, &self.swapchain)?;
-        unsafe {
-            self.device.device_wait_idle()?;
-            self.swapchain.cleanup(&self.device);
-        }
-        self.swapchain = new_swapchain;
-        Ok(())
     }
 }
 
