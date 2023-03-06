@@ -1,5 +1,5 @@
 use crate::device::{VkBuffer, VulkanDevice};
-use crate::engine::{DrawPayload, Pipeline, PipelineMode, Shader, Texture, VulkanEngine};
+use crate::engine::{CmdbufAction, DrawPayload, Pipeline, PipelineMode, Shader, Texture, VulkanEngine};
 use crate::types::{Cleanup, ErrorDescription, VulkanResult};
 use ash::vk;
 use egui::epaint::{Primitive, Vertex};
@@ -110,7 +110,7 @@ impl UiRenderer {
 
     pub fn draw(&mut self, engine: &VulkanEngine) -> VulkanResult<DrawPayload> {
         let Some(run_output) = self.frame_output.take() else {
-            return Ok(DrawPayload::new(self.cmd_buffer.expect("draw called before run"), false, self.cmd_pool));
+            return Ok(DrawPayload::new(self.cmd_buffer.expect("draw called before run"), CmdbufAction::None));
         };
 
         self.platform_output = Some(run_output.platform_output);
@@ -124,7 +124,7 @@ impl UiRenderer {
         let mut drop_buffers = self.build_draw_commands(cmd_buffer, primitives, engine)?;
 
         let pool = self.cmd_pool;
-        let payload = DrawPayload::new_with_callback(cmd_buffer, false, self.cmd_pool, move |dev| unsafe {
+        let payload = DrawPayload::new_with_callback(cmd_buffer, CmdbufAction::None, move |dev| unsafe {
             drop_buffers.cleanup(dev);
             drop_textures.cleanup(dev);
             if let Some(cmdbuf) = old_cmdbuf {

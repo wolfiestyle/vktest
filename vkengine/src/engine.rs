@@ -245,7 +245,7 @@ impl VulkanEngine {
                 .describe_err("Failed waiting semaphore")?;
         }
         // all previous work for this frame is done at this point
-        frame.free_payload(&self.device);
+        frame.free_payload(&self.device)?;
         self.prev_frame_time = self.last_frame_time;
         self.last_frame_time = Instant::now();
 
@@ -563,33 +563,37 @@ impl PipelineMode {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum CmdbufAction {
+    None,
+    Reset,
+    Free(vk::CommandPool),
+}
+
 pub struct DrawPayload {
     pub cmd_buffer: vk::CommandBuffer,
-    pub free_cmdbuf: bool,
-    pub source_pool: vk::CommandPool,
+    pub cmdbuf_action: CmdbufAction,
     pub on_frame_finish: Option<Box<dyn FnOnce(&VulkanDevice) + Send + Sync>>,
 }
 
 impl DrawPayload {
     #[inline]
-    pub fn new(cmd_buffer: vk::CommandBuffer, free_cmdbuf: bool, source_pool: vk::CommandPool) -> Self {
+    pub fn new(cmd_buffer: vk::CommandBuffer, cmdbuf_action: CmdbufAction) -> Self {
         Self {
             cmd_buffer,
-            free_cmdbuf,
-            source_pool,
+            cmdbuf_action,
             on_frame_finish: None,
         }
     }
 
     #[inline]
-    pub fn new_with_callback<F>(cmd_buffer: vk::CommandBuffer, free_cmdbuf: bool, source_pool: vk::CommandPool, on_frame_finish: F) -> Self
+    pub fn new_with_callback<F>(cmd_buffer: vk::CommandBuffer, cmdbuf_action: CmdbufAction, on_frame_finish: F) -> Self
     where
         F: FnOnce(&VulkanDevice) + Send + Sync + 'static,
     {
         Self {
             cmd_buffer,
-            free_cmdbuf,
-            source_pool,
+            cmdbuf_action,
             on_frame_finish: Some(Box::new(on_frame_finish)),
         }
     }
@@ -622,15 +626,22 @@ impl FrameState {
         })
     }
 
-    fn free_payload(&mut self, device: &VulkanDevice) {
+    fn free_payload(&mut self, device: &VulkanDevice) -> VulkanResult<()> {
         for pl in self.payload.drain(..) {
-            if pl.free_cmdbuf {
-                unsafe { device.free_command_buffers(pl.source_pool, &[pl.cmd_buffer]) };
+            match pl.cmdbuf_action {
+                CmdbufAction::None => (),
+                CmdbufAction::Reset => unsafe {
+                    device.reset_command_buffer(pl.cmd_buffer, Default::default())?;
+                },
+                CmdbufAction::Free(pool) => unsafe {
+                    device.free_command_buffers(pool, &[pl.cmd_buffer]);
+                },
             }
             if let Some(f) = pl.on_frame_finish {
                 f(device)
             }
         }
+        Ok(())
     }
 }
 

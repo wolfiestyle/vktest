@@ -1,5 +1,5 @@
 use crate::device::{UniformBuffer, VkBuffer, VulkanDevice};
-use crate::engine::{DrawPayload, Pipeline, PipelineMode, Shader, Texture, VulkanEngine};
+use crate::engine::{CmdbufAction, DrawPayload, Pipeline, PipelineMode, Shader, Texture, VulkanEngine};
 use crate::types::{Cleanup, VertexInput, VulkanResult};
 use ash::vk;
 use bytemuck_derive::{Pod, Zeroable};
@@ -123,8 +123,7 @@ impl MeshRenderer {
 
         Ok(DrawPayload::new(
             engine.end_secondary_draw_commands(cmd_buffer)?,
-            true,
-            self.cmd_pool,
+            CmdbufAction::Free(self.cmd_pool),
         ))
     }
 
@@ -257,8 +256,7 @@ impl SkyboxRenderer {
 
         Ok(DrawPayload::new(
             engine.end_secondary_draw_commands(cmd_buffer)?,
-            true,
-            self.cmd_pool,
+            CmdbufAction::Free(self.cmd_pool),
         ))
     }
 }
