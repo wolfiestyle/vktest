@@ -202,11 +202,6 @@ impl VulkanEngine {
         Ok(())
     }
 
-    pub fn create_secondary_command_buffer(&self, cmd_pool: vk::CommandPool) -> VulkanResult<vk::CommandBuffer> {
-        let cmd_buffer = self.device.create_command_buffers(cmd_pool, 1, vk::CommandBufferLevel::SECONDARY)?;
-        Ok(cmd_buffer[0])
-    }
-
     pub fn begin_secondary_draw_commands(&self, cmd_buffer: vk::CommandBuffer, flags: vk::CommandBufferUsageFlags) -> VulkanResult<()> {
         let mut render_info = vk::CommandBufferInheritanceRenderingInfo::builder()
             .color_attachment_formats(slice::from_ref(&self.swapchain.format))

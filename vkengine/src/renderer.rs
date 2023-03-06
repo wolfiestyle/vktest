@@ -76,7 +76,9 @@ impl MeshRenderer {
     }
 
     pub fn render(&mut self, engine: &VulkanEngine) -> VulkanResult<DrawPayload> {
-        let cmd_buffer = engine.create_secondary_command_buffer(self.cmd_pool)?;
+        let cmd_buffer = self
+            .device
+            .create_command_buffer(self.cmd_pool, vk::CommandBufferLevel::SECONDARY)?;
         engine.begin_secondary_draw_commands(cmd_buffer, vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)?;
 
         //FIXME: sync uniform buffer updates after frame finished
@@ -214,7 +216,9 @@ impl SkyboxRenderer {
     }
 
     pub fn render(&mut self, engine: &VulkanEngine) -> VulkanResult<DrawPayload> {
-        let cmd_buffer = engine.create_secondary_command_buffer(self.cmd_pool)?;
+        let cmd_buffer = self
+            .device
+            .create_command_buffer(self.cmd_pool, vk::CommandBufferLevel::SECONDARY)?;
         engine.begin_secondary_draw_commands(cmd_buffer, vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)?;
 
         let image_info = self.texture.descriptor();

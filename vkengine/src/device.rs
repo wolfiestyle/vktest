@@ -144,6 +144,11 @@ impl VulkanDevice {
         }
     }
 
+    #[inline]
+    pub fn create_command_buffer(&self, pool: vk::CommandPool, level: vk::CommandBufferLevel) -> VulkanResult<vk::CommandBuffer> {
+        self.create_command_buffers(pool, 1, level).map(|vec| vec[0])
+    }
+
     fn begin_one_time_commands(&self) -> VulkanResult<vk::CommandBuffer> {
         let cmd_buffer = self.create_command_buffers(self.transfer_pool, 1, vk::CommandBufferLevel::PRIMARY)?[0];
         let begin_info = vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);

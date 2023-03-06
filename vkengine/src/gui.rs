@@ -117,7 +117,9 @@ impl UiRenderer {
         let primitives = self.context.tessellate(run_output.shapes);
         let mut drop_textures = self.update_textures(run_output.textures_delta)?;
 
-        let cmd_buffer = engine.create_secondary_command_buffer(self.cmd_pool)?;
+        let cmd_buffer = self
+            .device
+            .create_command_buffer(self.cmd_pool, vk::CommandBufferLevel::SECONDARY)?;
         let old_cmdbuf = self.cmd_buffer.replace(cmd_buffer);
         let mut drop_buffers = self.build_draw_commands(cmd_buffer, primitives, engine)?;
 
