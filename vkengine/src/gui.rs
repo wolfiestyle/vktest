@@ -160,13 +160,17 @@ impl UiRenderer {
             }
         }
         // return textures to be deleted in next frame
-        let drop_textures: Vec<_> = tex_delta.free.iter().filter_map(|tex_id| self.textures.remove(tex_id)).collect();
+        let drop_textures = tex_delta
+            .free
+            .into_iter()
+            .filter_map(|tex_id| self.textures.remove(&tex_id))
+            .collect();
         Ok(drop_textures)
     }
 
     fn build_draw_commands(
         &mut self, cmd_buffer: vk::CommandBuffer, primitives: Vec<ClippedPrimitive>, engine: &VulkanEngine,
-    ) -> VulkanResult<Vec<VkBuffer>> {
+    ) -> VulkanResult<Option<VkBuffer>> {
         // get combined buffer size for a single shared allocation
         let (total_verts, total_idx) = primitives.iter().fold((0, 0), |acc, prim| match prim.primitive {
             Primitive::Mesh(ref mesh) => (acc.0 + mesh.vertices.len(), acc.1 + mesh.indices.len()),
@@ -176,7 +180,7 @@ impl UiRenderer {
         let total_bytes = total_vert_size + total_idx * size_of::<u32>();
         // allocate nearest power of two sized buffer if necessary
         let device = &*self.device;
-        let mut drop_buffers = vec![];
+        let mut drop_buffer = None;
         if total_bytes as u64 > self.buffer.size() {
             let new_size = 1u64 << ((total_bytes - 1).ilog2() + 1);
             let new_buffer = device.allocate_buffer(
@@ -185,7 +189,7 @@ impl UiRenderer {
                 MemoryLocation::CpuToGpu,
                 "UiRenderer buffer",
             )?;
-            drop_buffers.push(std::mem::replace(&mut self.buffer, new_buffer));
+            drop_buffer = Some(std::mem::replace(&mut self.buffer, new_buffer));
         }
         // build a command buffer from the primitives
         engine.begin_secondary_draw_commands(cmd_buffer, vk::CommandBufferUsageFlags::SIMULTANEOUS_USE)?;
@@ -243,7 +247,7 @@ impl UiRenderer {
         }
         device.debug(|d| d.cmd_end_label(cmd_buffer));
         engine.end_secondary_draw_commands(cmd_buffer)?;
-        Ok(drop_buffers)
+        Ok(drop_buffer)
     }
 }
 
