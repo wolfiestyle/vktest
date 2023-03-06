@@ -1879,6 +1879,7 @@ dependencies = [
  "structopt",
  "vkengine",
  "winit",
+ "yastl",
 ]
 
 [[package]]
@@ -2252,6 +2253,16 @@ name = "xmlparser"
 version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4d25c75bf9ea12c4040a97f829154768bbbce366287e2dc044af160cd79a13fd"
+
+[[package]]
+name = "yastl"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8ca6c5a4d66c1a9ea261811cf4773c27343de7e5033e1b75ea3f297dc7db3c1a"
+dependencies = [
+ "flume",
+ "scopeguard",
+]
 
 [[package]]
 name = "zune-inflate"

@@ -20,7 +20,6 @@ pub struct VulkanEngine {
     window_resized: bool,
     pub(crate) swapchain: Swapchain,
     main_cmd_pool: vk::CommandPool,
-    pub(crate) secondary_cmd_pool: vk::CommandPool,
     main_cmd_buffers: Vec<vk::CommandBuffer>,
     frame_state: Vec<FrameState>,
     current_frame: u64,
@@ -43,7 +42,6 @@ impl VulkanEngine {
         eprintln!("color_format: {:?}, depth_format: {depth_format:?}", swapchain.format);
 
         let main_cmd_pool = device.create_command_pool(device.dev_info.graphics_idx, vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)?;
-        let secondary_cmd_pool = device.create_command_pool(device.dev_info.graphics_idx, vk::CommandPoolCreateFlags::TRANSIENT)?;
         let main_cmd_buffers =
             device.create_command_buffers(main_cmd_pool, MAX_FRAMES_IN_FLIGHT as u32, vk::CommandBufferLevel::PRIMARY)?;
         let frame_state = (0..MAX_FRAMES_IN_FLIGHT)
@@ -61,7 +59,6 @@ impl VulkanEngine {
             window_resized: false,
             swapchain,
             main_cmd_pool,
-            secondary_cmd_pool,
             main_cmd_buffers,
             frame_state,
             current_frame: 0,
@@ -205,10 +202,8 @@ impl VulkanEngine {
         Ok(())
     }
 
-    pub fn create_secondary_command_buffer(&self) -> VulkanResult<vk::CommandBuffer> {
-        let cmd_buffer = self
-            .device
-            .create_command_buffers(self.secondary_cmd_pool, 1, vk::CommandBufferLevel::SECONDARY)?;
+    pub fn create_secondary_command_buffer(&self, cmd_pool: vk::CommandPool) -> VulkanResult<vk::CommandBuffer> {
+        let cmd_buffer = self.device.create_command_buffers(cmd_pool, 1, vk::CommandBufferLevel::SECONDARY)?;
         Ok(cmd_buffer[0])
     }
 
@@ -255,7 +250,7 @@ impl VulkanEngine {
                 .describe_err("Failed waiting semaphore")?;
         }
         // all previous work for this frame is done at this point
-        frame.free_payload(&self.device, self.secondary_cmd_pool);
+        frame.free_payload(&self.device);
         self.prev_frame_time = self.last_frame_time;
         self.last_frame_time = Instant::now();
 
@@ -331,7 +326,6 @@ impl Drop for VulkanEngine {
             self.device.device_wait_idle().unwrap();
             self.frame_state.cleanup(&self.device);
             self.main_cmd_pool.cleanup(&self.device);
-            self.secondary_cmd_pool.cleanup(&self.device);
             self.swapchain.cleanup(&self.device);
             self.samplers.lock().unwrap().cleanup(&self.device);
             self.device.destroy_pipeline_cache(self.pipeline_cache, None);
@@ -576,28 +570,31 @@ impl PipelineMode {
 
 pub struct DrawPayload {
     pub cmd_buffer: vk::CommandBuffer,
-    pub one_time_submit: bool,
-    pub on_frame_finish: Option<Box<dyn FnOnce(&VulkanDevice)>>,
+    pub free_cmdbuf: bool,
+    pub source_pool: vk::CommandPool,
+    pub on_frame_finish: Option<Box<dyn FnOnce(&VulkanDevice) + Send + Sync>>,
 }
 
 impl DrawPayload {
     #[inline]
-    pub fn new(cmd_buffer: vk::CommandBuffer, one_time_submit: bool) -> Self {
+    pub fn new(cmd_buffer: vk::CommandBuffer, free_cmdbuf: bool, source_pool: vk::CommandPool) -> Self {
         Self {
             cmd_buffer,
-            one_time_submit,
+            free_cmdbuf,
+            source_pool,
             on_frame_finish: None,
         }
     }
 
     #[inline]
-    pub fn new_with_callback<F>(cmd_buffer: vk::CommandBuffer, one_time_submit: bool, on_frame_finish: F) -> Self
+    pub fn new_with_callback<F>(cmd_buffer: vk::CommandBuffer, free_cmdbuf: bool, source_pool: vk::CommandPool, on_frame_finish: F) -> Self
     where
-        F: FnOnce(&VulkanDevice) + 'static,
+        F: FnOnce(&VulkanDevice) + Send + Sync + 'static,
     {
         Self {
             cmd_buffer,
-            one_time_submit,
+            free_cmdbuf,
+            source_pool,
             on_frame_finish: Some(Box::new(on_frame_finish)),
         }
     }
@@ -630,10 +627,10 @@ impl FrameState {
         })
     }
 
-    fn free_payload(&mut self, device: &VulkanDevice, cmd_pool: vk::CommandPool) {
+    fn free_payload(&mut self, device: &VulkanDevice) {
         for pl in self.payload.drain(..) {
-            if pl.one_time_submit {
-                unsafe { device.free_command_buffers(cmd_pool, &[pl.cmd_buffer]) };
+            if pl.free_cmdbuf {
+                unsafe { device.free_command_buffers(pl.source_pool, &[pl.cmd_buffer]) };
             }
             if let Some(f) = pl.on_frame_finish {
                 f(device)

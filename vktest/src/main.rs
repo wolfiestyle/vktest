@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use structopt::StructOpt;
 use vkengine::gui::{egui, UiRenderer};
-use vkengine::{CameraController, MeshRenderer, SkyboxRenderer, VulkanEngine, VulkanResult};
+use vkengine::{CameraController, MeshRenderer, SkyboxRenderer, VkError, VulkanEngine, VulkanResult};
 use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
@@ -68,6 +68,8 @@ fn main() -> VulkanResult<()> {
 
     let mut gui = UiRenderer::new(&event_loop, &vk_app)?;
     let mut show_gui = true;
+
+    let thread_pool = yastl::Pool::new(4);
 
     let mut prev_time = Instant::now();
     let mut prev_frame_count = 0;
@@ -156,11 +158,16 @@ fn main() -> VulkanResult<()> {
             window.request_redraw();
         }
         Event::RedrawRequested(_) => {
-            let draw_cmds = [
-                object.render(&vk_app).unwrap(),
-                skybox.render(&vk_app).unwrap(),
-                gui.draw(&vk_app).unwrap(),
-            ];
+            let mut out1 = VkError::UnfinishedJob.into();
+            let mut out2 = VkError::UnfinishedJob.into();
+            let mut out3 = VkError::UnfinishedJob.into();
+            thread_pool.scoped(|scope| {
+                scope.execute(|| out1 = object.render(&vk_app));
+                scope.execute(|| out2 = skybox.render(&vk_app));
+                scope.execute(|| out3 = gui.draw(&vk_app));
+            });
+
+            let draw_cmds = [out1.unwrap(), out2.unwrap(), out3.unwrap()];
 
             vk_app.submit_draw_commands(draw_cmds).unwrap();
 

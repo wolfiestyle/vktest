@@ -13,6 +13,7 @@ pub enum VkError {
     MemoryAlloc(gpu_allocator::AllocationError),
     EngineError(&'static str),
     UnsuitableDevice, // used internally
+    UnfinishedJob,    // used internally
 }
 
 impl std::fmt::Display for VkError {
@@ -24,6 +25,7 @@ impl std::fmt::Display for VkError {
             Self::MemoryAlloc(err) => write!(f, "Memory allocation error: {err}"),
             Self::EngineError(desc) => write!(f, "{desc}"),
             Self::UnsuitableDevice => write!(f, "Unsuitable device"),
+            Self::UnfinishedJob => write!(f, "Unfinished job"),
         }
     }
 }
@@ -36,6 +38,12 @@ impl std::error::Error for VkError {
             Self::MemoryAlloc(err) => Some(err),
             _ => None,
         }
+    }
+}
+
+impl<T> From<VkError> for VulkanResult<T> {
+    fn from(value: VkError) -> Self {
+        Self::Err(value)
     }
 }
 

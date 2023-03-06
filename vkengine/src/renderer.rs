@@ -17,6 +17,7 @@ pub struct MeshRenderer {
     index_count: u32,
     texture: Texture,
     uniforms: UniformBuffer<ObjectUniforms>,
+    cmd_pool: vk::CommandPool,
     pub model: Affine3A,
 }
 
@@ -58,6 +59,7 @@ impl MeshRenderer {
         let texture = Texture::new(&device, img_dims.0, img_dims.1, vk::Format::R8G8B8A8_SRGB, img_data, sampler)?;
 
         let uniforms = UniformBuffer::new(&device)?;
+        let cmd_pool = device.create_command_pool(device.dev_info.graphics_idx, vk::CommandPoolCreateFlags::TRANSIENT)?;
 
         Ok(Self {
             device,
@@ -68,12 +70,13 @@ impl MeshRenderer {
             index_count: indices.len() as _,
             texture,
             uniforms,
+            cmd_pool,
             model: Affine3A::IDENTITY,
         })
     }
 
     pub fn render(&mut self, engine: &VulkanEngine) -> VulkanResult<DrawPayload> {
-        let cmd_buffer = engine.create_secondary_command_buffer()?;
+        let cmd_buffer = engine.create_secondary_command_buffer(self.cmd_pool)?;
         engine.begin_secondary_draw_commands(cmd_buffer, vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)?;
 
         //FIXME: sync uniform buffer updates after frame finished
@@ -116,7 +119,11 @@ impl MeshRenderer {
             self.device.debug(|d| d.cmd_end_label(cmd_buffer));
         }
 
-        Ok(DrawPayload::new(engine.end_secondary_draw_commands(cmd_buffer)?, true))
+        Ok(DrawPayload::new(
+            engine.end_secondary_draw_commands(cmd_buffer)?,
+            true,
+            self.cmd_pool,
+        ))
     }
 
     fn calc_uniforms(&self, engine: &VulkanEngine) -> ObjectUniforms {
@@ -138,6 +145,7 @@ impl Drop for MeshRenderer {
             self.pipeline.cleanup(&self.device);
             self.desc_layout.cleanup(&self.device);
             self.uniforms.cleanup(&self.device);
+            self.cmd_pool.cleanup(&self.device);
         }
     }
 }
@@ -153,6 +161,7 @@ pub struct SkyboxRenderer {
     desc_layout: vk::DescriptorSetLayout,
     pipeline: Pipeline,
     texture: Texture,
+    cmd_pool: vk::CommandPool,
 }
 
 impl SkyboxRenderer {
@@ -193,16 +202,19 @@ impl SkyboxRenderer {
             vk::Sampler::null(),
         )?;
 
+        let cmd_pool = device.create_command_pool(device.dev_info.graphics_idx, vk::CommandPoolCreateFlags::TRANSIENT)?;
+
         Ok(Self {
             device,
             desc_layout,
             pipeline,
             texture,
+            cmd_pool,
         })
     }
 
     pub fn render(&mut self, engine: &VulkanEngine) -> VulkanResult<DrawPayload> {
-        let cmd_buffer = engine.create_secondary_command_buffer()?;
+        let cmd_buffer = engine.create_secondary_command_buffer(self.cmd_pool)?;
         engine.begin_secondary_draw_commands(cmd_buffer, vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)?;
 
         let image_info = self.texture.descriptor();
@@ -239,7 +251,11 @@ impl SkyboxRenderer {
             self.device.debug(|d| d.cmd_end_label(cmd_buffer));
         }
 
-        Ok(DrawPayload::new(engine.end_secondary_draw_commands(cmd_buffer)?, true))
+        Ok(DrawPayload::new(
+            engine.end_secondary_draw_commands(cmd_buffer)?,
+            true,
+            self.cmd_pool,
+        ))
     }
 }
 
@@ -250,6 +266,7 @@ impl Drop for SkyboxRenderer {
             self.texture.cleanup(&self.device);
             self.pipeline.cleanup(&self.device);
             self.desc_layout.cleanup(&self.device);
+            self.cmd_pool.cleanup(&self.device);
         }
     }
 }

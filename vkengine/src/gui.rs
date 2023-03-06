@@ -31,6 +31,7 @@ pub struct UiRenderer {
     pipeline: Pipeline,
     set_layout: vk::DescriptorSetLayout,
     buffer: VkBuffer,
+    cmd_pool: vk::CommandPool,
     cmd_buffer: Option<vk::CommandBuffer>,
     last_draw_time: Option<Instant>,
 }
@@ -73,6 +74,8 @@ impl UiRenderer {
             "UiRenderer buffer",
         )?;
 
+        let cmd_pool = device.create_command_pool(device.dev_info.graphics_idx, Default::default())?;
+
         Ok(Self {
             device,
             context: egui::Context::default(),
@@ -83,6 +86,7 @@ impl UiRenderer {
             pipeline,
             set_layout,
             buffer,
+            cmd_pool,
             cmd_buffer: None,
             last_draw_time: None,
         })
@@ -106,19 +110,19 @@ impl UiRenderer {
 
     pub fn draw(&mut self, engine: &VulkanEngine) -> VulkanResult<DrawPayload> {
         let Some(run_output) = self.frame_output.take() else {
-            return Ok(DrawPayload::new(self.cmd_buffer.expect("draw called before run"), false));
+            return Ok(DrawPayload::new(self.cmd_buffer.expect("draw called before run"), false, self.cmd_pool));
         };
 
         self.platform_output = Some(run_output.platform_output);
         let primitives = self.context.tessellate(run_output.shapes);
         let mut drop_textures = self.update_textures(run_output.textures_delta)?;
 
-        let cmd_buffer = engine.create_secondary_command_buffer()?;
+        let cmd_buffer = engine.create_secondary_command_buffer(self.cmd_pool)?;
         let old_cmdbuf = self.cmd_buffer.replace(cmd_buffer);
         let mut drop_buffers = self.build_draw_commands(cmd_buffer, primitives, engine)?;
 
-        let pool = engine.secondary_cmd_pool; //FIXME: use a separate command pool
-        let payload = DrawPayload::new_with_callback(cmd_buffer, false, move |dev| unsafe {
+        let pool = self.cmd_pool;
+        let payload = DrawPayload::new_with_callback(cmd_buffer, false, self.cmd_pool, move |dev| unsafe {
             drop_buffers.cleanup(dev);
             drop_textures.cleanup(dev);
             if let Some(cmdbuf) = old_cmdbuf {
@@ -259,6 +263,7 @@ impl Drop for UiRenderer {
             self.pipeline.cleanup(&self.device);
             self.set_layout.cleanup(&self.device);
             self.buffer.cleanup(&self.device);
+            self.cmd_pool.cleanup(&self.device);
         }
     }
 }
