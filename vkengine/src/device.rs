@@ -586,7 +586,7 @@ impl Drop for VulkanDevice {
     fn drop(&mut self) {
         unsafe {
             ManuallyDrop::drop(&mut self.allocator);
-            self.device.destroy_command_pool(self.transfer_pool, None);
+            self.transfer_pool.cleanup(&self.device);
             self.instance.surface_utils.destroy_surface(self.surface, None);
             self.device.destroy_device(None);
         }
@@ -775,12 +775,8 @@ impl std::ops::Deref for Swapchain {
 
 impl Cleanup<VulkanDevice> for Swapchain {
     unsafe fn cleanup(&mut self, device: &VulkanDevice) {
-        for &imgview in &self.image_views {
-            device.destroy_image_view(imgview, None);
-        }
-        for &img in &self.depth_imgviews {
-            device.destroy_image_view(img, None);
-        }
+        self.image_views.cleanup(device);
+        self.depth_imgviews.cleanup(device);
         self.depth_images.cleanup(device);
         device.swapchain_fn.destroy_swapchain(self.handle, None);
     }

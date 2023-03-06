@@ -330,12 +330,10 @@ impl Drop for VulkanEngine {
         unsafe {
             self.device.device_wait_idle().unwrap();
             self.frame_state.cleanup(&self.device);
-            self.device.destroy_command_pool(self.main_cmd_pool, None);
-            self.device.destroy_command_pool(self.secondary_cmd_pool, None);
+            self.main_cmd_pool.cleanup(&self.device);
+            self.secondary_cmd_pool.cleanup(&self.device);
             self.swapchain.cleanup(&self.device);
-            for &sampler in self.samplers.lock().unwrap().values() {
-                self.device.destroy_sampler(sampler, None);
-            }
+            self.samplers.lock().unwrap().cleanup(&self.device);
             self.device.destroy_pipeline_cache(self.pipeline_cache, None);
         }
     }
@@ -692,7 +690,7 @@ impl Texture {
 
 impl Cleanup<VulkanDevice> for Texture {
     unsafe fn cleanup(&mut self, device: &VulkanDevice) {
-        device.destroy_image_view(self.imgview, None);
+        self.imgview.cleanup(device);
         self.image.cleanup(device);
     }
 }

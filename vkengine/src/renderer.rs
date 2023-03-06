@@ -136,7 +136,7 @@ impl Drop for MeshRenderer {
             self.index_buffer.cleanup(&self.device);
             self.texture.cleanup(&self.device);
             self.pipeline.cleanup(&self.device);
-            self.device.destroy_descriptor_set_layout(self.desc_layout, None);
+            self.desc_layout.cleanup(&self.device);
             self.uniforms.cleanup(&self.device);
         }
     }
@@ -249,7 +249,7 @@ impl Drop for SkyboxRenderer {
             self.device.device_wait_idle().unwrap();
             self.texture.cleanup(&self.device);
             self.pipeline.cleanup(&self.device);
-            self.device.destroy_descriptor_set_layout(self.desc_layout, None);
+            self.desc_layout.cleanup(&self.device);
         }
     }
 }

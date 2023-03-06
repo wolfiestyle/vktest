@@ -257,7 +257,7 @@ impl Drop for UiRenderer {
             self.device.device_wait_idle().unwrap();
             self.textures.cleanup(&self.device);
             self.pipeline.cleanup(&self.device);
-            self.device.destroy_descriptor_set_layout(self.set_layout, None);
+            self.set_layout.cleanup(&self.device);
             self.buffer.cleanup(&self.device);
         }
     }
