@@ -64,18 +64,17 @@ fn main() -> VulkanResult<()> {
 
     let mut objects = scenes
         .iter()
-        .map(|scene| {
+        .flat_map(|scene| {
             scene.models.iter().map(|model| {
                 let texture = model.material().pbr.base_color_texture.clone().unwrap();
                 //HACK: vertices are returned on a non-Copy, non repr-C struct, so can't feed it directly
                 let (p, verts, s) = unsafe { model.vertices().align_to::<VertexTemp>() };
-                assert!(p.len() == 0 && s.len() == 0);
+                assert!(p.is_empty() && s.is_empty());
                 //also indices are returned in usize for some reason
                 let indices: Vec<_> = model.indices().unwrap().iter().map(|&idx| idx as u32).collect();
                 MeshRenderer::new(&vk_app, verts, &indices, texture.dimensions(), texture.as_raw())
             })
         })
-        .flatten()
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
     let mut mesh_enabled = vec![true; objects.len()];

@@ -3,7 +3,7 @@ use crate::engine::{CmdbufAction, DrawPayload, Pipeline, PipelineMode, Shader, T
 use crate::types::{Cleanup, VertexInput, VulkanResult};
 use ash::vk;
 use bytemuck_derive::{Pod, Zeroable};
-use glam::{Affine3A, Mat4, Vec3, Vec4};
+use glam::{Affine3A, Mat4, Vec4};
 use inline_spirv::include_spirv;
 use std::slice;
 use std::sync::Arc;
