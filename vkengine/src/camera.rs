@@ -46,8 +46,8 @@ impl Camera {
     }
 
     pub fn set_rotation(&mut self, pitch: f32, yaw: f32) {
-        let quat = Quat::from_euler(EulerRot::ZXY, yaw, -pitch, 0.0);
-        self.direction = quat * Vec3::Y;
+        let quat = Quat::from_euler(EulerRot::YXZ, yaw, pitch, 0.0);
+        self.direction = quat * Vec3::Z;
     }
 
     pub(crate) fn get_view_transform(&self) -> Affine3A {
@@ -64,8 +64,8 @@ impl Default for Camera {
     fn default() -> Self {
         Self {
             position: Vec3::ZERO,
-            direction: Vec3::Y,
-            up: Vec3::NEG_Z,
+            direction: Vec3::Z,
+            up: Vec3::NEG_Y,
             fov: 60.0,
             near: 0.1,
             far: 1000.0,

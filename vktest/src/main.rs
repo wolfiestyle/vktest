@@ -91,7 +91,7 @@ fn main() -> VulkanResult<()> {
     let mut fps = 0;
     let mut controller = CameraController::new();
     //TODO: compute these from current camera direction
-    controller.yaw = 135.0;
+    controller.yaw = 225.0;
     controller.pitch = 35.0;
 
     let mut fullscreen = false;
