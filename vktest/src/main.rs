@@ -163,6 +163,21 @@ fn main() -> VulkanResult<()> {
                             ui.label("fov: ");
                             ui.add(egui::Slider::new(&mut vk_app.camera.fov, 10.0..=120.0));
                         });
+                        ui.label("Sunlight:");
+                        ui.horizontal(|ui| {
+                            ui.label("X");
+                            ui.add(egui::DragValue::new(&mut vk_app.sunlight.x).speed(0.1));
+                            ui.label("Y");
+                            ui.add(egui::DragValue::new(&mut vk_app.sunlight.y).speed(0.1));
+                            ui.label("Z");
+                            ui.add(egui::DragValue::new(&mut vk_app.sunlight.z).speed(0.1));
+                        });
+                        if ui.button("Normalize").clicked() {
+                            if let Some(v) = vk_app.sunlight.try_normalize() {
+                                vk_app.sunlight = v;
+                            }
+                        }
+                        ui.add_space(10.0);
                         if ui.button("Exit").clicked() {
                             *control_flow = ControlFlow::Exit;
                         }

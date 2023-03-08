@@ -4,7 +4,7 @@ use crate::instance::DeviceSelection;
 use crate::types::*;
 use ash::vk;
 use cstr::cstr;
-use glam::UVec2;
+use glam::{UVec2, Vec3};
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use std::collections::HashMap;
 use std::slice;
@@ -28,6 +28,7 @@ pub struct VulkanEngine {
     prev_frame_time: Instant,
     last_frame_time: Instant,
     pub camera: Camera,
+    pub sunlight: Vec3,
 }
 
 impl VulkanEngine {
@@ -67,6 +68,7 @@ impl VulkanEngine {
             prev_frame_time: now,
             last_frame_time: now,
             camera,
+            sunlight: Vec3::Y,
         })
     }
 

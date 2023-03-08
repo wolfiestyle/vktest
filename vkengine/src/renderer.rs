@@ -3,7 +3,7 @@ use crate::engine::{CmdbufAction, DrawPayload, Pipeline, PipelineMode, Shader, T
 use crate::types::{Cleanup, VertexInput, VulkanResult};
 use ash::vk;
 use bytemuck_derive::{Pod, Zeroable};
-use glam::{Affine3A, Mat4};
+use glam::{Affine3A, Mat4, Vec3, Vec4};
 use inline_spirv::include_spirv;
 use std::slice;
 use std::sync::Arc;
@@ -36,7 +36,7 @@ impl MeshRenderer {
                 .binding(0)
                 .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
                 .descriptor_count(1)
-                .stage_flags(vk::ShaderStageFlags::VERTEX)
+                .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
                 .build(),
             vk::DescriptorSetLayoutBinding::builder()
                 .binding(1)
@@ -132,6 +132,7 @@ impl MeshRenderer {
         let proj = engine.camera.get_projection(engine.swapchain.aspect());
         ObjectUniforms {
             mvp: proj * view * self.model,
+            light_dir: engine.sunlight.extend(0.0),
         }
     }
 }
@@ -155,6 +156,7 @@ impl Drop for MeshRenderer {
 #[derive(Debug, Clone, Copy, Default, Pod, Zeroable)]
 struct ObjectUniforms {
     mvp: Mat4,
+    light_dir: Vec4,
 }
 
 pub struct SkyboxRenderer {
