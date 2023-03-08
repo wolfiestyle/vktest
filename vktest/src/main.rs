@@ -78,6 +78,7 @@ fn main() -> VulkanResult<()> {
         .flatten()
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
+    let mut mesh_enabled = vec![true; objects.len()];
 
     let mut skybox = SkyboxRenderer::new(&vk_app, skybox[0].dimensions(), &skybox_raw)?;
 
@@ -178,6 +179,10 @@ fn main() -> VulkanResult<()> {
                             }
                         }
                         ui.add_space(10.0);
+                        for (i, enable) in mesh_enabled.iter_mut().enumerate() {
+                            ui.add(egui::Checkbox::new(enable, format!("Mesh {i}")));
+                        }
+                        ui.add_space(10.0);
                         if ui.button("Exit").clicked() {
                             *control_flow = ControlFlow::Exit;
                         }
@@ -188,11 +193,19 @@ fn main() -> VulkanResult<()> {
             window.request_redraw();
         }
         Event::RedrawRequested(_) => {
-            let mut draw_cmds = vec![];
+            let mut draw_cmds = Vec::with_capacity(objects.len());
             let mut skybox_cmds = VkError::UnfinishedJob.into();
             let mut gui_cmds = VkError::UnfinishedJob.into();
             thread_pool.scoped(|scope| {
-                scope.execute(|| draw_cmds = objects.iter_mut().map(|obj| obj.render(&vk_app)).collect());
+                scope.execute(|| {
+                    draw_cmds.extend(
+                        objects
+                            .iter_mut()
+                            .enumerate()
+                            .filter(|&(i, _)| mesh_enabled[i])
+                            .map(|(_, obj)| obj.render(&vk_app)),
+                    )
+                });
                 scope.execute(|| skybox_cmds = skybox.render(&vk_app));
                 scope.execute(|| gui_cmds = gui.draw(&vk_app));
             });
