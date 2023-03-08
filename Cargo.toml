@@ -3,3 +3,8 @@ members = [
     "vkengine",
     "vktest",
 ]
+
+# Always compile deps with optimization.
+# Some crates, like image, are *really* slow on unoptimized debug mode
+[profile.dev.package."*"]
+opt-level = 1
