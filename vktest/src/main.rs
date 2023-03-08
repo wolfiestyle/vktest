@@ -1,10 +1,8 @@
-use std::fs::File;
-use std::io::BufReader;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use structopt::StructOpt;
 use vkengine::gui::{egui, UiRenderer};
-use vkengine::{CameraController, MeshRenderer, SkyboxRenderer, VkError, VulkanEngine, VulkanResult};
+use vkengine::{CameraController, MeshRenderer, SkyboxRenderer, VertexTemp, VkError, VulkanEngine, VulkanResult};
 use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
@@ -12,10 +10,8 @@ use winit::window::Fullscreen;
 
 #[derive(StructOpt)]
 struct Arguments {
-    #[structopt(short, long, parse(from_os_str), help = "OBJ model file")]
+    #[structopt(short, long, parse(from_os_str), help = "glTF model file")]
     model: Option<PathBuf>,
-    #[structopt(short, long, parse(from_os_str), help = "Texture for the model")]
-    texture: Option<PathBuf>,
     #[structopt(short, long, parse(from_os_str), help = "Directory with cubemap images for the skybox")]
     skybox_dir: Option<PathBuf>,
 }
@@ -23,13 +19,16 @@ struct Arguments {
 fn main() -> VulkanResult<()> {
     let args = Arguments::from_args();
 
-    let file = BufReader::new(File::open(args.model.unwrap_or_else(|| "data/model.obj".into())).unwrap());
-    let model: obj::Obj<obj::TexturedVertex, u32> = obj::load_obj(file).unwrap();
-    eprintln!("loaded {} vertices, {} indices", model.vertices.len(), model.indices.len());
-    let image = image::open(args.texture.unwrap_or_else(|| "data/texture.png".into()))
-        .unwrap()
-        .into_rgba8();
-    eprintln!("loaded image: {} x {}", image.width(), image.height());
+    let scenes = easy_gltf::load(args.model.unwrap_or_else(|| "data/model.glb".into())).unwrap();
+    for scene in &scenes {
+        for model in &scene.models {
+            println!(
+                "loaded model: vertices={} indices={}",
+                model.vertices().len(),
+                model.indices().unwrap().len()
+            );
+        }
+    }
 
     let skybox_dir = args.skybox_dir.unwrap_or_else(|| "data/skybox".into());
     let skybox = std::thread::scope(|scope| {
@@ -63,7 +62,23 @@ fn main() -> VulkanResult<()> {
     vk_app.camera.position = [2.0, 2.0, 2.0].into();
     vk_app.camera.look_at([0.0; 3]);
 
-    let mut object = MeshRenderer::new(&vk_app, &model.vertices, &model.indices, image.dimensions(), image.as_raw())?;
+    let mut objects = scenes
+        .iter()
+        .map(|scene| {
+            scene.models.iter().map(|model| {
+                let texture = model.material().pbr.base_color_texture.clone().unwrap();
+                //HACK: vertices are returned on a non-Copy, non repr-C struct, so can't feed it directly
+                let (p, verts, s) = unsafe { model.vertices().align_to::<VertexTemp>() };
+                assert!(p.len() == 0 && s.len() == 0);
+                //also indices are returned in usize for some reason
+                let indices: Vec<_> = model.indices().unwrap().iter().map(|&idx| idx as u32).collect();
+                MeshRenderer::new(&vk_app, verts, &indices, texture.dimensions(), texture.as_raw())
+            })
+        })
+        .flatten()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+
     let mut skybox = SkyboxRenderer::new(&vk_app, skybox[0].dimensions(), &skybox_raw)?;
 
     let mut gui = UiRenderer::new(&event_loop, &vk_app)?;
@@ -158,18 +173,19 @@ fn main() -> VulkanResult<()> {
             window.request_redraw();
         }
         Event::RedrawRequested(_) => {
-            let mut out1 = VkError::UnfinishedJob.into();
-            let mut out2 = VkError::UnfinishedJob.into();
-            let mut out3 = VkError::UnfinishedJob.into();
+            let mut draw_cmds = vec![];
+            let mut skybox_cmds = VkError::UnfinishedJob.into();
+            let mut gui_cmds = VkError::UnfinishedJob.into();
             thread_pool.scoped(|scope| {
-                scope.execute(|| out1 = object.render(&vk_app));
-                scope.execute(|| out2 = skybox.render(&vk_app));
-                scope.execute(|| out3 = gui.draw(&vk_app));
+                scope.execute(|| draw_cmds = objects.iter_mut().map(|obj| obj.render(&vk_app)).collect());
+                scope.execute(|| skybox_cmds = skybox.render(&vk_app));
+                scope.execute(|| gui_cmds = gui.draw(&vk_app));
             });
 
-            let draw_cmds = [out1.unwrap(), out2.unwrap(), out3.unwrap()];
+            draw_cmds.push(skybox_cmds);
+            draw_cmds.push(gui_cmds);
 
-            vk_app.submit_draw_commands(draw_cmds).unwrap();
+            vk_app.submit_draw_commands(draw_cmds.into_iter().map(|res| res.unwrap())).unwrap();
 
             let cur_time = vk_app.get_frame_timestamp();
             if cur_time - prev_time > Duration::from_secs(1) {

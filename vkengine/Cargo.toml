@@ -17,6 +17,6 @@ bytemuck_derive = "1.4.0"
 gpu-allocator = { version = "0.22.0", features = ["vulkan"], default_features = false }
 winit = { version = "0.28.1", optional = true }
 egui = { version = "0.21.0", features = ["bytemuck"], optional = true }
+easy-gltf = { version = "1.0.0", optional = true }
 #TODO: remove these or turn them optional
 egui-winit = { version = "0.21.1" }
-obj-rs = "0.7.0"

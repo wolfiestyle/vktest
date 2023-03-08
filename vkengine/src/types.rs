@@ -252,7 +252,6 @@ impl_vertex!(tuple: A 0, B 1, C 2);
 impl_vertex!(tuple: A 0, B 1, C 2, D 3);
 impl_vertex!(tuple: A 0, B 1, C 2, D 3, E 4);
 impl_vertex!(tuple: A 0, B 1, C 2, D 3, E 4, F 5);
-impl_vertex!(struct obj::TexturedVertex: position, normal, texture);
 #[cfg(feature = "egui")]
 impl_vertex!(struct egui::epaint::Vertex: pos, uv, color);
 
@@ -302,3 +301,14 @@ impl_object_type!(vk::DescriptorPool, vk::ObjectType::DESCRIPTOR_POOL);
 impl_object_type!(vk::DescriptorSet, vk::ObjectType::DESCRIPTOR_SET);
 impl_object_type!(vk::Framebuffer, vk::ObjectType::FRAMEBUFFER);
 impl_object_type!(vk::CommandPool, vk::ObjectType::COMMAND_POOL);
+
+//HACK: same layout as easy_gltf's Vertex but with Copy
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct VertexTemp {
+    pub position: [f32; 3],
+    pub normal: [f32; 3],
+    pub tangent: [f32; 4],
+    pub tex_coords: [f32; 2],
+}
+
+impl_vertex!(struct VertexTemp: position, normal, tex_coords);
