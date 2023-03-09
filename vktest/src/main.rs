@@ -66,13 +66,20 @@ fn main() -> VulkanResult<()> {
         .iter()
         .flat_map(|scene| {
             scene.models.iter().map(|model| {
-                let texture = model.material().pbr.base_color_texture.clone().unwrap();
+                //FIXME: possible duplicate texture creation
+                let color_tex = model
+                    .material()
+                    .pbr
+                    .base_color_texture
+                    .as_ref()
+                    .map(|image| vk_app.create_texture(image.width(), image.height(), image.as_raw()).unwrap());
+                eprintln!("color tex: {}", color_tex.is_some());
                 //HACK: vertices are returned on a non-Copy, non repr-C struct, so can't feed it directly
                 let (p, verts, s) = unsafe { model.vertices().align_to::<VertexTemp>() };
                 assert!(p.is_empty() && s.is_empty());
                 //also indices are returned in usize for some reason
                 let indices: Vec<_> = model.indices().unwrap().iter().map(|&idx| idx as u32).collect();
-                MeshRenderer::new(&vk_app, verts, &indices, texture.dimensions(), texture.as_raw())
+                MeshRenderer::new(&vk_app, verts, &indices, color_tex.into())
             })
         })
         .collect::<Result<Vec<_>, _>>()

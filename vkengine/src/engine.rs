@@ -24,6 +24,7 @@ pub struct VulkanEngine {
     frame_state: Vec<FrameState>,
     current_frame: u64,
     samplers: Mutex<HashMap<SamplerOptions, vk::Sampler>>,
+    pub(crate) default_texture: Texture,
     pub(crate) pipeline_cache: vk::PipelineCache,
     prev_frame_time: Instant,
     last_frame_time: Instant,
@@ -49,12 +50,15 @@ impl VulkanEngine {
             .map(|_| FrameState::new(&device))
             .collect::<Result<Vec<_>, _>>()?;
 
+        let pixel = [255, 255, 255, 255];
+        let default_texture = Texture::new(&device, 1, 1, vk::Format::R8G8B8A8_UNORM, &pixel, vk::Sampler::null())?;
+
         let pipeline_cache = device.create_pipeline_cache(&[])?; //TODO: save/load cache data
 
         let camera = Camera::default();
         let now = Instant::now();
 
-        Ok(Self {
+        let mut this = Self {
             device: device.into(),
             window_size,
             window_resized: false,
@@ -63,13 +67,19 @@ impl VulkanEngine {
             main_cmd_buffers,
             frame_state,
             current_frame: 0,
+            default_texture,
             samplers: Default::default(),
             pipeline_cache,
             prev_frame_time: now,
             last_frame_time: now,
             camera,
             sunlight: Vec3::Y,
-        })
+        };
+
+        let sampler = this.get_sampler(vk::Filter::NEAREST, vk::Filter::NEAREST, vk::SamplerAddressMode::REPEAT)?;
+        this.default_texture.sampler = sampler;
+
+        Ok(this)
     }
 
     #[inline]
@@ -140,6 +150,11 @@ impl VulkanEngine {
                 Ok(sampler)
             }
         }
+    }
+
+    pub fn create_texture(&self, width: u32, height: u32, data: &[u8]) -> VulkanResult<Texture> {
+        let sampler = self.get_sampler(vk::Filter::LINEAR, vk::Filter::LINEAR, vk::SamplerAddressMode::REPEAT)?;
+        Texture::new(&self.device, width, height, vk::Format::R8G8B8A8_SRGB, data, sampler)
     }
 
     fn record_primary_command_buffer(
@@ -325,6 +340,7 @@ impl Drop for VulkanEngine {
             self.main_cmd_pool.cleanup(&self.device);
             self.swapchain.cleanup(&self.device);
             self.samplers.lock().unwrap().cleanup(&self.device);
+            self.default_texture.cleanup(&self.device);
             self.device.destroy_pipeline_cache(self.pipeline_cache, None);
         }
     }

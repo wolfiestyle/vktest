@@ -15,7 +15,7 @@ pub struct MeshRenderer {
     vertex_buffer: VkBuffer,
     index_buffer: VkBuffer,
     index_count: u32,
-    texture: Texture,
+    texture: Option<Texture>,
     uniforms: UniformBuffer<ObjectUniforms>,
     cmd_pool: vk::CommandPool,
     pub model: Affine3A,
@@ -23,7 +23,7 @@ pub struct MeshRenderer {
 
 impl MeshRenderer {
     pub fn new<V: VertexInput + Copy>(
-        engine: &VulkanEngine, vertices: &[V], indices: &[u32], img_dims: (u32, u32), img_data: &[u8],
+        engine: &VulkanEngine, vertices: &[V], indices: &[u32], texture: Option<Texture>,
     ) -> VulkanResult<Self> {
         let device = engine.device.clone();
         let mut shader = Shader::new(
@@ -55,9 +55,6 @@ impl MeshRenderer {
         let vertex_buffer = device.create_buffer_from_data(vertices, vk::BufferUsageFlags::VERTEX_BUFFER, "Vertex buffer")?;
         let index_buffer = device.create_buffer_from_data(indices, vk::BufferUsageFlags::INDEX_BUFFER, "Index buffer")?;
 
-        let sampler = engine.get_sampler(vk::Filter::LINEAR, vk::Filter::LINEAR, vk::SamplerAddressMode::REPEAT)?;
-        let texture = Texture::new(&device, img_dims.0, img_dims.1, vk::Format::R8G8B8A8_SRGB, img_data, sampler)?;
-
         let uniforms = UniformBuffer::new(&device)?;
         let cmd_pool = device.create_command_pool(device.dev_info.graphics_idx, vk::CommandPoolCreateFlags::TRANSIENT)?;
 
@@ -86,7 +83,7 @@ impl MeshRenderer {
         self.uniforms.write_uniforms(ubo)?;
 
         let buffer_info = self.uniforms.descriptor();
-        let image_info = self.texture.descriptor();
+        let image_info = self.texture.as_ref().unwrap_or(&engine.default_texture).descriptor();
         unsafe {
             // object
             self.device
