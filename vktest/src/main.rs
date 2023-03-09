@@ -19,13 +19,14 @@ struct Arguments {
 fn main() -> VulkanResult<()> {
     let args = Arguments::from_args();
 
-    let scenes = easy_gltf::load(args.model.unwrap_or_else(|| "data/model.glb".into())).unwrap();
-    for scene in &scenes {
+    let gltf_scenes = easy_gltf::load(args.model.unwrap_or_else(|| "data/model.glb".into())).unwrap();
+    for scene in &gltf_scenes {
         for model in &scene.models {
             println!(
-                "loaded model: vertices={} indices={}",
+                "loaded model: vertices={} indices={:?}, mode={:?}",
                 model.vertices().len(),
-                model.indices().unwrap().len()
+                model.indices().map(Vec::len),
+                model.mode()
             );
         }
     }
@@ -62,29 +63,34 @@ fn main() -> VulkanResult<()> {
     vk_app.camera.position = [2.0, 2.0, 2.0].into();
     vk_app.camera.look_at([0.0; 3]);
 
-    let mut objects = scenes
+    let mut scenes = gltf_scenes
         .iter()
-        .flat_map(|scene| {
-            scene.models.iter().map(|model| {
-                //FIXME: possible duplicate texture creation
-                let color_tex = model
-                    .material()
-                    .pbr
-                    .base_color_texture
-                    .as_ref()
-                    .map(|image| vk_app.create_texture(image.width(), image.height(), image.as_raw()).unwrap());
-                eprintln!("color tex: {}", color_tex.is_some());
-                //HACK: vertices are returned on a non-Copy, non repr-C struct, so can't feed it directly
-                let (p, verts, s) = unsafe { model.vertices().align_to::<VertexTemp>() };
-                assert!(p.is_empty() && s.is_empty());
-                //also indices are returned in usize for some reason
-                let indices = model.indices().map(|idx| idx.iter().map(|&idx| idx as u32).collect::<Vec<_>>());
-                MeshRenderer::new(&vk_app, verts, indices.as_deref(), color_tex.into())
-            })
+        .map(|scene| {
+            scene
+                .models
+                .iter()
+                .map(|model| {
+                    //FIXME: possible duplicate texture creation
+                    let color_tex = model
+                        .material()
+                        .pbr
+                        .base_color_texture
+                        .as_ref()
+                        .map(|image| vk_app.create_texture(image.width(), image.height(), image.as_raw()).unwrap());
+                    eprintln!("color tex: {}", color_tex.is_some());
+                    //HACK: vertices are returned on a non-Copy, non repr-C struct, so can't feed it directly
+                    let (p, verts, s) = unsafe { model.vertices().align_to::<VertexTemp>() };
+                    assert!(p.is_empty() && s.is_empty());
+                    //also indices are returned in usize for some reason
+                    let indices = model.indices().map(|idx| idx.iter().map(|&idx| idx as u32).collect::<Vec<_>>());
+                    MeshRenderer::new(&vk_app, verts, indices.as_deref(), color_tex.into())
+                })
+                .collect::<Result<Vec<_>, _>>()
         })
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
-    let mut mesh_enabled = vec![true; objects.len()];
+    let mut mesh_enabled: Vec<_> = scenes.iter().map(|objects| vec![true; objects.len()]).collect();
+    let mut cur_scene = 0;
 
     let mut skybox = SkyboxRenderer::new(&vk_app, skybox[0].dimensions(), &skybox_raw)?;
 
@@ -158,12 +164,19 @@ fn main() -> VulkanResult<()> {
 
             gui.run(&window, |ctx| {
                 egui::panel::SidePanel::left("main")
-                    .frame(egui::Frame::default().fill(egui::Color32::from_black_alpha(192)))
+                    .frame(egui::Frame::default().fill(egui::Color32::from_black_alpha(225)))
                     .resizable(false)
                     .show_animated(ctx, show_gui, |ui| {
                         ui.heading("VKtest 3D engine");
                         ui.label(format!("{fps} fps"));
                         ui.add_space(10.0);
+                        egui::ComboBox::from_label("Scene")
+                            .selected_text(format!("Scene {cur_scene}"))
+                            .show_ui(ui, |ui| {
+                                for i in 0..scenes.len() {
+                                    ui.selectable_value(&mut cur_scene, i, format!("Scene {i}"));
+                                }
+                            });
                         ui.label("Camera:");
                         ui.horizontal(|ui| {
                             ui.label("X");
@@ -194,8 +207,8 @@ fn main() -> VulkanResult<()> {
                             }
                         }
                         ui.add_space(10.0);
-                        ui.collapsing(format!("{} Meshes", mesh_enabled.len()), |ui| {
-                            for (i, enable) in mesh_enabled.iter_mut().enumerate() {
+                        ui.collapsing(format!("{} Meshes", mesh_enabled[cur_scene].len()), |ui| {
+                            for (i, enable) in mesh_enabled[cur_scene].iter_mut().enumerate() {
                                 ui.add(egui::Checkbox::new(enable, format!("Mesh {i}")));
                             }
                         });
@@ -210,6 +223,7 @@ fn main() -> VulkanResult<()> {
             window.request_redraw();
         }
         Event::RedrawRequested(_) => {
+            let objects = &mut scenes[cur_scene];
             let mut draw_cmds = Vec::with_capacity(objects.len());
             let mut skybox_cmds = VkError::UnfinishedJob.into();
             let mut gui_cmds = VkError::UnfinishedJob.into();
@@ -219,7 +233,7 @@ fn main() -> VulkanResult<()> {
                         objects
                             .iter_mut()
                             .enumerate()
-                            .filter(|&(i, _)| mesh_enabled[i])
+                            .filter(|&(i, _)| mesh_enabled[cur_scene][i])
                             .map(|(_, obj)| obj.render(&vk_app)),
                     )
                 });
