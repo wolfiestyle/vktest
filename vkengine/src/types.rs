@@ -1,5 +1,6 @@
 use ash::vk;
 use memoffset::{offset_of, offset_of_tuple};
+use std::sync::Arc;
 #[cfg(feature = "winit")]
 use winit::dpi::PhysicalSize;
 
@@ -110,6 +111,14 @@ impl<C, K, V: Cleanup<C>> Cleanup<C> for std::collections::HashMap<K, V> {
 impl<C, T: Cleanup<C>> Cleanup<C> for Option<T> {
     unsafe fn cleanup(&mut self, context: &C) {
         if let Some(item) = self {
+            item.cleanup(context);
+        }
+    }
+}
+
+impl<C, T: Cleanup<C>> Cleanup<C> for Arc<T> {
+    unsafe fn cleanup(&mut self, context: &C) {
+        if let Some(item) = Arc::get_mut(self) {
             item.cleanup(context);
         }
     }
