@@ -54,7 +54,7 @@ fn main() -> VulkanResult<()> {
     let event_loop = EventLoop::new();
     let window = winit::window::WindowBuilder::new()
         .with_title("vulkan test")
-        .with_inner_size(PhysicalSize::new(1024, 768))
+        .with_inner_size(PhysicalSize::new(1657, 1024))
         .build(&event_loop)
         .unwrap();
 
@@ -236,7 +236,6 @@ fn main() -> VulkanResult<()> {
             if cur_time - prev_time > Duration::from_secs(1) {
                 let frame_count = vk_app.get_frame_count();
                 fps = frame_count - prev_frame_count;
-                println!("{fps} fps, frame time {:?}", vk_app.get_frame_time());
                 prev_time = cur_time;
                 prev_frame_count = frame_count;
             }
