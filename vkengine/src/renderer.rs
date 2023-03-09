@@ -13,8 +13,8 @@ pub struct MeshRenderer {
     desc_layout: vk::DescriptorSetLayout,
     pipeline: Pipeline,
     vertex_buffer: VkBuffer,
-    index_buffer: VkBuffer,
-    index_count: u32,
+    index_buffer: Option<VkBuffer>,
+    elem_count: u32,
     texture: Option<Texture>,
     uniforms: UniformBuffer<ObjectUniforms>,
     cmd_pool: vk::CommandPool,
@@ -23,7 +23,7 @@ pub struct MeshRenderer {
 
 impl MeshRenderer {
     pub fn new<V: VertexInput + Copy>(
-        engine: &VulkanEngine, vertices: &[V], indices: &[u32], texture: Option<Texture>,
+        engine: &VulkanEngine, vertices: &[V], indices: Option<&[u32]>, texture: Option<Texture>,
     ) -> VulkanResult<Self> {
         let device = engine.device.clone();
         let mut shader = Shader::new(
@@ -53,7 +53,10 @@ impl MeshRenderer {
         unsafe { shader.cleanup(&device) };
 
         let vertex_buffer = device.create_buffer_from_data(vertices, vk::BufferUsageFlags::VERTEX_BUFFER, "Vertex buffer")?;
-        let index_buffer = device.create_buffer_from_data(indices, vk::BufferUsageFlags::INDEX_BUFFER, "Index buffer")?;
+        let index_buffer = indices
+            .map(|idx| device.create_buffer_from_data(idx, vk::BufferUsageFlags::INDEX_BUFFER, "Index buffer"))
+            .transpose()?;
+        let elem_count = indices.map(|idx| idx.len() as u32).unwrap_or_else(|| vertices.len() as u32);
 
         let uniforms = UniformBuffer::new(&device)?;
         let cmd_pool = device.create_command_pool(device.dev_info.graphics_idx, vk::CommandPoolCreateFlags::TRANSIENT)?;
@@ -64,7 +67,7 @@ impl MeshRenderer {
             pipeline,
             vertex_buffer,
             index_buffer,
-            index_count: indices.len() as _,
+            elem_count,
             texture,
             uniforms,
             cmd_pool,
@@ -112,9 +115,13 @@ impl MeshRenderer {
             );
             self.device
                 .cmd_bind_vertex_buffers(cmd_buffer, 0, slice::from_ref(&*self.vertex_buffer), &[0]);
-            self.device
-                .cmd_bind_index_buffer(cmd_buffer, *self.index_buffer, 0, vk::IndexType::UINT32);
-            self.device.cmd_draw_indexed(cmd_buffer, self.index_count, 1, 0, 0, 0);
+            if let Some(index_buffer) = &self.index_buffer {
+                self.device
+                    .cmd_bind_index_buffer(cmd_buffer, index_buffer.handle, 0, vk::IndexType::UINT32);
+                self.device.cmd_draw_indexed(cmd_buffer, self.elem_count, 1, 0, 0, 0);
+            } else {
+                self.device.cmd_draw(cmd_buffer, self.elem_count, 1, 0, 0);
+            }
             self.device.debug(|d| d.cmd_end_label(cmd_buffer));
         }
 

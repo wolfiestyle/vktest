@@ -78,8 +78,8 @@ fn main() -> VulkanResult<()> {
                 let (p, verts, s) = unsafe { model.vertices().align_to::<VertexTemp>() };
                 assert!(p.is_empty() && s.is_empty());
                 //also indices are returned in usize for some reason
-                let indices: Vec<_> = model.indices().unwrap().iter().map(|&idx| idx as u32).collect();
-                MeshRenderer::new(&vk_app, verts, &indices, color_tex.into())
+                let indices = model.indices().map(|idx| idx.iter().map(|&idx| idx as u32).collect::<Vec<_>>());
+                MeshRenderer::new(&vk_app, verts, indices.as_deref(), color_tex.into())
             })
         })
         .collect::<Result<Vec<_>, _>>()
