@@ -156,13 +156,22 @@ fn main() -> VulkanResult<()> {
                     .show_animated(ctx, show_gui, |ui| {
                         ui.heading("VKtest 3D engine");
                         ui.label(format!("{fps} fps"));
-                        ui.label(format!("frame {}", vk_app.get_frame_count()));
                         ui.add_space(10.0);
+                        ui.label("Camera:");
+                        ui.horizontal(|ui| {
+                            ui.label("X");
+                            ui.add(egui::DragValue::new(&mut vk_app.camera.position.x).speed(0.1));
+                            ui.label("Y");
+                            ui.add(egui::DragValue::new(&mut vk_app.camera.position.y).speed(0.1));
+                            ui.label("Z");
+                            ui.add(egui::DragValue::new(&mut vk_app.camera.position.z).speed(0.1));
+                        });
                         ui.checkbox(&mut controller.flying, "Flying");
                         ui.horizontal(|ui| {
                             ui.label("fov: ");
                             ui.add(egui::Slider::new(&mut vk_app.camera.fov, 10.0..=120.0));
                         });
+                        ui.add_space(10.0);
                         ui.label("Sunlight:");
                         ui.horizontal(|ui| {
                             ui.label("X");
@@ -178,9 +187,11 @@ fn main() -> VulkanResult<()> {
                             }
                         }
                         ui.add_space(10.0);
-                        for (i, enable) in mesh_enabled.iter_mut().enumerate() {
-                            ui.add(egui::Checkbox::new(enable, format!("Mesh {i}")));
-                        }
+                        ui.collapsing(format!("{} Meshes", mesh_enabled.len()), |ui| {
+                            for (i, enable) in mesh_enabled.iter_mut().enumerate() {
+                                ui.add(egui::Checkbox::new(enable, format!("Mesh {i}")));
+                            }
+                        });
                         ui.add_space(10.0);
                         if ui.button("Exit").clicked() {
                             *control_flow = ControlFlow::Exit;
