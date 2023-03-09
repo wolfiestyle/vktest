@@ -1,3 +1,4 @@
+use easy_gltf::model::Mode;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use structopt::StructOpt;
@@ -77,7 +78,6 @@ fn main() -> VulkanResult<()> {
                         .base_color_texture
                         .as_ref()
                         .map(|image| vk_app.create_texture(image.width(), image.height(), image.as_raw()).unwrap());
-                    eprintln!("color tex: {}", color_tex.is_some());
                     //HACK: vertices are returned on a non-Copy, non repr-C struct, so can't feed it directly
                     let (p, verts, s) = unsafe { model.vertices().align_to::<VertexTemp>() };
                     assert!(p.is_empty() && s.is_empty());
@@ -89,7 +89,11 @@ fn main() -> VulkanResult<()> {
         })
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
-    let mut mesh_enabled: Vec<_> = scenes.iter().map(|objects| vec![true; objects.len()]).collect();
+    //FIXME: disabling meshes not made of triangles. implement other modes or properly skip them
+    let mut mesh_enabled: Vec<Vec<_>> = gltf_scenes
+        .iter()
+        .map(|scene| scene.models.iter().map(|model| model.mode() == Mode::Triangles).collect())
+        .collect();
     let mut cur_scene = 0;
 
     let mut skybox = SkyboxRenderer::new(&vk_app, skybox[0].dimensions(), &skybox_raw)?;
