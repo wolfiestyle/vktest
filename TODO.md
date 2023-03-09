@@ -1,28 +1,23 @@
 # TODO
 
-- Implement complex model loading (gltf, FBX)
-- Support for models with multiple textures/materials
-- Allocate a single buffer for all geometry data of a mesh (vertices, indices).
-  This might need to be done as a separate import/baking process.
+- Optimize glTF loading. Write custom importer that outputs GPU-friendly data
 - Build a global descriptor set for all textures and material settings used on
-  the scene, indexed by push constant or another buffer
-- Possibly use a buffer with draw data + CmdDrawIndexedIndirect
+  the scene, indexed by push constant or another buffer. Evaluate performance
+  vs push descriptors
 - Rough visibility determination with bounding boxes, rebuild command buffer
   when visibility changes. Could use occlusion queries
 - Depth pre-pass, do shading with depth test equal + depth writes off. It might
   not be necessary if objects are properly sorted in depth order and not
   overlapping.
-- Sort objects by shader, possibly limit to 1 shader per mesh, then each draw
-  call set will basically have no state changes other than the push constant
+- Group objects by pipeline (shader, material settings, culling mode..)
 - Alpha tested (cutout) materials will likely need a separate pass. Shaders
   with discard can be slower than opaque ones. Could just alpha blend them, but
   now they can't write to depth (no shadows)
 - Possibly join all same size textures on an array sampler, but would have to
-  compare performance/complexity with push constant version. Also I don't know
-  if shared vertices will cause bleeding or other artifacts. Might need more
-  data passed to the fragment shader like a per-face texture index
-- Draw skybox where depth = 1.0 (far plane)
-- Put all lightmaps on an single array sampler or big atlas texture
+  compare performance/complexity with push constant version. Will need a per-face
+  texture index, could be an external array indexed by gl_VertexIndex/3 or
+  actual per-face attributes if using mesh shaders
+- Put all lightmaps on an single array image. Can be done for shadow maps too
 - Implement shadow maps, store results per light an only recalculate when
   objects move. Possibly implement stencil shadows as an alternative
 - Animation data stored on a streaming buffer (only weights), skinning done on
@@ -32,4 +27,5 @@
 - Do async resource loading, synchronize between frames
 - Configurable settings (multisampling, anisotropic filtering, shadow quality, 
   depth buffer mode, engine fine tuning, ...)
-- OpenXR integration (we need to accept a pre-made vulkan instance)
+- OpenXR integration. It requires special creation procedures for the instance,
+  device and uses it's own swapchain
