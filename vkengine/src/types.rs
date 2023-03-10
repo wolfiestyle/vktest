@@ -124,6 +124,14 @@ impl<C, T: Cleanup<C>> Cleanup<C> for Arc<T> {
     }
 }
 
+impl<C, T: Cleanup<C> + Send> Cleanup<C> for thread_local::ThreadLocal<T> {
+    unsafe fn cleanup(&mut self, context: &C) {
+        for item in self {
+            item.cleanup(context);
+        }
+    }
+}
+
 impl Cleanup<ash::Device> for vk::CommandPool {
     unsafe fn cleanup(&mut self, device: &ash::Device) {
         device.destroy_command_pool(*self, None);

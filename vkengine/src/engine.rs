@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::slice;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use thread_local::ThreadLocal;
 
 const SWAPCHAIN_IMAGE_COUNT: u32 = 3;
 const MAX_FRAMES_IN_FLIGHT: usize = 2;
@@ -19,7 +20,7 @@ pub struct VulkanEngine {
     window_size: UVec2,
     window_resized: bool,
     pub(crate) swapchain: Swapchain,
-    main_cmd_pool: vk::CommandPool,
+    thread_cmd_pools: ThreadLocal<vk::CommandPool>,
     main_cmd_buffers: Vec<vk::CommandBuffer>,
     frame_state: Vec<FrameState>,
     current_frame: u64,
@@ -43,9 +44,6 @@ impl VulkanEngine {
         let swapchain = Swapchain::new(&device, window_size, SWAPCHAIN_IMAGE_COUNT, depth_format)?;
         eprintln!("color_format: {:?}, depth_format: {depth_format:?}", swapchain.format);
 
-        let main_cmd_pool = device.create_command_pool(device.dev_info.graphics_idx, vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)?;
-        let main_cmd_buffers =
-            device.create_command_buffers(main_cmd_pool, MAX_FRAMES_IN_FLIGHT as u32, vk::CommandBufferLevel::PRIMARY)?;
         let frame_state = (0..MAX_FRAMES_IN_FLIGHT)
             .map(|_| FrameState::new(&device))
             .collect::<Result<Vec<_>, _>>()?;
@@ -63,8 +61,8 @@ impl VulkanEngine {
             window_size,
             window_resized: false,
             swapchain,
-            main_cmd_pool,
-            main_cmd_buffers,
+            thread_cmd_pools: Default::default(),
+            main_cmd_buffers: vec![],
             frame_state,
             current_frame: 0,
             default_texture,
@@ -75,6 +73,11 @@ impl VulkanEngine {
             camera,
             sunlight: Vec3::Y,
         };
+
+        let cmd_pool = this.get_thread_cmd_pool()?;
+        this.main_cmd_buffers =
+            this.device
+                .create_command_buffers(cmd_pool, MAX_FRAMES_IN_FLIGHT as u32, vk::CommandBufferLevel::PRIMARY)?;
 
         let sampler = this.get_sampler(vk::Filter::NEAREST, vk::Filter::NEAREST, vk::SamplerAddressMode::REPEAT)?;
         this.default_texture.sampler = sampler;
@@ -114,6 +117,15 @@ impl VulkanEngine {
     #[inline]
     pub fn get_frame_count(&self) -> u64 {
         self.current_frame
+    }
+
+    pub fn get_thread_cmd_pool(&self) -> VulkanResult<vk::CommandPool> {
+        self.thread_cmd_pools
+            .get_or_try(|| {
+                self.device
+                    .create_command_pool(self.device.dev_info.graphics_idx, vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
+            })
+            .copied()
     }
 
     pub fn get_sampler(
@@ -337,7 +349,7 @@ impl Drop for VulkanEngine {
         unsafe {
             self.device.device_wait_idle().unwrap();
             self.frame_state.cleanup(&self.device);
-            self.main_cmd_pool.cleanup(&self.device);
+            self.thread_cmd_pools.cleanup(&self.device);
             self.swapchain.cleanup(&self.device);
             self.samplers.lock().unwrap().cleanup(&self.device);
             self.default_texture.cleanup(&self.device);
