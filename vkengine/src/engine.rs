@@ -40,8 +40,9 @@ impl VulkanEngine {
     {
         let device = VulkanDevice::new(window, app_name, device_selection)?;
         let depth_format = device.find_depth_format(false)?;
+        let msaa_samples = device.dev_info.get_max_samples();
         let window_size = window.window_size().into();
-        let swapchain = Swapchain::new(&device, window_size, SWAPCHAIN_IMAGE_COUNT, depth_format)?;
+        let swapchain = Swapchain::new(&device, window_size, SWAPCHAIN_IMAGE_COUNT, depth_format, msaa_samples)?;
         eprintln!("color_format: {:?}, depth_format: {depth_format:?}", swapchain.format);
 
         let frame_state = (0..MAX_FRAMES_IN_FLIGHT)
@@ -179,16 +180,32 @@ impl VulkanEngine {
                 .describe_err("Failed to begin recording command buffer")?;
         }
 
-        let color_attach = vk::RenderingAttachmentInfo::builder()
-            .image_view(self.swapchain.image_views[image_idx])
-            .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-            .load_op(vk::AttachmentLoadOp::DONT_CARE)
-            .store_op(vk::AttachmentStoreOp::STORE)
-            .clear_value(vk::ClearValue {
-                color: vk::ClearColorValue {
-                    float32: [0.0, 0.0, 0.0, 1.0],
-                },
-            });
+        let color_attach = if let Some(msaa_imgview) = self.swapchain.msaa_imgview {
+            vk::RenderingAttachmentInfo::builder()
+                .image_view(msaa_imgview)
+                .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+                .load_op(vk::AttachmentLoadOp::DONT_CARE)
+                .store_op(vk::AttachmentStoreOp::STORE)
+                .resolve_mode(vk::ResolveModeFlags::AVERAGE)
+                .resolve_image_view(self.swapchain.image_views[image_idx])
+                .resolve_image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+                .clear_value(vk::ClearValue {
+                    color: vk::ClearColorValue {
+                        float32: [0.0, 0.0, 0.0, 1.0],
+                    },
+                })
+        } else {
+            vk::RenderingAttachmentInfo::builder()
+                .image_view(self.swapchain.image_views[image_idx])
+                .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+                .load_op(vk::AttachmentLoadOp::DONT_CARE)
+                .store_op(vk::AttachmentStoreOp::STORE)
+                .clear_value(vk::ClearValue {
+                    color: vk::ClearColorValue {
+                        float32: [0.0, 0.0, 0.0, 1.0],
+                    },
+                })
+        };
         let depth_attach = vk::RenderingAttachmentInfo::builder()
             .image_view(self.swapchain.depth_imgviews[image_idx])
             .image_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
@@ -235,7 +252,7 @@ impl VulkanEngine {
         let mut render_info = vk::CommandBufferInheritanceRenderingInfo::builder()
             .color_attachment_formats(slice::from_ref(&self.swapchain.format))
             .depth_attachment_format(self.swapchain.depth_format)
-            .rasterization_samples(vk::SampleCountFlags::TYPE_1);
+            .rasterization_samples(self.swapchain.samples);
         let inherit_info = vk::CommandBufferInheritanceInfo::builder().push_next(&mut render_info);
         let begin_info = vk::CommandBufferBeginInfo::builder()
             .flags(vk::CommandBufferUsageFlags::RENDER_PASS_CONTINUE | flags)
@@ -367,6 +384,7 @@ pub struct PipelineBuilder<'a> {
     pub attrib_desc: Vec<vk::VertexInputAttributeDescription>,
     pub color_format: vk::Format,
     pub depth_format: vk::Format,
+    pub samples: vk::SampleCountFlags,
     pub mode: PipelineMode,
     pub topology: vk::PrimitiveTopology,
 }
@@ -381,6 +399,7 @@ impl<'a> PipelineBuilder<'a> {
             attrib_desc: vec![],
             color_format: vk::Format::UNDEFINED,
             depth_format: vk::Format::UNDEFINED,
+            samples: vk::SampleCountFlags::TYPE_1,
             mode: PipelineMode::Opaque,
             topology: vk::PrimitiveTopology::TRIANGLE_LIST,
         }
@@ -405,6 +424,7 @@ impl<'a> PipelineBuilder<'a> {
     pub fn render_to_swapchain(mut self, swapchain: &Swapchain) -> Self {
         self.color_format = swapchain.format;
         self.depth_format = swapchain.depth_format;
+        self.samples = swapchain.samples;
         self
     }
 
@@ -478,7 +498,7 @@ impl Pipeline {
             .front_face(vk::FrontFace::CLOCKWISE);
 
         let multisample_ci = vk::PipelineMultisampleStateCreateInfo::builder()
-            .rasterization_samples(vk::SampleCountFlags::TYPE_1)
+            .rasterization_samples(params.samples)
             .min_sample_shading(1.0);
 
         let color_attach = vk::PipelineColorBlendAttachmentState::builder()

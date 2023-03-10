@@ -168,6 +168,7 @@ impl VulkanInstance {
         let properties = unsafe { self.instance.get_physical_device_properties(phys_dev) };
         let dev_type = properties.device_type.into();
         let name = vk_to_cstr(&properties.device_name).to_str().unwrap_or("unknown").to_owned();
+        let msaa_support = properties.limits.framebuffer_color_sample_counts & properties.limits.framebuffer_depth_sample_counts;
 
         // features
         let mut tl_sem_feats = vk::PhysicalDeviceTimelineSemaphoreFeatures::default();
@@ -234,6 +235,7 @@ impl VulkanInstance {
             present_idx: present_idx.unwrap(),
             unique_families,
             extensions,
+            msaa_support,
         })
     }
 
@@ -348,6 +350,14 @@ pub struct DeviceInfo {
     pub present_idx: u32,
     pub unique_families: Vec<u32>,
     pub extensions: HashSet<CString>,
+    pub msaa_support: vk::SampleCountFlags,
+}
+
+impl DeviceInfo {
+    pub fn get_max_samples(&self) -> vk::SampleCountFlags {
+        let msb = self.msaa_support.as_raw().ilog2();
+        vk::SampleCountFlags::from_raw(1 << msb)
+    }
 }
 
 #[derive(Debug, Clone)]

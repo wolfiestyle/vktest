@@ -261,20 +261,24 @@ impl VulkanDevice {
     }
 
     pub fn allocate_image(
-        &self, width: u32, height: u32, layers: u32, format: vk::Format, flags: vk::ImageCreateFlags, img_usage: vk::ImageUsageFlags,
+        &self, params: ImageParams, format: vk::Format, flags: vk::ImageCreateFlags, img_usage: vk::ImageUsageFlags,
         location: MemoryLocation, name: &str,
     ) -> VulkanResult<VkImage> {
         let image_ci = vk::ImageCreateInfo::builder()
             .image_type(vk::ImageType::TYPE_2D)
-            .extent(vk::Extent3D { width, height, depth: 1 })
+            .extent(vk::Extent3D {
+                width: params.width,
+                height: params.height,
+                depth: 1,
+            })
+            .array_layers(params.layers)
             .mip_levels(1)
-            .array_layers(layers)
+            .samples(params.samples)
             .format(format)
             .tiling(vk::ImageTiling::OPTIMAL)
             .initial_layout(vk::ImageLayout::UNDEFINED)
             .usage(img_usage)
             .flags(flags)
-            .samples(vk::SampleCountFlags::TYPE_1)
             .sharing_mode(vk::SharingMode::EXCLUSIVE);
 
         let image = unsafe { self.device.create_image(&image_ci, None).describe_err("Failed to create image")? };
@@ -403,9 +407,12 @@ impl VulkanDevice {
         let size = layer_size as vk::DeviceSize * layers as vk::DeviceSize;
         let mut src_buffer = self.allocate_buffer(size, vk::BufferUsageFlags::TRANSFER_SRC, MemoryLocation::CpuToGpu, "Staging")?;
         let tex_image = self.allocate_image(
-            width,
-            height,
-            layers,
+            ImageParams {
+                width,
+                height,
+                layers,
+                ..Default::default()
+            },
             format,
             flags,
             vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
@@ -605,20 +612,27 @@ pub struct Swapchain {
     pub image_views: Vec<vk::ImageView>,
     pub format: vk::Format,
     pub extent: vk::Extent2D,
+    pub samples: vk::SampleCountFlags,
+    pub msaa_image: Option<VkImage>,
+    pub msaa_imgview: Option<vk::ImageView>,
     pub depth_images: Option<VkImage>,
     pub depth_imgviews: Vec<vk::ImageView>,
     pub depth_format: vk::Format,
 }
 
 impl Swapchain {
-    pub fn new(device: &VulkanDevice, win_size: UVec2, image_count: u32, depth_format: vk::Format) -> VulkanResult<Self> {
+    pub fn new(
+        device: &VulkanDevice, win_size: UVec2, image_count: u32, depth_format: vk::Format, samples: vk::SampleCountFlags,
+    ) -> VulkanResult<Self> {
         let mut swapchain = Swapchain::create(device, win_size.x, win_size.y, image_count, vk::SwapchainKHR::null())?;
+        swapchain.create_msaa_attachment(device, samples)?;
         swapchain.create_depth_attachments(device, depth_format, swapchain.images.len() as _)?;
         Ok(swapchain)
     }
 
     pub fn recreate(&mut self, device: &VulkanDevice, win_size: UVec2) -> VulkanResult<()> {
         let mut swapchain = Swapchain::create(device, win_size.x, win_size.y, self.images.len() as _, self.handle)?;
+        swapchain.create_msaa_attachment(device, self.samples)?;
         swapchain.create_depth_attachments(device, self.depth_format, self.images.len() as _)?;
         let mut old_swapchain = std::mem::replace(self, swapchain);
         unsafe {
@@ -689,10 +703,53 @@ impl Swapchain {
             image_views,
             format: surface_format.format,
             extent,
+            samples: vk::SampleCountFlags::TYPE_1,
+            msaa_image: None,
+            msaa_imgview: None,
             depth_images: None,
             depth_imgviews: vec![],
             depth_format: vk::Format::UNDEFINED,
         })
+    }
+
+    fn create_msaa_attachment(&mut self, device: &VulkanDevice, samples: vk::SampleCountFlags) -> VulkanResult<()> {
+        if samples == vk::SampleCountFlags::TYPE_1 {
+            return Ok(());
+        }
+        let image = device.allocate_image(
+            ImageParams {
+                width: self.extent.width,
+                height: self.extent.height,
+                samples,
+                ..Default::default()
+            },
+            self.format,
+            vk::ImageCreateFlags::empty(),
+            vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSIENT_ATTACHMENT,
+            MemoryLocation::GpuOnly,
+            "MSAA image",
+        )?;
+        let imgview = device.create_image_view(*image, self.format, 0, vk::ImageViewType::TYPE_2D, vk::ImageAspectFlags::COLOR)?;
+
+        let cmd_buffer = device.begin_one_time_commands()?;
+        device.transition_image_layout(
+            cmd_buffer,
+            *image,
+            self.format,
+            1,
+            vk::ImageLayout::UNDEFINED,
+            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+        );
+        device.end_one_time_commands(cmd_buffer)?;
+
+        device.debug(|d| {
+            d.set_object_name(device, &*image, "MSAA color image");
+            d.set_object_name(device, &imgview, "MSAA color image view");
+        });
+        self.samples = samples;
+        self.msaa_image = Some(image);
+        self.msaa_imgview = Some(imgview);
+        Ok(())
     }
 
     fn create_depth_attachments(&mut self, device: &VulkanDevice, depth_format: vk::Format, image_count: u32) -> VulkanResult<()> {
@@ -700,9 +757,13 @@ impl Swapchain {
             return Ok(());
         }
         let depth_images = device.allocate_image(
-            self.extent.width,
-            self.extent.height,
-            image_count,
+            ImageParams {
+                width: self.extent.width,
+                height: self.extent.height,
+                layers: image_count,
+                samples: self.samples,
+                ..Default::default()
+            },
             depth_format,
             vk::ImageCreateFlags::empty(),
             vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
@@ -781,6 +842,8 @@ impl std::ops::Deref for Swapchain {
 impl Cleanup<VulkanDevice> for Swapchain {
     unsafe fn cleanup(&mut self, device: &VulkanDevice) {
         self.image_views.cleanup(device);
+        self.msaa_imgview.cleanup(device);
+        self.msaa_image.cleanup(device);
         self.depth_imgviews.cleanup(device);
         self.depth_images.cleanup(device);
         device.swapchain_fn.destroy_swapchain(self.handle, None);
@@ -917,6 +980,26 @@ impl ImageData<'_> {
         match self {
             Self::Single(_) => 1,
             Self::Array(s) => s.len() as _,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ImageParams {
+    width: u32,
+    height: u32,
+    layers: u32,
+    samples: vk::SampleCountFlags,
+}
+
+impl Default for ImageParams {
+    #[inline]
+    fn default() -> Self {
+        Self {
+            width: 1,
+            height: 1,
+            layers: 1,
+            samples: vk::SampleCountFlags::TYPE_1,
         }
     }
 }
