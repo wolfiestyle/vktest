@@ -106,6 +106,26 @@ impl VulkanEngine {
     }
 
     #[inline]
+    pub fn get_msaa_samples(&self) -> u32 {
+        self.swapchain.samples.as_raw()
+    }
+
+    pub fn set_msaa_samples(&mut self, samples: u32) -> VulkanResult<()> {
+        if !samples.is_power_of_two() {
+            return VkError::EngineError("Invalid argument").into();
+        }
+        let samples = vk::SampleCountFlags::from_raw(samples);
+        if !self.device.dev_info.msaa_support.contains(samples) {
+            return VkError::EngineError("Unsupported sample count").into();
+        }
+        if samples != self.swapchain.samples {
+            self.swapchain.samples = samples;
+            self.swapchain.recreate(&self.device, self.window_size)?;
+        }
+        Ok(())
+    }
+
+    #[inline]
     pub fn get_frame_timestamp(&self) -> Instant {
         self.last_frame_time
     }

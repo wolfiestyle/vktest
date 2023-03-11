@@ -112,6 +112,7 @@ fn main() -> VulkanResult<()> {
     controller.pitch = 35.0;
 
     let mut fullscreen = false;
+    let mut msaa_samples = vk_app.get_msaa_samples();
 
     event_loop.run(move |event, _, control_flow| match event {
         Event::WindowEvent { event, .. } => {
@@ -173,6 +174,17 @@ fn main() -> VulkanResult<()> {
                     .show_animated(ctx, show_gui, |ui| {
                         ui.heading("VKtest 3D engine");
                         ui.label(format!("{fps} fps"));
+                        egui::ComboBox::from_label("MSAA")
+                            .selected_text(format!("{msaa_samples}x"))
+                            .show_ui(ui, |ui| {
+                                let supp = vk_app.device().dev_info.msaa_support.as_raw();
+                                for i in 0..=6 {
+                                    let val = 1 << i;
+                                    if val & supp != 0 {
+                                        ui.selectable_value(&mut msaa_samples, val, format!("{val}x"));
+                                    }
+                                }
+                            });
                         ui.add_space(10.0);
                         egui::ComboBox::from_label("Scene")
                             .selected_text(format!("Scene {cur_scene}"))
@@ -223,6 +235,10 @@ fn main() -> VulkanResult<()> {
                     });
             });
             gui.event_output(&window);
+
+            if msaa_samples != vk_app.get_msaa_samples() {
+                vk_app.set_msaa_samples(msaa_samples).unwrap();
+            }
 
             window.request_redraw();
         }
