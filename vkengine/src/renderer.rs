@@ -1,5 +1,5 @@
 use crate::device::{UniformBuffer, VkBuffer, VulkanDevice};
-use crate::engine::{CmdbufAction, DrawPayload, Pipeline, PipelineMode, Shader, Texture, VulkanEngine};
+use crate::engine::{CmdBufferRing, DrawPayload, Pipeline, PipelineMode, Shader, Texture, VulkanEngine};
 use crate::types::{Cleanup, VertexInput, VulkanResult};
 use ash::vk;
 use bytemuck_derive::{Pod, Zeroable};
@@ -16,6 +16,7 @@ pub struct MeshRenderer {
     index_buffer: Option<VkBuffer>,
     elem_count: u32,
     texture: Option<Texture>,
+    cmd_buffers: CmdBufferRing,
     uniforms: UniformBuffer<ObjectUniforms>,
     pub model: Affine3A,
 }
@@ -57,6 +58,8 @@ impl MeshRenderer {
             .transpose()?;
         let elem_count = indices.map(|idx| idx.len() as u32).unwrap_or_else(|| vertices.len() as u32);
 
+        let cmd_buffers = CmdBufferRing::new(&device)?;
+
         let uniforms = UniformBuffer::new(&device)?;
 
         Ok(Self {
@@ -67,14 +70,14 @@ impl MeshRenderer {
             index_buffer,
             elem_count,
             texture,
+            cmd_buffers,
             uniforms,
             model: Affine3A::IDENTITY,
         })
     }
 
     pub fn render(&mut self, engine: &VulkanEngine) -> VulkanResult<DrawPayload> {
-        let cmd_pool = engine.get_thread_cmd_pool()?;
-        let cmd_buffer = self.device.create_command_buffer(cmd_pool, vk::CommandBufferLevel::SECONDARY)?;
+        let cmd_buffer = self.cmd_buffers.get_current_buffer(engine)?;
         engine.begin_secondary_draw_commands(cmd_buffer, vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)?;
 
         //FIXME: sync uniform buffer updates after frame finished
@@ -121,10 +124,7 @@ impl MeshRenderer {
             self.device.debug(|d| d.cmd_end_label(cmd_buffer));
         }
 
-        Ok(DrawPayload::new(
-            engine.end_secondary_draw_commands(cmd_buffer)?,
-            CmdbufAction::Free(cmd_pool),
-        ))
+        Ok(DrawPayload::new(engine.end_secondary_draw_commands(cmd_buffer)?))
     }
 
     fn calc_uniforms(&self, engine: &VulkanEngine) -> ObjectUniforms {
@@ -146,6 +146,7 @@ impl Drop for MeshRenderer {
             self.texture.cleanup(&self.device);
             self.pipeline.cleanup(&self.device);
             self.desc_layout.cleanup(&self.device);
+            self.cmd_buffers.cleanup(&self.device);
             self.uniforms.cleanup(&self.device);
         }
     }
@@ -163,6 +164,7 @@ pub struct SkyboxRenderer {
     desc_layout: vk::DescriptorSetLayout,
     pipeline: Pipeline,
     texture: Texture,
+    cmd_buffers: CmdBufferRing,
 }
 
 impl SkyboxRenderer {
@@ -203,17 +205,19 @@ impl SkyboxRenderer {
             vk::Sampler::null(),
         )?;
 
+        let cmd_buffers = CmdBufferRing::new(&device)?;
+
         Ok(Self {
             device,
             desc_layout,
             pipeline,
             texture,
+            cmd_buffers,
         })
     }
 
     pub fn render(&mut self, engine: &VulkanEngine) -> VulkanResult<DrawPayload> {
-        let cmd_pool = engine.get_thread_cmd_pool()?;
-        let cmd_buffer = self.device.create_command_buffer(cmd_pool, vk::CommandBufferLevel::SECONDARY)?;
+        let cmd_buffer = self.cmd_buffers.get_current_buffer(engine)?;
         engine.begin_secondary_draw_commands(cmd_buffer, vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)?;
 
         let image_info = self.texture.descriptor();
@@ -250,10 +254,7 @@ impl SkyboxRenderer {
             self.device.debug(|d| d.cmd_end_label(cmd_buffer));
         }
 
-        Ok(DrawPayload::new(
-            engine.end_secondary_draw_commands(cmd_buffer)?,
-            CmdbufAction::Free(cmd_pool),
-        ))
+        Ok(DrawPayload::new(engine.end_secondary_draw_commands(cmd_buffer)?))
     }
 }
 
@@ -264,6 +265,7 @@ impl Drop for SkyboxRenderer {
             self.texture.cleanup(&self.device);
             self.pipeline.cleanup(&self.device);
             self.desc_layout.cleanup(&self.device);
+            self.cmd_buffers.cleanup(&self.device);
         }
     }
 }

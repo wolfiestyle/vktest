@@ -15,7 +15,6 @@ glam = { version = "0.22.0", features = ["bytemuck"] }
 bytemuck = "1.13.0"
 bytemuck_derive = "1.4.0"
 gpu-allocator = { version = "0.22.0", features = ["vulkan"], default_features = false }
-thread_local = "1.1.7"
 
 winit = { version = "0.28.1", optional = true }
 egui = { version = "0.21.0", features = ["bytemuck"], optional = true }

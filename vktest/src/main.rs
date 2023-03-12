@@ -268,7 +268,7 @@ fn main() -> VulkanResult<()> {
 
             let cur_time = vk_app.get_frame_timestamp();
             if cur_time - prev_time > Duration::from_secs(1) {
-                let frame_count = vk_app.get_frame_count();
+                let frame_count = vk_app.get_current_frame();
                 fps = frame_count - prev_frame_count;
                 prev_time = cur_time;
                 prev_frame_count = frame_count;

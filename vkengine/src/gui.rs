@@ -1,5 +1,5 @@
 use crate::device::{VkBuffer, VulkanDevice};
-use crate::engine::{CmdbufAction, DrawPayload, Pipeline, PipelineMode, Shader, Texture, VulkanEngine};
+use crate::engine::{DrawPayload, Pipeline, PipelineMode, Shader, Texture, VulkanEngine};
 use crate::types::{Cleanup, ErrorDescription, VulkanResult};
 use ash::vk;
 use egui::epaint::{Primitive, Vertex};
@@ -31,8 +31,8 @@ pub struct UiRenderer {
     pipeline: Pipeline,
     set_layout: vk::DescriptorSetLayout,
     buffer: VkBuffer,
+    cmd_pool: vk::CommandPool,
     cmd_buffer: Option<vk::CommandBuffer>,
-    source_pool: vk::CommandPool,
     last_draw_time: Option<Instant>,
 }
 
@@ -74,6 +74,8 @@ impl UiRenderer {
             "UiRenderer buffer",
         )?;
 
+        let cmd_pool = device.create_command_pool(device.dev_info.graphics_idx, Default::default())?;
+
         Ok(Self {
             device,
             context: egui::Context::default(),
@@ -84,8 +86,8 @@ impl UiRenderer {
             pipeline,
             set_layout,
             buffer,
+            cmd_pool,
             cmd_buffer: None,
-            source_pool: vk::CommandPool::null(),
             last_draw_time: None,
         })
     }
@@ -108,21 +110,21 @@ impl UiRenderer {
 
     pub fn draw(&mut self, engine: &VulkanEngine) -> VulkanResult<DrawPayload> {
         let Some(run_output) = self.frame_output.take() else {
-            return Ok(DrawPayload::new(self.cmd_buffer.expect("draw called before run"), CmdbufAction::None));
+            return Ok(DrawPayload::new(self.cmd_buffer.expect("draw called before run")));
         };
 
         self.platform_output = Some(run_output.platform_output);
         let primitives = self.context.tessellate(run_output.shapes);
         let mut drop_textures = self.update_textures(run_output.textures_delta)?;
 
-        let cmd_pool = engine.get_thread_cmd_pool()?;
-        let cmd_buffer = self.device.create_command_buffer(cmd_pool, vk::CommandBufferLevel::SECONDARY)?;
+        let cmd_buffer = self
+            .device
+            .create_command_buffer(self.cmd_pool, vk::CommandBufferLevel::SECONDARY)?;
         let old_cmdbuf = self.cmd_buffer.replace(cmd_buffer);
-        let pool = self.source_pool;
-        self.source_pool = cmd_pool;
+        let pool = self.cmd_pool;
         let mut drop_buffers = self.build_draw_commands(cmd_buffer, primitives, engine)?;
 
-        let payload = DrawPayload::new_with_callback(cmd_buffer, CmdbufAction::None, move |dev| unsafe {
+        let payload = DrawPayload::new_with_callback(cmd_buffer, move |dev| unsafe {
             drop_buffers.cleanup(dev);
             drop_textures.cleanup(dev);
             if let Some(cmdbuf) = old_cmdbuf {
@@ -263,6 +265,7 @@ impl Drop for UiRenderer {
             self.pipeline.cleanup(&self.device);
             self.set_layout.cleanup(&self.device);
             self.buffer.cleanup(&self.device);
+            self.cmd_pool.cleanup(&self.device);
         }
     }
 }

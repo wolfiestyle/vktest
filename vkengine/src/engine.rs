@@ -10,17 +10,16 @@ use std::collections::HashMap;
 use std::slice;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use thread_local::ThreadLocal;
 
 const SWAPCHAIN_IMAGE_COUNT: u32 = 3;
-const MAX_FRAMES_IN_FLIGHT: usize = 2;
+pub const QUEUE_DEPTH: usize = 2;
 
 pub struct VulkanEngine {
     pub(crate) device: Arc<VulkanDevice>,
     window_size: UVec2,
     window_resized: bool,
     pub(crate) swapchain: Swapchain,
-    thread_cmd_pools: ThreadLocal<vk::CommandPool>,
+    cmd_pool: vk::CommandPool,
     main_cmd_buffers: Vec<vk::CommandBuffer>,
     frame_state: Vec<FrameState>,
     current_frame: u64,
@@ -45,9 +44,10 @@ impl VulkanEngine {
         let swapchain = Swapchain::new(&device, window_size, SWAPCHAIN_IMAGE_COUNT, depth_format, msaa_samples)?;
         eprintln!("color_format: {:?}, depth_format: {depth_format:?}", swapchain.format);
 
-        let frame_state = (0..MAX_FRAMES_IN_FLIGHT)
-            .map(|_| FrameState::new(&device))
-            .collect::<Result<Vec<_>, _>>()?;
+        let cmd_pool = device.create_command_pool(device.dev_info.graphics_idx, vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)?;
+        // we use N + 1 command buffers so we can write on them right away without waiting for the previous frame
+        let main_cmd_buffers = device.create_command_buffers(cmd_pool, QUEUE_DEPTH as u32 + 1, vk::CommandBufferLevel::PRIMARY)?;
+        let frame_state = (0..QUEUE_DEPTH).map(|_| FrameState::new(&device)).collect::<Result<Vec<_>, _>>()?;
 
         let pixel = [255, 255, 255, 255];
         let default_texture = Texture::new(&device, 1, 1, vk::Format::R8G8B8A8_UNORM, &pixel, vk::Sampler::null())?;
@@ -62,8 +62,8 @@ impl VulkanEngine {
             window_size,
             window_resized: false,
             swapchain,
-            thread_cmd_pools: Default::default(),
-            main_cmd_buffers: vec![],
+            cmd_pool,
+            main_cmd_buffers,
             frame_state,
             current_frame: 0,
             default_texture,
@@ -74,12 +74,6 @@ impl VulkanEngine {
             camera,
             sunlight: Vec3::Y,
         };
-
-        let cmd_pool = this.get_thread_cmd_pool()?;
-        // we use N + 1 command buffers so we can write on them right away without waiting for the previous frame
-        this.main_cmd_buffers =
-            this.device
-                .create_command_buffers(cmd_pool, MAX_FRAMES_IN_FLIGHT as u32 + 1, vk::CommandBufferLevel::PRIMARY)?;
 
         let sampler = this.get_sampler(vk::Filter::NEAREST, vk::Filter::NEAREST, vk::SamplerAddressMode::REPEAT)?;
         this.default_texture.sampler = sampler;
@@ -137,17 +131,8 @@ impl VulkanEngine {
     }
 
     #[inline]
-    pub fn get_frame_count(&self) -> u64 {
+    pub fn get_current_frame(&self) -> u64 {
         self.current_frame
-    }
-
-    pub fn get_thread_cmd_pool(&self) -> VulkanResult<vk::CommandPool> {
-        self.thread_cmd_pools
-            .get_or_try(|| {
-                self.device
-                    .create_command_pool(self.device.dev_info.graphics_idx, vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
-            })
-            .copied()
     }
 
     pub fn get_sampler(
@@ -393,7 +378,7 @@ impl Drop for VulkanEngine {
         unsafe {
             self.device.device_wait_idle().unwrap();
             self.frame_state.cleanup(&self.device);
-            self.thread_cmd_pools.cleanup(&self.device);
+            self.cmd_pool.cleanup(&self.device);
             self.swapchain.cleanup(&self.device);
             self.samplers.lock().unwrap().cleanup(&self.device);
             self.default_texture.cleanup(&self.device);
@@ -640,37 +625,57 @@ impl PipelineMode {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum CmdbufAction {
-    None,
-    Reset,
-    Free(vk::CommandPool),
+#[derive(Debug)]
+pub struct CmdBufferRing {
+    pool: vk::CommandPool,
+    buffers: [vk::CommandBuffer; QUEUE_DEPTH + 1],
+}
+
+impl CmdBufferRing {
+    pub fn new(device: &VulkanDevice) -> VulkanResult<Self> {
+        let pool = device.create_command_pool(device.dev_info.graphics_idx, vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)?;
+        let buffers = device
+            .create_command_buffers(pool, QUEUE_DEPTH as u32 + 1, vk::CommandBufferLevel::SECONDARY)?
+            .try_into()
+            .unwrap();
+        Ok(Self { pool, buffers })
+    }
+
+    pub fn get_current_buffer(&self, engine: &VulkanEngine) -> VulkanResult<vk::CommandBuffer> {
+        let idx = (engine.get_current_frame() % (QUEUE_DEPTH as u64 + 1)) as usize;
+        let cmd_buffer = self.buffers[idx];
+        unsafe { engine.device.reset_command_buffer(cmd_buffer, Default::default())? };
+        Ok(cmd_buffer)
+    }
+}
+
+impl Cleanup<ash::Device> for CmdBufferRing {
+    unsafe fn cleanup(&mut self, device: &ash::Device) {
+        self.pool.cleanup(device);
+    }
 }
 
 pub struct DrawPayload {
     pub cmd_buffer: vk::CommandBuffer,
-    pub cmdbuf_action: CmdbufAction,
     pub on_frame_finish: Option<Box<dyn FnOnce(&VulkanDevice) + Send + Sync>>,
 }
 
 impl DrawPayload {
     #[inline]
-    pub fn new(cmd_buffer: vk::CommandBuffer, cmdbuf_action: CmdbufAction) -> Self {
+    pub fn new(cmd_buffer: vk::CommandBuffer) -> Self {
         Self {
             cmd_buffer,
-            cmdbuf_action,
             on_frame_finish: None,
         }
     }
 
     #[inline]
-    pub fn new_with_callback<F>(cmd_buffer: vk::CommandBuffer, cmdbuf_action: CmdbufAction, on_frame_finish: F) -> Self
+    pub fn new_with_callback<F>(cmd_buffer: vk::CommandBuffer, on_frame_finish: F) -> Self
     where
         F: FnOnce(&VulkanDevice) + Send + Sync + 'static,
     {
         Self {
             cmd_buffer,
-            cmdbuf_action,
             on_frame_finish: Some(Box::new(on_frame_finish)),
         }
     }
@@ -705,15 +710,6 @@ impl FrameState {
 
     fn free_payload(&mut self, device: &VulkanDevice) -> VulkanResult<()> {
         for pl in self.payload.drain(..) {
-            match pl.cmdbuf_action {
-                CmdbufAction::None => (),
-                CmdbufAction::Reset => unsafe {
-                    device.reset_command_buffer(pl.cmd_buffer, Default::default())?;
-                },
-                CmdbufAction::Free(pool) => unsafe {
-                    device.free_command_buffers(pool, &[pl.cmd_buffer]);
-                },
-            }
             if let Some(f) = pl.on_frame_finish {
                 f(device)
             }
