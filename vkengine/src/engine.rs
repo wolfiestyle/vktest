@@ -76,9 +76,10 @@ impl VulkanEngine {
         };
 
         let cmd_pool = this.get_thread_cmd_pool()?;
+        // we use N + 1 command buffers so we can write on them right away without waiting for the previous frame
         this.main_cmd_buffers =
             this.device
-                .create_command_buffers(cmd_pool, MAX_FRAMES_IN_FLIGHT as u32, vk::CommandBufferLevel::PRIMARY)?;
+                .create_command_buffers(cmd_pool, MAX_FRAMES_IN_FLIGHT as u32 + 1, vk::CommandBufferLevel::PRIMARY)?;
 
         let sampler = this.get_sampler(vk::Filter::NEAREST, vk::Filter::NEAREST, vk::SamplerAddressMode::REPEAT)?;
         this.default_texture.sampler = sampler;
@@ -191,9 +192,9 @@ impl VulkanEngine {
     }
 
     fn record_primary_command_buffer(
-        &self, cmd_buffer: vk::CommandBuffer, image_idx: usize, secondaries: &[vk::CommandBuffer],
+        &self, cmd_buffer: vk::CommandBuffer, image_idx: usize, draw_cmds: &[DrawPayload],
     ) -> VulkanResult<()> {
-        let begin_info = vk::CommandBufferBeginInfo::default();
+        let begin_info = vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
         unsafe {
             self.device
                 .begin_command_buffer(cmd_buffer, &begin_info)
@@ -251,7 +252,9 @@ impl VulkanEngine {
                 vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
             );
             self.device.dynrender_fn.cmd_begin_rendering(cmd_buffer, &render_info);
-            self.device.cmd_execute_commands(cmd_buffer, secondaries);
+            for cmdbuf in draw_cmds {
+                self.device.cmd_execute_commands(cmd_buffer, slice::from_ref(&cmdbuf.cmd_buffer));
+            }
             self.device.dynrender_fn.cmd_end_rendering(cmd_buffer);
             self.device.transition_image_layout(
                 cmd_buffer,
@@ -289,19 +292,21 @@ impl VulkanEngine {
         unsafe {
             self.device
                 .end_command_buffer(cmd_buffer)
-                .describe_err("Failed to end recording secodary command buffer")?;
+                .describe_err("Failed to end recording secondary command buffer")?;
         }
         Ok(cmd_buffer)
     }
 
     pub fn submit_draw_commands(&mut self, draw_commands: impl IntoIterator<Item = DrawPayload>) -> VulkanResult<bool> {
         let frame_idx = (self.current_frame % self.frame_state.len() as u64) as usize;
-        let frame = &mut self.frame_state[frame_idx];
+        let cmdbuf_idx = (self.current_frame % self.main_cmd_buffers.len() as u64) as usize;
+        let frame = &self.frame_state[frame_idx];
         let image_avail_sem = frame.image_avail_sem;
         let render_finish_sem = frame.render_finished_sem;
         let in_flight_sem = frame.in_flight_sem;
-        let command_buffer = self.main_cmd_buffers[frame_idx];
+        let command_buffer = self.main_cmd_buffers[cmdbuf_idx];
 
+        // the swapchain image id is available before it's actually ready to use
         let image_idx = unsafe {
             let acquire_res = self
                 .device
@@ -318,6 +323,16 @@ impl VulkanEngine {
             }
         };
 
+        // ..that's all the info we need to record a new command buffer
+        unsafe {
+            self.device
+                .reset_command_buffer(command_buffer, Default::default())
+                .describe_err("Failed to reset command buffer")?;
+        }
+        let draw_cmds: Vec<_> = draw_commands.into_iter().collect();
+        self.record_primary_command_buffer(command_buffer, image_idx as _, &draw_cmds)?;
+
+        // now we can wait for frame finished, then we can modify resources
         let wait_info = vk::SemaphoreWaitInfo::builder()
             .semaphores(slice::from_ref(&in_flight_sem))
             .values(slice::from_ref(&frame.wait_frame));
@@ -326,23 +341,15 @@ impl VulkanEngine {
                 .wait_semaphores(&wait_info, u64::MAX)
                 .describe_err("Failed waiting semaphore")?;
         }
-        // all previous work for this frame is done at this point
+        let frame = &mut self.frame_state[frame_idx];
         frame.free_payload(&self.device)?;
+        let next_frame = self.current_frame + 1;
+        frame.wait_frame = next_frame;
+        frame.payload.extend(draw_cmds);
         self.prev_frame_time = self.last_frame_time;
         self.last_frame_time = Instant::now();
 
-        unsafe {
-            self.device
-                .reset_command_buffer(command_buffer, Default::default())
-                .describe_err("Failed to reset command buffer")?;
-        }
-
-        let next_frame = self.current_frame + 1;
-        frame.wait_frame = next_frame;
-        frame.payload.extend(draw_commands);
-        let cmd_buffers: Vec<_> = frame.payload.iter().map(|pl| pl.cmd_buffer).collect();
-        self.record_primary_command_buffer(command_buffer, image_idx as _, &cmd_buffers)?;
-
+        // submit work for the next frame
         let signal_values = [0, next_frame];
         let signal_sems = [render_finish_sem, in_flight_sem];
         let mut timeline_info = vk::TimelineSemaphoreSubmitInfo::builder().signal_semaphore_values(&signal_values);
