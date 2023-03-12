@@ -302,19 +302,6 @@ impl VulkanEngine {
         let in_flight_sem = frame.in_flight_sem;
         let command_buffer = self.main_cmd_buffers[frame_idx];
 
-        let wait_info = vk::SemaphoreWaitInfo::builder()
-            .semaphores(slice::from_ref(&in_flight_sem))
-            .values(slice::from_ref(&frame.wait_frame));
-        unsafe {
-            self.device
-                .wait_semaphores(&wait_info, u64::MAX)
-                .describe_err("Failed waiting semaphore")?;
-        }
-        // all previous work for this frame is done at this point
-        frame.free_payload(&self.device)?;
-        self.prev_frame_time = self.last_frame_time;
-        self.last_frame_time = Instant::now();
-
         let image_idx = unsafe {
             let acquire_res = self
                 .device
@@ -330,6 +317,19 @@ impl VulkanEngine {
                 Err(e) => return Err(VkError::VulkanMsg("Failed to acquire swapchain image", e)),
             }
         };
+
+        let wait_info = vk::SemaphoreWaitInfo::builder()
+            .semaphores(slice::from_ref(&in_flight_sem))
+            .values(slice::from_ref(&frame.wait_frame));
+        unsafe {
+            self.device
+                .wait_semaphores(&wait_info, u64::MAX)
+                .describe_err("Failed waiting semaphore")?;
+        }
+        // all previous work for this frame is done at this point
+        frame.free_payload(&self.device)?;
+        self.prev_frame_time = self.last_frame_time;
+        self.last_frame_time = Instant::now();
 
         unsafe {
             self.device
