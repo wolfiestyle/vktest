@@ -161,7 +161,7 @@ impl WindowSize for winit::window::Window {
     }
 }
 
-pub trait TypeFormat {
+pub trait TypeFormat: Copy {
     const VK_FORMAT: vk::Format;
     const VK_WIDTH: u32;
 }
@@ -211,7 +211,7 @@ impl IndexInput for u32 {
     const VK_INDEX_TYPE: vk::IndexType = vk::IndexType::UINT32;
 }
 
-pub trait VertexInput {
+pub trait VertexInput: Copy {
     fn binding_desc(binding: u32) -> vk::VertexInputBindingDescription;
     fn attr_desc(binding: u32) -> Vec<vk::VertexInputAttributeDescription>;
 }

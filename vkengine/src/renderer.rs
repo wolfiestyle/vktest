@@ -24,7 +24,7 @@ pub struct MeshRenderer<V, I> {
     _p: PhantomData<(V, I)>,
 }
 
-impl<V: VertexInput + Copy, I: IndexInput> MeshRenderer<V, I> {
+impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
     pub fn new(engine: &VulkanEngine, vertices: &[V], indices: Option<&[I]>, texture: Option<Texture>) -> VulkanResult<Self> {
         let device = engine.device.clone();
         let shader = Shader::new(
