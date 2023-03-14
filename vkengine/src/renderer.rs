@@ -1,6 +1,6 @@
 use crate::device::{UniformBuffer, VkBuffer, VulkanDevice};
 use crate::engine::{CmdBufferRing, DrawPayload, Pipeline, PipelineMode, Shader, Texture, VulkanEngine};
-use crate::types::{Cleanup, VertexInput, VulkanResult};
+use crate::types::{Cleanup, IndexInput, VertexInput, VulkanResult};
 use ash::vk;
 use bytemuck_derive::{Pod, Zeroable};
 use glam::{Affine3A, Mat4, Vec4};
@@ -9,7 +9,7 @@ use std::marker::PhantomData;
 use std::slice;
 use std::sync::Arc;
 
-pub struct MeshRenderer<V> {
+pub struct MeshRenderer<V, I> {
     device: Arc<VulkanDevice>,
     desc_layout: vk::DescriptorSetLayout,
     shader: Shader,
@@ -21,11 +21,11 @@ pub struct MeshRenderer<V> {
     cmd_buffers: CmdBufferRing,
     uniforms: UniformBuffer<ObjectUniforms>,
     pub model: Affine3A,
-    _p: PhantomData<V>,
+    _p: PhantomData<(V, I)>,
 }
 
-impl<V: VertexInput + Copy> MeshRenderer<V> {
-    pub fn new(engine: &VulkanEngine, vertices: &[V], indices: Option<&[u32]>, texture: Option<Texture>) -> VulkanResult<Self> {
+impl<V: VertexInput + Copy, I: IndexInput> MeshRenderer<V, I> {
+    pub fn new(engine: &VulkanEngine, vertices: &[V], indices: Option<&[I]>, texture: Option<Texture>) -> VulkanResult<Self> {
         let device = engine.device.clone();
         let shader = Shader::new(
             &device,
@@ -118,7 +118,7 @@ impl<V: VertexInput + Copy> MeshRenderer<V> {
                 .cmd_bind_vertex_buffers(cmd_buffer, 0, slice::from_ref(&*self.vertex_buffer), &[0]);
             if let Some(index_buffer) = &self.index_buffer {
                 self.device
-                    .cmd_bind_index_buffer(cmd_buffer, index_buffer.handle, 0, vk::IndexType::UINT32);
+                    .cmd_bind_index_buffer(cmd_buffer, index_buffer.handle, 0, I::VK_INDEX_TYPE);
                 self.device.cmd_draw_indexed(cmd_buffer, self.elem_count, 1, 0, 0, 0);
             } else {
                 self.device.cmd_draw(cmd_buffer, self.elem_count, 1, 0, 0);
@@ -152,7 +152,7 @@ impl<V: VertexInput + Copy> MeshRenderer<V> {
     }
 }
 
-impl<V> Drop for MeshRenderer<V> {
+impl<V, I> Drop for MeshRenderer<V, I> {
     fn drop(&mut self) {
         unsafe {
             self.device.device_wait_idle().unwrap();

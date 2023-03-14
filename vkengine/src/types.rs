@@ -195,6 +195,22 @@ impl_format!(egui::Pos2, 1, vk::Format::R32G32_SFLOAT);
 #[cfg(feature = "egui")]
 impl_format!(egui::Color32, 1, vk::Format::R8G8B8A8_UNORM);
 
+pub trait IndexInput: Copy {
+    const VK_INDEX_TYPE: vk::IndexType;
+}
+
+impl IndexInput for u8 {
+    const VK_INDEX_TYPE: vk::IndexType = vk::IndexType::UINT8_EXT;
+}
+
+impl IndexInput for u16 {
+    const VK_INDEX_TYPE: vk::IndexType = vk::IndexType::UINT16;
+}
+
+impl IndexInput for u32 {
+    const VK_INDEX_TYPE: vk::IndexType = vk::IndexType::UINT32;
+}
+
 pub trait VertexInput {
     fn binding_desc(binding: u32) -> vk::VertexInputBindingDescription;
     fn attr_desc(binding: u32) -> Vec<vk::VertexInputAttributeDescription>;
