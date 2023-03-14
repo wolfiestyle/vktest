@@ -135,6 +135,8 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
         ObjectUniforms {
             mvp: proj * view * self.model,
             light_dir: engine.sunlight.extend(0.0),
+            light_color: Vec4::ONE,
+            ambient: Vec4::splat(0.1),
         }
     }
 
@@ -173,6 +175,8 @@ impl<V, I> Drop for MeshRenderer<V, I> {
 struct ObjectUniforms {
     mvp: Mat4,
     light_dir: Vec4,
+    light_color: Vec4,
+    ambient: Vec4,
 }
 
 pub struct SkyboxRenderer {

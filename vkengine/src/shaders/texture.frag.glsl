@@ -2,6 +2,8 @@
 layout(binding = 0) uniform ObjectUniforms {
     mat4 mvp;
     vec4 light_dir;
+    vec4 light_color;
+    vec4 ambient;
 };
 layout(binding = 1) uniform sampler2D texSampler;
 
@@ -11,6 +13,7 @@ layout(location = 1) in vec2 fragTexCoord;
 layout(location = 0) out vec4 outColor;
 
 void main() {
-    float light_val = max(0.1, dot(fragNormal, light_dir.xyz));
-    outColor = texture(texSampler, fragTexCoord) * light_val;
+    vec3 diffuse = ambient.rgb + max(0.0, dot(fragNormal, light_dir.xyz)) * light_color.rgb;
+    vec3 color = texture(texSampler, fragTexCoord).rgb * diffuse;
+    outColor = vec4(color, 1.0);
 }
