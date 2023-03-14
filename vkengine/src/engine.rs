@@ -396,7 +396,6 @@ pub struct PipelineBuilder<'a> {
     pub attrib_desc: Vec<vk::VertexInputAttributeDescription>,
     pub color_format: vk::Format,
     pub depth_format: vk::Format,
-    pub samples: vk::SampleCountFlags,
     pub mode: PipelineMode,
     pub topology: vk::PrimitiveTopology,
 }
@@ -411,7 +410,6 @@ impl<'a> PipelineBuilder<'a> {
             attrib_desc: vec![],
             color_format: vk::Format::UNDEFINED,
             depth_format: vk::Format::UNDEFINED,
-            samples: vk::SampleCountFlags::TYPE_1,
             mode: PipelineMode::Opaque,
             topology: vk::PrimitiveTopology::TRIANGLE_LIST,
         }
@@ -436,7 +434,6 @@ impl<'a> PipelineBuilder<'a> {
     pub fn render_to_swapchain(mut self, swapchain: &Swapchain) -> Self {
         self.color_format = swapchain.format;
         self.depth_format = swapchain.depth_format;
-        self.samples = swapchain.samples;
         self
     }
 
@@ -452,7 +449,7 @@ impl<'a> PipelineBuilder<'a> {
 
     pub fn build(self, engine: &VulkanEngine) -> VulkanResult<Pipeline> {
         let layout = engine.device.create_pipeline_layout(&self.desc_layouts, self.push_constants)?;
-        let handle = Pipeline::create_pipeline(&engine.device, layout, self, engine.pipeline_cache)?;
+        let handle = Pipeline::create_pipeline(engine, layout, self)?;
         Ok(Pipeline { handle, layout })
     }
 }
@@ -469,9 +466,8 @@ impl Pipeline {
         PipelineBuilder::new(shader)
     }
 
-    fn create_pipeline(
-        device: &ash::Device, layout: vk::PipelineLayout, params: PipelineBuilder, cache: vk::PipelineCache,
-    ) -> VulkanResult<vk::Pipeline> {
+    fn create_pipeline(engine: &VulkanEngine, layout: vk::PipelineLayout, params: PipelineBuilder) -> VulkanResult<vk::Pipeline> {
+        let device = &engine.device;
         let entry_point = cstr!("main");
         let shader_stages_ci = [
             vk::PipelineShaderStageCreateInfo::builder()
@@ -510,7 +506,7 @@ impl Pipeline {
             .front_face(vk::FrontFace::CLOCKWISE);
 
         let multisample_ci = vk::PipelineMultisampleStateCreateInfo::builder()
-            .rasterization_samples(params.samples)
+            .rasterization_samples(engine.swapchain.samples)
             .min_sample_shading(1.0);
 
         let color_attach = vk::PipelineColorBlendAttachmentState::builder()
@@ -555,7 +551,7 @@ impl Pipeline {
 
         let pipeline = unsafe {
             device
-                .create_graphics_pipelines(cache, slice::from_ref(&pipeline_ci), None)
+                .create_graphics_pipelines(engine.pipeline_cache, slice::from_ref(&pipeline_ci), None)
                 .map_err(|(_, err)| VkError::VulkanMsg("Error creating pipeline", err))?
         };
 

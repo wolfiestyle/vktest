@@ -5,12 +5,14 @@ use ash::vk;
 use bytemuck_derive::{Pod, Zeroable};
 use glam::{Affine3A, Mat4, Vec4};
 use inline_spirv::include_spirv;
+use std::marker::PhantomData;
 use std::slice;
 use std::sync::Arc;
 
-pub struct MeshRenderer {
+pub struct MeshRenderer<V> {
     device: Arc<VulkanDevice>,
     desc_layout: vk::DescriptorSetLayout,
+    shader: Shader,
     pipeline: Pipeline,
     vertex_buffer: VkBuffer,
     index_buffer: Option<VkBuffer>,
@@ -19,14 +21,13 @@ pub struct MeshRenderer {
     cmd_buffers: CmdBufferRing,
     uniforms: UniformBuffer<ObjectUniforms>,
     pub model: Affine3A,
+    _p: PhantomData<V>,
 }
 
-impl MeshRenderer {
-    pub fn new<V: VertexInput + Copy>(
-        engine: &VulkanEngine, vertices: &[V], indices: Option<&[u32]>, texture: Option<Texture>,
-    ) -> VulkanResult<Self> {
+impl<V: VertexInput + Copy> MeshRenderer<V> {
+    pub fn new(engine: &VulkanEngine, vertices: &[V], indices: Option<&[u32]>, texture: Option<Texture>) -> VulkanResult<Self> {
         let device = engine.device.clone();
-        let mut shader = Shader::new(
+        let shader = Shader::new(
             &device,
             include_spirv!("src/shaders/texture.vert.glsl", vert, glsl),
             include_spirv!("src/shaders/texture.frag.glsl", frag, glsl),
@@ -50,7 +51,6 @@ impl MeshRenderer {
             .descriptor_layout(desc_layout)
             .render_to_swapchain(&engine.swapchain)
             .build(engine)?;
-        unsafe { shader.cleanup(&device) };
 
         let vertex_buffer = device.create_buffer_from_data(vertices, vk::BufferUsageFlags::VERTEX_BUFFER, "Vertex buffer")?;
         let index_buffer = indices
@@ -65,6 +65,7 @@ impl MeshRenderer {
         Ok(Self {
             device,
             desc_layout,
+            shader,
             pipeline,
             vertex_buffer,
             index_buffer,
@@ -73,6 +74,7 @@ impl MeshRenderer {
             cmd_buffers,
             uniforms,
             model: Affine3A::IDENTITY,
+            _p: PhantomData,
         })
     }
 
@@ -135,9 +137,22 @@ impl MeshRenderer {
             light_dir: engine.sunlight.extend(0.0),
         }
     }
+
+    pub fn rebuild_pipeline(&mut self, engine: &VulkanEngine) -> VulkanResult<()> {
+        let pipeline = Pipeline::builder(&self.shader)
+            .vertex_input::<V>()
+            .descriptor_layout(self.desc_layout)
+            .render_to_swapchain(&engine.swapchain)
+            .build(engine)?;
+        unsafe {
+            self.pipeline.cleanup(&self.device);
+        }
+        self.pipeline = pipeline;
+        Ok(())
+    }
 }
 
-impl Drop for MeshRenderer {
+impl<V> Drop for MeshRenderer<V> {
     fn drop(&mut self) {
         unsafe {
             self.device.device_wait_idle().unwrap();
@@ -145,6 +160,7 @@ impl Drop for MeshRenderer {
             self.index_buffer.cleanup(&self.device);
             self.texture.cleanup(&self.device);
             self.pipeline.cleanup(&self.device);
+            self.shader.cleanup(&self.device);
             self.desc_layout.cleanup(&self.device);
             self.cmd_buffers.cleanup(&self.device);
             self.uniforms.cleanup(&self.device);
@@ -162,6 +178,8 @@ struct ObjectUniforms {
 pub struct SkyboxRenderer {
     device: Arc<VulkanDevice>,
     desc_layout: vk::DescriptorSetLayout,
+    push_constants: vk::PushConstantRange,
+    shader: Shader,
     pipeline: Pipeline,
     texture: Texture,
     cmd_buffers: CmdBufferRing,
@@ -170,7 +188,7 @@ pub struct SkyboxRenderer {
 impl SkyboxRenderer {
     pub fn new(engine: &VulkanEngine, skybox_dims: (u32, u32), skybox_data: &[&[u8]; 6]) -> VulkanResult<Self> {
         let device = engine.device.clone();
-        let mut bg_shader = Shader::new(
+        let shader = Shader::new(
             &device,
             include_spirv!("src/shaders/skybox.vert.glsl", vert, glsl),
             include_spirv!("src/shaders/skybox.frag.glsl", frag, glsl),
@@ -186,15 +204,15 @@ impl SkyboxRenderer {
         let push_constants = vk::PushConstantRange::builder()
             .stage_flags(vk::ShaderStageFlags::VERTEX)
             .offset(0)
-            .size(std::mem::size_of::<Mat4>() as _);
-        let pipeline = Pipeline::builder(&bg_shader)
+            .size(std::mem::size_of::<Mat4>() as _)
+            .build();
+        let pipeline = Pipeline::builder(&shader)
             .descriptor_layout(desc_layout)
             .push_constants(slice::from_ref(&push_constants))
             .render_to_swapchain(&engine.swapchain)
             .mode(PipelineMode::Background)
             .topology(vk::PrimitiveTopology::TRIANGLE_STRIP)
             .build(engine)?;
-        unsafe { bg_shader.cleanup(&device) };
 
         let texture = Texture::new_cubemap(
             &device,
@@ -210,6 +228,8 @@ impl SkyboxRenderer {
         Ok(Self {
             device,
             desc_layout,
+            push_constants,
+            shader,
             pipeline,
             texture,
             cmd_buffers,
@@ -256,6 +276,21 @@ impl SkyboxRenderer {
 
         Ok(DrawPayload::new(engine.end_secondary_draw_commands(cmd_buffer)?))
     }
+
+    pub fn rebuild_pipeline(&mut self, engine: &VulkanEngine) -> VulkanResult<()> {
+        let pipeline = Pipeline::builder(&self.shader)
+            .descriptor_layout(self.desc_layout)
+            .push_constants(slice::from_ref(&self.push_constants))
+            .render_to_swapchain(&engine.swapchain)
+            .mode(PipelineMode::Background)
+            .topology(vk::PrimitiveTopology::TRIANGLE_STRIP)
+            .build(engine)?;
+        unsafe {
+            self.pipeline.cleanup(&self.device);
+        }
+        self.pipeline = pipeline;
+        Ok(())
+    }
 }
 
 impl Drop for SkyboxRenderer {
@@ -264,6 +299,7 @@ impl Drop for SkyboxRenderer {
             self.device.device_wait_idle().unwrap();
             self.texture.cleanup(&self.device);
             self.pipeline.cleanup(&self.device);
+            self.shader.cleanup(&self.device);
             self.desc_layout.cleanup(&self.device);
             self.cmd_buffers.cleanup(&self.device);
         }

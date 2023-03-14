@@ -28,8 +28,10 @@ pub struct UiRenderer {
     frame_output: Option<FullOutput>,
     platform_output: Option<PlatformOutput>,
     textures: HashMap<TextureId, Texture>,
+    shader: Shader,
     pipeline: Pipeline,
     set_layout: vk::DescriptorSetLayout,
+    push_constants: vk::PushConstantRange,
     buffer: VkBuffer,
     cmd_pool: vk::CommandPool,
     cmd_buffer: Option<vk::CommandBuffer>,
@@ -39,7 +41,7 @@ pub struct UiRenderer {
 impl UiRenderer {
     pub fn new(event_loop: &EventLoopWindowTarget<()>, engine: &VulkanEngine) -> VulkanResult<Self> {
         let device = engine.device.clone();
-        let mut shader = Shader::new(
+        let shader = Shader::new(
             &device,
             include_spirv!("src/shaders/gui.vert.glsl", vert, glsl),
             include_spirv!("src/shaders/gui.frag.glsl", frag, glsl),
@@ -58,7 +60,8 @@ impl UiRenderer {
         let push_constants = vk::PushConstantRange::builder()
             .stage_flags(vk::ShaderStageFlags::VERTEX)
             .offset(0)
-            .size(size_of::<Mat4>() as _);
+            .size(size_of::<Mat4>() as _)
+            .build();
         let pipeline = Pipeline::builder(&shader)
             .vertex_input::<Vertex>()
             .descriptor_layout(set_layout)
@@ -66,7 +69,6 @@ impl UiRenderer {
             .render_to_swapchain(&engine.swapchain)
             .mode(PipelineMode::Overlay)
             .build(engine)?;
-        unsafe { shader.cleanup(&device) };
         let buffer = device.allocate_buffer(
             65536,
             vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::INDEX_BUFFER,
@@ -83,8 +85,10 @@ impl UiRenderer {
             frame_output: None,
             platform_output: None,
             textures: Default::default(),
+            shader,
             pipeline,
             set_layout,
+            push_constants,
             buffer,
             cmd_pool,
             cmd_buffer: None,
@@ -255,6 +259,21 @@ impl UiRenderer {
         engine.end_secondary_draw_commands(cmd_buffer)?;
         Ok(drop_buffer)
     }
+
+    pub fn rebuild_pipeline(&mut self, engine: &VulkanEngine) -> VulkanResult<()> {
+        let pipeline = Pipeline::builder(&self.shader)
+            .vertex_input::<Vertex>()
+            .descriptor_layout(self.set_layout)
+            .push_constants(slice::from_ref(&self.push_constants))
+            .render_to_swapchain(&engine.swapchain)
+            .mode(PipelineMode::Overlay)
+            .build(engine)?;
+        unsafe {
+            self.pipeline.cleanup(&self.device);
+        }
+        self.pipeline = pipeline;
+        Ok(())
+    }
 }
 
 impl Drop for UiRenderer {
@@ -263,6 +282,7 @@ impl Drop for UiRenderer {
             self.device.device_wait_idle().unwrap();
             self.textures.cleanup(&self.device);
             self.pipeline.cleanup(&self.device);
+            self.shader.cleanup(&self.device);
             self.set_layout.cleanup(&self.device);
             self.buffer.cleanup(&self.device);
             self.cmd_pool.cleanup(&self.device);

@@ -238,6 +238,14 @@ fn main() -> VulkanResult<()> {
 
             if msaa_samples != vk_app.get_msaa_samples() {
                 vk_app.set_msaa_samples(msaa_samples).unwrap();
+
+                for scene in &mut scenes {
+                    for mesh in scene {
+                        mesh.rebuild_pipeline(&vk_app).unwrap();
+                    }
+                }
+                skybox.rebuild_pipeline(&vk_app).unwrap();
+                gui.rebuild_pipeline(&vk_app).unwrap();
             }
 
             window.request_redraw();
