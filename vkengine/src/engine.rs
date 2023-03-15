@@ -75,7 +75,7 @@ impl VulkanEngine {
             sunlight: Vec3::Y,
         };
 
-        let sampler = this.get_sampler(vk::Filter::NEAREST, vk::Filter::NEAREST, vk::SamplerAddressMode::REPEAT)?;
+        let sampler = this.get_sampler(vk::Filter::NEAREST, vk::Filter::NEAREST, vk::SamplerAddressMode::REPEAT, false)?;
         this.default_texture.sampler = sampler;
 
         Ok(this)
@@ -136,13 +136,14 @@ impl VulkanEngine {
     }
 
     pub fn get_sampler(
-        &self, mag_filter: vk::Filter, min_filter: vk::Filter, addr_mode: vk::SamplerAddressMode,
+        &self, mag_filter: vk::Filter, min_filter: vk::Filter, addr_mode: vk::SamplerAddressMode, aniso_enabled: bool,
     ) -> VulkanResult<vk::Sampler> {
         use std::collections::hash_map::Entry;
         let key = SamplerOptions {
             mag_filter,
             min_filter,
             addr_mode,
+            aniso_enabled,
         };
         match self.samplers.lock().unwrap().entry(key) {
             Entry::Occupied(entry) => Ok(*entry.get()),
@@ -153,8 +154,8 @@ impl VulkanEngine {
                     .address_mode_u(addr_mode)
                     .address_mode_v(addr_mode)
                     .address_mode_w(addr_mode)
-                    .anisotropy_enable(false)
-                    .max_anisotropy(1.0)
+                    .anisotropy_enable(aniso_enabled)
+                    .max_anisotropy(self.device.dev_info.max_aniso)
                     .border_color(vk::BorderColor::INT_OPAQUE_BLACK)
                     .unnormalized_coordinates(false)
                     .compare_enable(false)
@@ -172,7 +173,7 @@ impl VulkanEngine {
     }
 
     pub fn create_texture(&self, width: u32, height: u32, data: &[u8]) -> VulkanResult<Texture> {
-        let sampler = self.get_sampler(vk::Filter::LINEAR, vk::Filter::LINEAR, vk::SamplerAddressMode::REPEAT)?;
+        let sampler = self.get_sampler(vk::Filter::LINEAR, vk::Filter::LINEAR, vk::SamplerAddressMode::REPEAT, true)?;
         Texture::new(&self.device, width, height, vk::Format::R8G8B8A8_SRGB, data, sampler)
     }
 
@@ -788,6 +789,7 @@ struct SamplerOptions {
     mag_filter: vk::Filter,
     min_filter: vk::Filter,
     addr_mode: vk::SamplerAddressMode,
+    aniso_enabled: bool,
 }
 
 #[derive(Debug)]

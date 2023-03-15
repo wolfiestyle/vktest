@@ -236,6 +236,7 @@ impl VulkanInstance {
             unique_families,
             extensions,
             msaa_support,
+            max_aniso: properties.limits.max_sampler_anisotropy,
         })
     }
 
@@ -279,7 +280,8 @@ impl VulkanInstance {
             })
             .collect();
 
-        let features = vk::PhysicalDeviceFeatures::default();
+        let features = vk::PhysicalDeviceFeatures::builder().sampler_anisotropy(true);
+
         let extensions: Vec<_> = DEVICE_EXTENSIONS
             .into_iter()
             .filter_map(|(name, required)| {
@@ -351,6 +353,7 @@ pub struct DeviceInfo {
     pub unique_families: Vec<u32>,
     pub extensions: HashSet<CString>,
     pub msaa_support: vk::SampleCountFlags,
+    pub max_aniso: f32,
 }
 
 impl DeviceInfo {

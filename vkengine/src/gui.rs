@@ -46,7 +46,7 @@ impl UiRenderer {
             include_spirv!("src/shaders/gui.vert.glsl", vert, glsl),
             include_spirv!("src/shaders/gui.frag.glsl", frag, glsl),
         )?;
-        let sampler = engine.get_sampler(vk::Filter::LINEAR, vk::Filter::LINEAR, vk::SamplerAddressMode::CLAMP_TO_EDGE)?;
+        let sampler = engine.get_sampler(vk::Filter::LINEAR, vk::Filter::LINEAR, vk::SamplerAddressMode::CLAMP_TO_EDGE, false)?;
         let set_layout = device.create_descriptor_set_layout(&[
             // layout(binding = 0) uniform sampler2D texSampler
             vk::DescriptorSetLayoutBinding::builder()
