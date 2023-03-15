@@ -1009,10 +1009,10 @@ impl ImageData<'_> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ImageParams {
-    width: u32,
-    height: u32,
-    layers: u32,
-    samples: vk::SampleCountFlags,
+    pub width: u32,
+    pub height: u32,
+    pub layers: u32,
+    pub samples: vk::SampleCountFlags,
 }
 
 impl Default for ImageParams {

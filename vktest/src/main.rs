@@ -83,7 +83,7 @@ fn main() -> VulkanResult<()> {
                     assert!(p.is_empty() && s.is_empty());
                     //also indices are returned in usize for some reason
                     let indices = model.indices().map(|idx| idx.iter().map(|&idx| idx as u32).collect::<Vec<_>>());
-                    MeshRenderer::new(&vk_app, verts, indices.as_deref(), color_tex.into())
+                    MeshRenderer::new(&vk_app, verts, indices.as_deref(), color_tex)
                 })
                 .collect::<Result<Vec<_>, _>>()
         })
