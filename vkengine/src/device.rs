@@ -311,6 +311,16 @@ impl VulkanDevice {
         Ok(VkImage::new(image, allocation))
     }
 
+    fn image_aspect_flags(format: vk::Format) -> vk::ImageAspectFlags {
+        match format {
+            vk::Format::D16_UNORM_S8_UINT | vk::Format::D24_UNORM_S8_UINT | vk::Format::D32_SFLOAT_S8_UINT => {
+                vk::ImageAspectFlags::DEPTH | vk::ImageAspectFlags::STENCIL
+            }
+            vk::Format::D16_UNORM | vk::Format::X8_D24_UNORM_PACK32 | vk::Format::D32_SFLOAT => vk::ImageAspectFlags::DEPTH,
+            _ => vk::ImageAspectFlags::COLOR,
+        }
+    }
+
     pub fn transition_image_layout(
         &self, cmd_buffer: vk::CommandBuffer, image: vk::Image, format: vk::Format, layer_count: u32, old_layout: vk::ImageLayout,
         new_layout: vk::ImageLayout,
@@ -336,18 +346,60 @@ impl VulkanDevice {
         let (src_access, src_stage) = layout_to_access_and_stage(old_layout, false);
         let (dst_access, dst_stage) = layout_to_access_and_stage(new_layout, true);
 
-        let aspect_mask = match format {
-            vk::Format::D16_UNORM_S8_UINT | vk::Format::D24_UNORM_S8_UINT | vk::Format::D32_SFLOAT_S8_UINT => {
-                vk::ImageAspectFlags::DEPTH | vk::ImageAspectFlags::STENCIL
-            }
-            vk::Format::D16_UNORM | vk::Format::X8_D24_UNORM_PACK32 | vk::Format::D32_SFLOAT => vk::ImageAspectFlags::DEPTH,
-            _ => vk::ImageAspectFlags::COLOR,
-        };
+        let aspect_mask = Self::image_aspect_flags(format);
 
         let barrier = vk::ImageMemoryBarrier::builder()
             .image(image)
             .old_layout(old_layout)
             .new_layout(new_layout)
+            .src_access_mask(src_access)
+            .dst_access_mask(dst_access)
+            .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .subresource_range(vk::ImageSubresourceRange {
+                aspect_mask,
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: 0,
+                layer_count,
+            });
+        unsafe {
+            self.device.cmd_pipeline_barrier(
+                cmd_buffer,
+                src_stage,
+                dst_stage,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                slice::from_ref(&barrier),
+            );
+        }
+    }
+
+    pub fn image_reuse_barrier(
+        &self, cmd_buffer: vk::CommandBuffer, image: vk::Image, format: vk::Format, layer_count: u32, layout: vk::ImageLayout,
+    ) {
+        let src_access = vk::AccessFlags::empty();
+        let src_stage = vk::PipelineStageFlags::BOTTOM_OF_PIPE;
+
+        let (dst_access, dst_stage) = match layout {
+            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL => (
+                vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            ),
+            vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL => (
+                vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
+                vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS | vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
+            ),
+            _ => panic!("Unsupported image barrier"),
+        };
+
+        let aspect_mask = Self::image_aspect_flags(format);
+
+        let barrier = vk::ImageMemoryBarrier::builder()
+            .image(image)
+            .old_layout(vk::ImageLayout::UNDEFINED)
+            .new_layout(layout)
             .src_access_mask(src_access)
             .dst_access_mask(dst_access)
             .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
@@ -615,8 +667,8 @@ pub struct Swapchain {
     pub samples: vk::SampleCountFlags,
     pub msaa_image: Option<VkImage>,
     pub msaa_imgview: Option<vk::ImageView>,
-    pub depth_images: Option<VkImage>,
-    pub depth_imgviews: Vec<vk::ImageView>,
+    pub depth_image: Option<VkImage>,
+    pub depth_imgview: Option<vk::ImageView>,
     pub depth_format: vk::Format,
 }
 
@@ -626,14 +678,14 @@ impl Swapchain {
     ) -> VulkanResult<Self> {
         let mut swapchain = Swapchain::create(device, win_size.x, win_size.y, image_count, vk::SwapchainKHR::null())?;
         swapchain.create_msaa_attachment(device, samples)?;
-        swapchain.create_depth_attachments(device, depth_format, swapchain.images.len() as _)?;
+        swapchain.create_depth_attachment(device, depth_format)?;
         Ok(swapchain)
     }
 
     pub fn recreate(&mut self, device: &VulkanDevice, win_size: UVec2) -> VulkanResult<()> {
         let mut swapchain = Swapchain::create(device, win_size.x, win_size.y, self.images.len() as _, self.handle)?;
         swapchain.create_msaa_attachment(device, self.samples)?;
-        swapchain.create_depth_attachments(device, self.depth_format, self.images.len() as _)?;
+        swapchain.create_depth_attachment(device, self.depth_format)?;
         let mut old_swapchain = std::mem::replace(self, swapchain);
         unsafe {
             device.device_wait_idle()?;
@@ -706,8 +758,8 @@ impl Swapchain {
             samples: vk::SampleCountFlags::TYPE_1,
             msaa_image: None,
             msaa_imgview: None,
-            depth_images: None,
-            depth_imgviews: vec![],
+            depth_image: None,
+            depth_imgview: None,
             depth_format: vk::Format::UNDEFINED,
         })
     }
@@ -731,17 +783,6 @@ impl Swapchain {
         )?;
         let imgview = device.create_image_view(*image, self.format, 0, vk::ImageViewType::TYPE_2D, vk::ImageAspectFlags::COLOR)?;
 
-        let cmd_buffer = device.begin_one_time_commands()?;
-        device.transition_image_layout(
-            cmd_buffer,
-            *image,
-            self.format,
-            1,
-            vk::ImageLayout::UNDEFINED,
-            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-        );
-        device.end_one_time_commands(cmd_buffer)?;
-
         device.debug(|d| {
             d.set_object_name(device, &*image, "MSAA color image");
             d.set_object_name(device, &imgview, "MSAA color image view");
@@ -752,57 +793,39 @@ impl Swapchain {
         Ok(())
     }
 
-    fn create_depth_attachments(&mut self, device: &VulkanDevice, depth_format: vk::Format, image_count: u32) -> VulkanResult<()> {
+    fn create_depth_attachment(&mut self, device: &VulkanDevice, depth_format: vk::Format) -> VulkanResult<()> {
         if depth_format == vk::Format::UNDEFINED {
-            return Ok(());
+            return VkError::EngineError("depth format undefined").into();
         }
-        let depth_images = device.allocate_image(
+        let depth_image = device.allocate_image(
             ImageParams {
                 width: self.extent.width,
                 height: self.extent.height,
-                layers: image_count,
                 samples: self.samples,
                 ..Default::default()
             },
             depth_format,
             vk::ImageCreateFlags::empty(),
-            vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+            vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT | vk::ImageUsageFlags::TRANSIENT_ATTACHMENT,
             MemoryLocation::GpuOnly,
-            "Depth image array",
+            "Depth image",
         )?;
 
-        let depth_imgviews = (0..image_count)
-            .map(|layer| {
-                device.create_image_view(
-                    *depth_images,
-                    depth_format,
-                    layer,
-                    vk::ImageViewType::TYPE_2D,
-                    vk::ImageAspectFlags::DEPTH,
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let cmd_buffer = device.begin_one_time_commands()?;
-        device.transition_image_layout(
-            cmd_buffer,
-            *depth_images,
+        let depth_imgview = device.create_image_view(
+            *depth_image,
             depth_format,
-            image_count,
-            vk::ImageLayout::UNDEFINED,
-            vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-        );
-        device.end_one_time_commands(cmd_buffer)?;
+            0,
+            vk::ImageViewType::TYPE_2D,
+            vk::ImageAspectFlags::DEPTH,
+        )?;
 
         device.debug(|d| {
-            d.set_object_name(device, &*depth_images, "Depth image array");
-            depth_imgviews
-                .iter()
-                .for_each(|view| d.set_object_name(device, view, "Depth image view"));
+            d.set_object_name(device, &*depth_image, "Depth image");
+            d.set_object_name(device, &depth_imgview, "Depth image view");
         });
 
-        self.depth_images = Some(depth_images);
-        self.depth_imgviews = depth_imgviews;
+        self.depth_image = Some(depth_image);
+        self.depth_imgview = Some(depth_imgview);
         self.depth_format = depth_format;
         Ok(())
     }
@@ -844,8 +867,8 @@ impl Cleanup<VulkanDevice> for Swapchain {
         self.image_views.cleanup(device);
         self.msaa_imgview.cleanup(device);
         self.msaa_image.cleanup(device);
-        self.depth_imgviews.cleanup(device);
-        self.depth_images.cleanup(device);
+        self.depth_imgview.cleanup(device);
+        self.depth_image.cleanup(device);
         device.swapchain_fn.destroy_swapchain(self.handle, None);
     }
 }

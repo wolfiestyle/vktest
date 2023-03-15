@@ -213,7 +213,7 @@ impl VulkanEngine {
                 })
         };
         let depth_attach = vk::RenderingAttachmentInfo::builder()
-            .image_view(self.swapchain.depth_imgviews[image_idx])
+            .image_view(self.swapchain.depth_imgview.expect("missing depth image view"))
             .image_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
             .load_op(vk::AttachmentLoadOp::CLEAR)
             .store_op(vk::AttachmentStoreOp::DONT_CARE)
@@ -227,15 +227,31 @@ impl VulkanEngine {
             .color_attachments(slice::from_ref(&color_attach))
             .depth_attachment(&depth_attach);
 
-        unsafe {
-            self.device.transition_image_layout(
+        self.device.transition_image_layout(
+            cmd_buffer,
+            self.swapchain.images[image_idx],
+            self.swapchain.format,
+            1,
+            vk::ImageLayout::UNDEFINED,
+            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+        );
+        self.device.image_reuse_barrier(
+            cmd_buffer,
+            self.swapchain.depth_image.as_ref().expect("missing depth image").handle,
+            self.swapchain.depth_format,
+            1,
+            vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        );
+        if let Some(image) = &self.swapchain.msaa_image {
+            self.device.image_reuse_barrier(
                 cmd_buffer,
-                self.swapchain.images[image_idx],
+                image.handle,
                 self.swapchain.format,
                 1,
-                vk::ImageLayout::UNDEFINED,
                 vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
             );
+        }
+        unsafe {
             self.device.dynrender_fn.cmd_begin_rendering(cmd_buffer, &render_info);
             for cmdbuf in draw_cmds {
                 self.device.cmd_execute_commands(cmd_buffer, slice::from_ref(&cmdbuf.cmd_buffer));
