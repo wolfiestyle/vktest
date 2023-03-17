@@ -79,7 +79,8 @@ fn main() -> VulkanResult<()> {
                         .as_ref()
                         .map(|image| vk_app.create_texture(image.width(), image.height(), image.as_raw()).unwrap());
                     let indices = model.indices().map(|vec| vec.as_slice());
-                    MeshRenderer::new(&vk_app, model.vertices(), indices, color_tex)
+                    let color = model.material().pbr.base_color_factor.into();
+                    MeshRenderer::new(&vk_app, model.vertices(), indices, color, color_tex)
                 })
                 .collect::<Result<Vec<_>, _>>()
         })

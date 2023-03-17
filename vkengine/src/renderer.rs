@@ -3,7 +3,7 @@ use crate::engine::{CmdBufferRing, DrawPayload, Pipeline, PipelineMode, Shader, 
 use crate::types::{Cleanup, IndexInput, VertexInput, VulkanResult};
 use ash::vk;
 use bytemuck_derive::{Pod, Zeroable};
-use glam::{Affine3A, Mat4, Vec4};
+use glam::{Affine3A, Mat4, Vec3, Vec4};
 use inline_spirv::include_spirv;
 use std::marker::PhantomData;
 use std::slice;
@@ -17,6 +17,7 @@ pub struct MeshRenderer<V, I> {
     vertex_buffer: VkBuffer,
     index_buffer: Option<VkBuffer>,
     elem_count: u32,
+    base_color: [f32; 4],
     texture: Option<Texture>,
     cmd_buffers: CmdBufferRing,
     uniforms: UniformBuffer<ObjectUniforms>,
@@ -25,7 +26,9 @@ pub struct MeshRenderer<V, I> {
 }
 
 impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
-    pub fn new(engine: &VulkanEngine, vertices: &[V], indices: Option<&[I]>, texture: Option<Texture>) -> VulkanResult<Self> {
+    pub fn new(
+        engine: &VulkanEngine, vertices: &[V], indices: Option<&[I]>, base_color: [f32; 4], texture: Option<Texture>,
+    ) -> VulkanResult<Self> {
         let device = engine.device.clone();
         let shader = Shader::new(
             &device,
@@ -70,6 +73,7 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
             vertex_buffer,
             index_buffer,
             elem_count,
+            base_color,
             texture,
             cmd_buffers,
             uniforms,
@@ -134,9 +138,9 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
         let proj = engine.camera.get_projection(engine.swapchain.aspect());
         ObjectUniforms {
             mvp: proj * view * self.model,
-            light_dir: engine.sunlight.extend(0.0),
-            light_color: Vec4::ONE,
-            ambient: Vec4::splat(0.1),
+            light_dir: engine.sunlight.extend(self.base_color[0]),
+            light_color: Vec3::ONE.extend(self.base_color[1]),
+            ambient: Vec3::splat(0.1).extend(self.base_color[2]),
         }
     }
 

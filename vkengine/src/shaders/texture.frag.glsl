@@ -15,5 +15,6 @@ layout(location = 0) out vec4 outColor;
 void main() {
     vec3 diffuse = ambient.rgb + max(0.0, dot(fragNormal, light_dir.xyz)) * light_color.rgb;
     vec3 color = texture(texSampler, fragTexCoord).rgb * diffuse;
-    outColor = vec4(color, 1.0);
+    vec3 base_color = vec3(light_dir.a, light_color.a, ambient.a);
+    outColor = vec4(color * base_color, 1.0);
 }
