@@ -5,10 +5,9 @@ authors = ["SnowDerg <slayerbeast@gmail.com>"]
 edition = "2021"
 
 [dependencies]
-vkengine = { path = "../vkengine", features = ["winit", "egui", "easy-gltf"] }
+vkengine = { path = "../vkengine", features = ["winit", "egui", "easy-gltf", "cgmath"] }
 winit = "0.28.1"
 image = "0.24.5"
-obj-rs = "0.7.0"
 structopt = "0.3.26"
 yastl = "0.1.2"
-easy-gltf = "1.0.0"
+easy-gltf = { git = "https://github.com/wolfiestyle/easy-gltf.git" }

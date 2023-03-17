@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use structopt::StructOpt;
 use vkengine::gui::{egui, UiRenderer};
-use vkengine::{CameraController, MeshRenderer, SkyboxRenderer, VertexTemp, VkError, VulkanEngine, VulkanResult};
+use vkengine::{CameraController, MeshRenderer, SkyboxRenderer, VkError, VulkanEngine, VulkanResult};
 use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
@@ -78,12 +78,8 @@ fn main() -> VulkanResult<()> {
                         .base_color_texture
                         .as_ref()
                         .map(|image| vk_app.create_texture(image.width(), image.height(), image.as_raw()).unwrap());
-                    //HACK: vertices are returned on a non-Copy, non repr-C struct, so can't feed it directly
-                    let (p, verts, s) = unsafe { model.vertices().align_to::<VertexTemp>() };
-                    assert!(p.is_empty() && s.is_empty());
-                    //also indices are returned in usize for some reason
-                    let indices = model.indices().map(|idx| idx.iter().map(|&idx| idx as u32).collect::<Vec<_>>());
-                    MeshRenderer::new(&vk_app, verts, indices.as_deref(), color_tex)
+                    let indices = model.indices().map(|vec| vec.as_slice());
+                    MeshRenderer::new(&vk_app, model.vertices(), indices, color_tex)
                 })
                 .collect::<Result<Vec<_>, _>>()
         })

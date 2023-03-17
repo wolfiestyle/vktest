@@ -194,6 +194,12 @@ impl_format!([i32; 4], 1, vk::Format::R32G32B32A32_SINT);
 impl_format!(egui::Pos2, 1, vk::Format::R32G32_SFLOAT);
 #[cfg(feature = "egui")]
 impl_format!(egui::Color32, 1, vk::Format::R8G8B8A8_UNORM);
+#[cfg(feature = "cgmath")]
+impl_format!(cgmath::Vector2<f32>, 1, vk::Format::R32G32_SFLOAT);
+#[cfg(feature = "cgmath")]
+impl_format!(cgmath::Vector3<f32>, 1, vk::Format::R32G32B32_SFLOAT);
+#[cfg(feature = "cgmath")]
+impl_format!(cgmath::Vector4<f32>, 1, vk::Format::R32G32B32A32_SFLOAT);
 
 pub trait IndexInput: Copy {
     const VK_INDEX_TYPE: vk::IndexType;
@@ -279,6 +285,8 @@ impl_vertex!(tuple: A 0, B 1, C 2, D 3, E 4);
 impl_vertex!(tuple: A 0, B 1, C 2, D 3, E 4, F 5);
 #[cfg(feature = "egui")]
 impl_vertex!(struct egui::epaint::Vertex: pos, uv, color);
+#[cfg(feature = "easy-gltf")]
+impl_vertex!(struct easy_gltf::model::Vertex: position, normal, tex_coords);
 
 trait LensFormat {
     #[inline(always)]
@@ -326,14 +334,3 @@ impl_object_type!(vk::DescriptorPool, vk::ObjectType::DESCRIPTOR_POOL);
 impl_object_type!(vk::DescriptorSet, vk::ObjectType::DESCRIPTOR_SET);
 impl_object_type!(vk::Framebuffer, vk::ObjectType::FRAMEBUFFER);
 impl_object_type!(vk::CommandPool, vk::ObjectType::COMMAND_POOL);
-
-//HACK: same layout as easy_gltf's Vertex but with Copy
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub struct VertexTemp {
-    pub position: [f32; 3],
-    pub normal: [f32; 3],
-    pub tangent: [f32; 4],
-    pub tex_coords: [f32; 2],
-}
-
-impl_vertex!(struct VertexTemp: position, normal, tex_coords);
