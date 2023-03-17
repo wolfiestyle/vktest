@@ -88,7 +88,10 @@ pub struct CameraController {
 }
 
 impl CameraController {
-    pub fn new() -> Self {
+    pub fn new(direction: Vec3) -> Self {
+        let direction = direction.normalize();
+        let pitch = (-direction.y).asin().to_degrees();
+        let yaw = direction.x.atan2(direction.z).to_degrees();
         Self {
             speed: 1.0,
             flying: false,
@@ -97,8 +100,8 @@ impl CameraController {
             up_speed: 0.0,
             mouse_look: false,
             sensitivity: 0.1,
-            yaw: 0.0,
-            pitch: 0.0,
+            yaw,
+            pitch,
         }
     }
 

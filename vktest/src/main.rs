@@ -61,8 +61,6 @@ fn main() -> VulkanResult<()> {
         .unwrap();
 
     let mut vk_app = VulkanEngine::new(&window, "vulkan test", Default::default())?;
-    vk_app.camera.position = [2.0, 2.0, 2.0].into();
-    vk_app.camera.look_at([0.0; 3]);
 
     let mut scenes = gltf_scenes
         .iter()
@@ -93,6 +91,10 @@ fn main() -> VulkanResult<()> {
         .collect();
     let mut cur_scene = 0;
 
+    vk_app.camera.position = [2.0, 2.0, -2.0].into();
+    vk_app.camera.look_at([0.0; 3]);
+    let mut controller = CameraController::new(vk_app.camera.direction);
+
     let mut skybox = SkyboxRenderer::new(&vk_app, skybox[0].dimensions(), &skybox_raw)?;
 
     let mut gui = UiRenderer::new(&event_loop, &vk_app)?;
@@ -103,10 +105,6 @@ fn main() -> VulkanResult<()> {
     let mut prev_time = Instant::now();
     let mut prev_frame_count = 0;
     let mut fps = 0;
-    let mut controller = CameraController::new();
-    //TODO: compute these from current camera direction
-    controller.yaw = 225.0;
-    controller.pitch = 35.0;
 
     let mut fullscreen = false;
     let mut msaa_samples = vk_app.get_msaa_samples();
