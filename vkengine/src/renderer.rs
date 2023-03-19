@@ -1,5 +1,5 @@
-use crate::device::{UniformBuffer, VkBuffer, VulkanDevice};
-use crate::engine::{CmdBufferRing, DrawPayload, Pipeline, PipelineMode, Shader, Texture, VulkanEngine};
+use crate::device::{VkBuffer, VulkanDevice};
+use crate::engine::{CmdBufferRing, DrawPayload, Pipeline, PipelineMode, Shader, Texture, UploadBuffer, VulkanEngine};
 use crate::types::{Cleanup, IndexInput, VertexInput, VulkanResult};
 use ash::vk;
 use bytemuck_derive::{Pod, Zeroable};
@@ -20,7 +20,7 @@ pub struct MeshRenderer<V, I> {
     base_color: [f32; 4],
     texture: Option<Texture>,
     cmd_buffers: CmdBufferRing,
-    uniforms: UniformBuffer<ObjectUniforms>,
+    uniforms: UploadBuffer,
     pub model: Affine3A,
     _p: PhantomData<(V, I)>,
 }
@@ -63,7 +63,12 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
 
         let cmd_buffers = CmdBufferRing::new(&device)?;
 
-        let uniforms = UniformBuffer::new(&device)?;
+        let uniforms = UploadBuffer::new(
+            &device,
+            std::mem::size_of::<ObjectUniforms>() as _,
+            vk::BufferUsageFlags::UNIFORM_BUFFER,
+            "MeshRenderer uniform buffer",
+        )?;
 
         Ok(Self {
             device,
@@ -86,11 +91,10 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
         let cmd_buffer = self.cmd_buffers.get_current_buffer(engine)?;
         engine.begin_secondary_draw_commands(cmd_buffer, vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)?;
 
-        //FIXME: sync uniform buffer updates after frame finished
         let ubo = self.calc_uniforms(engine);
-        self.uniforms.write_uniforms(ubo)?;
+        self.uniforms.map(engine)?.write_object(&ubo);
 
-        let buffer_info = self.uniforms.descriptor();
+        let buffer_info = self.uniforms.descriptor(engine);
         let image_info = self.texture.as_ref().unwrap_or(&engine.default_texture).descriptor();
         unsafe {
             // object

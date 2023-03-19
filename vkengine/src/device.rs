@@ -7,7 +7,6 @@ use glam::UVec2;
 use gpu_allocator::vulkan::{Allocation, AllocationCreateDesc, AllocationScheme, Allocator, AllocatorCreateDesc};
 use gpu_allocator::MemoryLocation;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
-use std::marker::PhantomData;
 use std::mem::ManuallyDrop;
 use std::mem::{size_of, size_of_val};
 use std::slice;
@@ -951,44 +950,6 @@ impl MappedMemory<'_> {
     #[inline]
     pub fn write_object<T: bytemuck::Pod>(&mut self, object: &T) {
         self.write_bytes(bytemuck::bytes_of(object), 0)
-    }
-}
-
-pub struct UniformBuffer<T> {
-    pub buffer: VkBuffer,
-    _p: PhantomData<T>,
-}
-
-impl<T: bytemuck::Pod> UniformBuffer<T> {
-    pub fn new(device: &VulkanDevice) -> VulkanResult<Self> {
-        let size = size_of::<T>() as _;
-        let buffer = device.allocate_buffer(
-            size,
-            vk::BufferUsageFlags::UNIFORM_BUFFER,
-            MemoryLocation::CpuToGpu,
-            "Uniform buffer",
-        )?;
-        device.debug(|d| d.set_object_name(device, &*buffer, "Uniform buffer"));
-        Ok(Self { buffer, _p: PhantomData })
-    }
-
-    pub fn write_uniforms(&mut self, ubo: T) -> VulkanResult<()> {
-        self.buffer.map()?.write_object(&ubo);
-        Ok(())
-    }
-
-    pub fn descriptor(&self) -> vk::DescriptorBufferInfo {
-        vk::DescriptorBufferInfo {
-            buffer: *self.buffer,
-            offset: 0,
-            range: size_of::<T>() as _,
-        }
-    }
-}
-
-impl<T> Cleanup<VulkanDevice> for UniformBuffer<T> {
-    unsafe fn cleanup(&mut self, device: &VulkanDevice) {
-        self.buffer.cleanup(device);
     }
 }
 

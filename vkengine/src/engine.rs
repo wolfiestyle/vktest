@@ -1,10 +1,11 @@
 use crate::camera::Camera;
-use crate::device::{ImageData, Swapchain, VkImage, VulkanDevice};
+use crate::device::{ImageData, MappedMemory, Swapchain, VkBuffer, VkImage, VulkanDevice};
 use crate::instance::DeviceSelection;
 use crate::types::*;
 use ash::vk;
 use cstr::cstr;
 use glam::{UVec2, Vec3};
+use gpu_allocator::MemoryLocation;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use std::collections::HashMap;
 use std::slice;
@@ -665,6 +666,53 @@ impl CmdBufferRing {
 impl Cleanup<ash::Device> for CmdBufferRing {
     unsafe fn cleanup(&mut self, device: &ash::Device) {
         self.pool.cleanup(device);
+    }
+}
+
+#[derive(Debug)]
+pub struct UploadBuffer {
+    buffers: [VkBuffer; QUEUE_DEPTH + 1],
+}
+
+impl UploadBuffer {
+    pub fn new(device: &VulkanDevice, size: vk::DeviceSize, usage: vk::BufferUsageFlags, name: &str) -> VulkanResult<Self> {
+        let buffers = (0..QUEUE_DEPTH + 1)
+            .map(|_| device.allocate_buffer(size, usage, MemoryLocation::CpuToGpu, name))
+            .collect::<Result<Vec<_>, _>>()?
+            .try_into()
+            .unwrap();
+        let this = Self { buffers };
+        device.debug(|d| this.buffers.iter().for_each(|b| d.set_object_name(device, &b.handle, name)));
+        Ok(this)
+    }
+
+    pub fn get_current_buffer(&self, engine: &VulkanEngine) -> &VkBuffer {
+        let idx = (engine.get_current_frame() % (QUEUE_DEPTH as u64 + 1)) as usize;
+        &self.buffers[idx]
+    }
+
+    pub fn get_current_buffer_mut(&mut self, engine: &VulkanEngine) -> &mut VkBuffer {
+        let idx = (engine.get_current_frame() % (QUEUE_DEPTH as u64 + 1)) as usize;
+        &mut self.buffers[idx]
+    }
+
+    pub fn map(&mut self, engine: &VulkanEngine) -> VulkanResult<MappedMemory> {
+        self.get_current_buffer_mut(engine).map()
+    }
+
+    pub fn descriptor(&self, engine: &VulkanEngine) -> vk::DescriptorBufferInfo {
+        let buffer = self.get_current_buffer(engine);
+        vk::DescriptorBufferInfo {
+            buffer: buffer.handle,
+            offset: 0,
+            range: buffer.size(),
+        }
+    }
+}
+
+impl Cleanup<VulkanDevice> for UploadBuffer {
+    unsafe fn cleanup(&mut self, device: &VulkanDevice) {
+        self.buffers.cleanup(device)
     }
 }
 
