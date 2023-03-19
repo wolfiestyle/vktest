@@ -5,53 +5,46 @@ use winit::event::{DeviceEvent, WindowEvent};
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Camera {
     pub position: Vec3,
-    pub direction: Vec3,
-    pub up: Vec3,
+    pub rotation: Quat,
     pub fov: f32,
     pub near: f32,
     pub far: f32,
 }
 
 impl Camera {
-    pub fn new(position: impl Into<Vec3>, direction: impl Into<Vec3>, up: impl Into<Vec3>) -> Self {
-        Self {
-            position: position.into(),
-            direction: direction.into(),
-            up: up.into(),
-            ..Default::default()
-        }
-    }
-
     pub fn look_at(&mut self, center: impl Into<Vec3>) {
         let dir = center.into() - self.position;
-        if dir != Vec3::ZERO {
-            self.direction = dir;
+        if let Some(dir) = dir.try_normalize() {
+            let pitch = (-dir.y).asin();
+            let yaw = dir.x.atan2(dir.z);
+            self.rotation = Quat::from_euler(EulerRot::YXZ, yaw, pitch, 0.0);
         }
     }
 
     pub fn fly_forward(&mut self, dist: f32) {
-        self.position += self.direction.normalize() * dist;
+        self.position += self.rotation * Vec3::Z * dist;
     }
 
     pub fn fly_up(&mut self, dist: f32) {
-        self.position += self.up.normalize() * dist;
+        self.position += Vec3::Y * dist;
     }
 
     pub fn walk_forward(&mut self, dist: f32, ground: impl Into<Vec3>) {
-        self.position += self.up.cross(self.direction).cross(ground.into()).normalize() * dist;
+        self.position += (self.rotation * Vec3::X).cross(ground.into()).normalize() * dist;
     }
 
     pub fn walk_right(&mut self, dist: f32) {
-        self.position += self.direction.cross(self.up).normalize() * dist;
+        self.position += self.rotation * Vec3::X * dist;
     }
 
-    pub fn set_rotation(&mut self, pitch: f32, yaw: f32) {
-        let quat = Quat::from_euler(EulerRot::YXZ, yaw, pitch, 0.0);
-        self.direction = quat * Vec3::Z;
+    pub fn set_rotation(&mut self, pitch: f32, yaw: f32, roll: f32) {
+        self.rotation = Quat::from_euler(EulerRot::YXZ, yaw, pitch, roll);
     }
 
     pub(crate) fn get_view_transform(&self) -> Affine3A {
-        Affine3A::look_to_rh(self.position, self.direction, self.up)
+        let tf = Affine3A::from_rotation_translation(self.rotation, self.position);
+        let flip = Affine3A::from_rotation_x(std::f32::consts::PI);
+        flip * tf.inverse()
     }
 
     pub(crate) fn get_projection(&self, aspect: f32) -> Mat4 {
@@ -64,10 +57,9 @@ impl Default for Camera {
     fn default() -> Self {
         Self {
             position: Vec3::ZERO,
-            direction: Vec3::Z,
-            up: Vec3::NEG_Y,
+            rotation: Quat::IDENTITY,
             fov: 60.0,
-            near: 0.1,
+            near: 0.05,
             far: 1000.0,
         }
     }
@@ -85,13 +77,12 @@ pub struct CameraController {
     pub sensitivity: f32,
     pub yaw: f32,
     pub pitch: f32,
+    pub roll: f32,
 }
 
 impl CameraController {
-    pub fn new(direction: Vec3) -> Self {
-        let direction = direction.normalize();
-        let pitch = (-direction.y).asin().to_degrees();
-        let yaw = direction.x.atan2(direction.z).to_degrees();
+    pub fn new(camera: &Camera) -> Self {
+        let (y, x, z) = camera.rotation.to_euler(EulerRot::YXZ);
         Self {
             speed: 1.0,
             flying: false,
@@ -100,8 +91,9 @@ impl CameraController {
             up_speed: 0.0,
             mouse_look: false,
             sensitivity: 0.1,
-            yaw,
-            pitch,
+            yaw: y.to_degrees(),
+            pitch: x.to_degrees(),
+            roll: z.to_degrees(),
         }
     }
 
@@ -110,7 +102,7 @@ impl CameraController {
             if self.flying {
                 camera.fly_forward(self.forward_speed * dt);
             } else {
-                camera.walk_forward(self.forward_speed * dt, camera.up);
+                camera.walk_forward(self.forward_speed * dt, Vec3::Y);
             }
         }
         if self.right_speed != 0.0 {
@@ -120,7 +112,7 @@ impl CameraController {
             camera.fly_up(self.up_speed * dt);
         }
         if self.mouse_look {
-            camera.set_rotation(self.pitch.to_radians(), self.yaw.to_radians());
+            camera.set_rotation(self.pitch.to_radians(), self.yaw.to_radians(), self.roll.to_radians());
         }
     }
 
@@ -150,10 +142,10 @@ impl CameraController {
                     self.right_speed = 0.0;
                 }
                 KeyboardInput { state: Pressed, virtual_keycode: Some(Key::Space), .. } => {
-                    self.up_speed = -self.speed;
+                    self.up_speed = self.speed;
                 }
                 KeyboardInput { state: Pressed, virtual_keycode: Some(Key::C), .. } => {
-                    self.up_speed = self.speed;
+                    self.up_speed = -self.speed;
                 }
                 KeyboardInput { state: Released, virtual_keycode: Some(Key::Space | Key::C), .. } => {
                     self.up_speed = 0.0;

@@ -93,7 +93,7 @@ fn main() -> VulkanResult<()> {
 
     vk_app.camera.position = [2.0, 2.0, -2.0].into();
     vk_app.camera.look_at([0.0; 3]);
-    let mut controller = CameraController::new(vk_app.camera.direction);
+    let mut controller = CameraController::new(&vk_app.camera);
 
     let mut skybox = SkyboxRenderer::new(&vk_app, skybox[0].dimensions(), &skybox_raw)?;
 
