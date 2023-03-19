@@ -353,7 +353,7 @@ impl VulkanEngine {
                 .describe_err("Failed waiting semaphore")?;
         }
         let frame = &mut self.frame_state[frame_idx];
-        frame.free_payload(&self.device)?;
+        frame.execute_on_finish(&self.device);
         let next_frame = self.current_frame + 1;
         frame.wait_frame = next_frame;
         frame.payload.extend(draw_cmds);
@@ -777,13 +777,12 @@ impl FrameState {
         })
     }
 
-    fn free_payload(&mut self, device: &VulkanDevice) -> VulkanResult<()> {
+    fn execute_on_finish(&mut self, device: &VulkanDevice) {
         for pl in self.payload.drain(..) {
             if let Some(f) = pl.on_frame_finish {
                 f(device)
             }
         }
-        Ok(())
     }
 }
 
