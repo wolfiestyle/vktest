@@ -138,10 +138,8 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
     }
 
     fn calc_uniforms(&self, engine: &VulkanEngine) -> ObjectUniforms {
-        let view = engine.camera.get_view_transform();
-        let proj = engine.camera.get_projection(engine.swapchain.aspect());
         ObjectUniforms {
-            mvp: proj * view * self.model,
+            mvp: engine.view_proj * self.model,
             light_dir: engine.sunlight.extend(self.base_color[0]),
             light_color: Vec3::ONE.extend(self.base_color[1]),
             ambient: Vec3::splat(0.1).extend(self.base_color[2]),
@@ -253,9 +251,7 @@ impl SkyboxRenderer {
         engine.begin_secondary_draw_commands(cmd_buffer, vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)?;
 
         let image_info = self.texture.descriptor();
-        let view = engine.camera.get_view_transform();
-        let proj = engine.camera.get_projection(engine.swapchain.aspect());
-        let viewproj_inv = (proj * view).inverse();
+        let viewproj_inv = engine.view_proj.inverse();
         unsafe {
             // background
             self.device

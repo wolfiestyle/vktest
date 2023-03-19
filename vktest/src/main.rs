@@ -246,6 +246,8 @@ fn main() -> VulkanResult<()> {
             window.request_redraw();
         }
         Event::RedrawRequested(_) => {
+            vk_app.update();
+
             let objects = &mut scenes[cur_scene];
             let mut draw_cmds = Vec::with_capacity(objects.len());
             let mut skybox_cmds = VkError::UnfinishedJob.into();

@@ -4,7 +4,7 @@ use crate::instance::DeviceSelection;
 use crate::types::*;
 use ash::vk;
 use cstr::cstr;
-use glam::{UVec2, Vec3};
+use glam::{Mat4, UVec2, Vec3};
 use gpu_allocator::MemoryLocation;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use std::collections::HashMap;
@@ -30,6 +30,7 @@ pub struct VulkanEngine {
     prev_frame_time: Instant,
     last_frame_time: Instant,
     pub camera: Camera,
+    pub view_proj: Mat4,
     pub sunlight: Vec3,
 }
 
@@ -73,6 +74,7 @@ impl VulkanEngine {
             prev_frame_time: now,
             last_frame_time: now,
             camera,
+            view_proj: Mat4::IDENTITY,
             sunlight: Vec3::Y,
         };
 
@@ -298,6 +300,12 @@ impl VulkanEngine {
                 .describe_err("Failed to end recording secondary command buffer")?;
         }
         Ok(cmd_buffer)
+    }
+
+    pub fn update(&mut self) {
+        let view = self.camera.get_view_transform();
+        let proj = self.camera.get_projection(self.swapchain.aspect());
+        self.view_proj = proj * view;
     }
 
     pub fn submit_draw_commands(&mut self, draw_commands: impl IntoIterator<Item = DrawPayload>) -> VulkanResult<bool> {
