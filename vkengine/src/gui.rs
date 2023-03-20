@@ -1,6 +1,6 @@
 use crate::device::{VkBuffer, VulkanDevice};
-use crate::engine::{DrawPayload, Pipeline, PipelineMode, Shader, Texture, VulkanEngine};
-use crate::types::{Cleanup, ErrorDescription, VulkanResult};
+use crate::engine::{CmdBufferRing, DrawPayload, Pipeline, PipelineMode, Shader, Texture, VulkanEngine};
+use crate::types::{Cleanup, VulkanResult};
 use ash::vk;
 use egui::epaint::{Primitive, Vertex};
 use egui::{ClippedPrimitive, Context, FullOutput, PlatformOutput, TextureId, TexturesDelta};
@@ -20,6 +20,7 @@ use winit::window::Window;
 pub use egui; //FIXME: forward only what's needed to build UIs
 
 const MIN_FRAME_TIME: Duration = Duration::from_micros(1_000_000 / 60);
+const INITIAL_BUFFER_SIZE: u64 = 65536;
 
 pub struct UiRenderer {
     device: Arc<VulkanDevice>,
@@ -27,14 +28,15 @@ pub struct UiRenderer {
     winit_state: State,
     frame_output: Option<FullOutput>,
     platform_output: Option<PlatformOutput>,
+    primitives: Vec<ClippedPrimitive>,
     textures: HashMap<TextureId, Texture>,
     shader: Shader,
     pipeline: Pipeline,
     set_layout: vk::DescriptorSetLayout,
     push_constants: vk::PushConstantRange,
     buffer: VkBuffer,
-    cmd_pool: vk::CommandPool,
-    cmd_buffer: Option<vk::CommandBuffer>,
+    total_vert_size: vk::DeviceSize,
+    cmd_buffers: CmdBufferRing,
     last_draw_time: Option<Instant>,
 }
 
@@ -69,14 +71,15 @@ impl UiRenderer {
             .render_to_swapchain(&engine.swapchain)
             .mode(PipelineMode::Overlay)
             .build(engine)?;
+
         let buffer = device.allocate_buffer(
-            65536,
+            INITIAL_BUFFER_SIZE,
             vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::INDEX_BUFFER,
             MemoryLocation::CpuToGpu,
             "UiRenderer buffer",
         )?;
 
-        let cmd_pool = device.create_command_pool(device.dev_info.graphics_idx, Default::default())?;
+        let cmd_buffers = CmdBufferRing::new(&device)?;
 
         Ok(Self {
             device,
@@ -84,14 +87,15 @@ impl UiRenderer {
             winit_state: State::new(event_loop),
             frame_output: None,
             platform_output: None,
+            primitives: vec![],
             textures: Default::default(),
             shader,
             pipeline,
             set_layout,
             push_constants,
             buffer,
-            cmd_pool,
-            cmd_buffer: None,
+            total_vert_size: 0,
+            cmd_buffers,
             last_draw_time: None,
         })
     }
@@ -113,29 +117,26 @@ impl UiRenderer {
     }
 
     pub fn draw(&mut self, engine: &VulkanEngine) -> VulkanResult<DrawPayload> {
-        let Some(run_output) = self.frame_output.take() else {
-            return Ok(DrawPayload::new(self.cmd_buffer.expect("draw called before run")));
-        };
+        if let Some(run_output) = self.frame_output.take() {
+            // process a new set of primitives
+            self.platform_output = Some(run_output.platform_output);
+            self.primitives = self.context.tessellate(run_output.shapes);
+            let mut drop_textures = self.update_textures(run_output.textures_delta)?;
+            let mut drop_buffers = self.update_buffers()?;
 
-        self.platform_output = Some(run_output.platform_output);
-        let primitives = self.context.tessellate(run_output.shapes);
-        let mut drop_textures = self.update_textures(run_output.textures_delta)?;
-
-        let cmd_buffer = self
-            .device
-            .create_command_buffer(self.cmd_pool, vk::CommandBufferLevel::SECONDARY)?;
-        let old_cmdbuf = self.cmd_buffer.replace(cmd_buffer);
-        let pool = self.cmd_pool;
-        let mut drop_buffers = self.build_draw_commands(cmd_buffer, primitives, engine)?;
-
-        let payload = DrawPayload::new_with_callback(cmd_buffer, move |dev| unsafe {
-            drop_buffers.cleanup(dev);
-            drop_textures.cleanup(dev);
-            if let Some(cmdbuf) = old_cmdbuf {
-                dev.free_command_buffers(pool, &[cmdbuf]);
-            }
-        });
-        Ok(payload)
+            let cmd_buffer = self.cmd_buffers.get_current_buffer(engine)?;
+            self.build_draw_commands(cmd_buffer, engine)?;
+            let payload = DrawPayload::new_with_callback(cmd_buffer, move |dev| unsafe {
+                drop_buffers.cleanup(dev);
+                drop_textures.cleanup(dev);
+            });
+            Ok(payload)
+        } else {
+            // build a command buffer from the old primitives
+            let cmd_buffer = self.cmd_buffers.get_current_buffer(engine)?;
+            self.build_draw_commands(cmd_buffer, engine)?;
+            Ok(DrawPayload::new(cmd_buffer))
+        }
     }
 
     pub fn event_output(&mut self, window: &Window) {
@@ -178,22 +179,20 @@ impl UiRenderer {
         Ok(drop_textures)
     }
 
-    fn build_draw_commands(
-        &mut self, cmd_buffer: vk::CommandBuffer, primitives: Vec<ClippedPrimitive>, engine: &VulkanEngine,
-    ) -> VulkanResult<Option<VkBuffer>> {
+    fn update_buffers(&mut self) -> VulkanResult<Option<VkBuffer>> {
         // get combined buffer size for a single shared allocation
-        let (total_verts, total_idx) = primitives.iter().fold((0, 0), |acc, prim| match prim.primitive {
-            Primitive::Mesh(ref mesh) => (acc.0 + mesh.vertices.len(), acc.1 + mesh.indices.len()),
+        let (total_verts, total_idx) = self.primitives.iter().fold((0, 0), |acc, prim| match &prim.primitive {
+            Primitive::Mesh(mesh) => (acc.0 + mesh.vertices.len(), acc.1 + mesh.indices.len()),
             _ => acc,
         });
         let total_vert_size = total_verts * size_of::<Vertex>();
         let total_bytes = total_vert_size + total_idx * size_of::<u32>();
+        self.total_vert_size = total_vert_size as _;
         // allocate nearest power of two sized buffer if necessary
-        let device = &*self.device;
         let mut drop_buffer = None;
         if total_bytes as u64 > self.buffer.size() {
             let new_size = 1u64 << ((total_bytes - 1).ilog2() + 1);
-            let new_buffer = device.allocate_buffer(
+            let new_buffer = self.device.allocate_buffer(
                 new_size,
                 vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::INDEX_BUFFER,
                 MemoryLocation::CpuToGpu,
@@ -201,36 +200,61 @@ impl UiRenderer {
             )?;
             drop_buffer = Some(std::mem::replace(&mut self.buffer, new_buffer));
         }
-        // build a command buffer from the primitives
-        engine.begin_secondary_draw_commands(cmd_buffer, vk::CommandBufferUsageFlags::SIMULTANEOUS_USE)?;
+        // write vertices and indices on the same buffer
+        let mut vert_offset = 0;
+        let mut idx_offset = total_vert_size / size_of::<u32>();
+        let mut mem = self.buffer.map()?;
+        for prim in &self.primitives {
+            match &prim.primitive {
+                Primitive::Mesh(mesh) => {
+                    mem.write_slice(&mesh.vertices, vert_offset);
+                    mem.write_slice(&mesh.indices, idx_offset);
+                    vert_offset += mesh.vertices.len();
+                    idx_offset += mesh.indices.len();
+                }
+                Primitive::Callback(_) => (),
+            }
+        }
+        Ok(drop_buffer)
+    }
+
+    fn build_draw_commands(&mut self, cmd_buffer: vk::CommandBuffer, engine: &VulkanEngine) -> VulkanResult<()> {
+        let device = &*self.device;
+        engine.begin_secondary_draw_commands(cmd_buffer, vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)?;
         unsafe {
             device.debug(|d| d.cmd_begin_label(cmd_buffer, "UI", [0.6, 0.2, 0.4, 1.0]));
             device.cmd_bind_pipeline(cmd_buffer, vk::PipelineBindPoint::GRAPHICS, *self.pipeline);
             device.cmd_bind_vertex_buffers(cmd_buffer, 0, &[*self.buffer], &[0]);
-            device.cmd_bind_index_buffer(cmd_buffer, *self.buffer, total_vert_size as _, vk::IndexType::UINT32);
+            device.cmd_bind_index_buffer(cmd_buffer, *self.buffer, self.total_vert_size, vk::IndexType::UINT32);
             device.cmd_set_viewport(cmd_buffer, 0, &[engine.swapchain.viewport()]);
         }
+        let vk::Extent2D { width, height } = engine.swapchain.extent;
+        let proj = Mat4::orthographic_rh(0.0, width as _, 0.0, height as _, 0.0, 1.0);
+        unsafe {
+            device.cmd_push_constants(
+                cmd_buffer,
+                self.pipeline.layout,
+                vk::ShaderStageFlags::VERTEX,
+                0,
+                bytemuck::bytes_of(&proj),
+            );
+        }
+
         let mut vert_offset = 0;
         let mut idx_offset = 0;
-        let idx_base = total_vert_size / 4;
-        let mut mem = self.buffer.map()?;
-        for prim in primitives {
-            match prim.primitive {
+        for prim in &self.primitives {
+            unsafe { device.cmd_set_scissor(cmd_buffer, 0, &[vk_rect(prim.clip_rect)]) };
+            match &prim.primitive {
                 Primitive::Mesh(mesh) => {
-                    let n_vert = mesh.vertices.len();
-                    let n_idx = mesh.indices.len();
-                    mem.write_slice(&mesh.vertices, vert_offset);
-                    mem.write_slice(&mesh.indices, idx_base + idx_offset);
-                    let vk::Extent2D { width, height } = engine.swapchain.extent;
-                    let proj = Mat4::orthographic_rh(0.0, width as _, 0.0, height as _, 0.0, 1.0);
-                    let texture = self.textures.get(&mesh.texture_id).describe_err("Missing gui texture")?;
+                    let n_vert = mesh.vertices.len() as i32;
+                    let n_idx = mesh.indices.len() as u32;
+                    let texture = self.textures.get(&mesh.texture_id).unwrap_or(&engine.default_texture);
                     let image_info = texture.descriptor();
                     let desc_writes = vk::WriteDescriptorSet::builder()
                         .dst_binding(0)
                         .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                         .image_info(slice::from_ref(&image_info));
                     unsafe {
-                        device.cmd_set_scissor(cmd_buffer, 0, &[vk_rect(prim.clip_rect)]);
                         device.pushdesc_fn.cmd_push_descriptor_set(
                             cmd_buffer,
                             vk::PipelineBindPoint::GRAPHICS,
@@ -238,14 +262,7 @@ impl UiRenderer {
                             0,
                             slice::from_ref(&desc_writes),
                         );
-                        device.cmd_push_constants(
-                            cmd_buffer,
-                            self.pipeline.layout,
-                            vk::ShaderStageFlags::VERTEX,
-                            0,
-                            bytemuck::bytes_of(&proj),
-                        );
-                        device.cmd_draw_indexed(cmd_buffer, n_idx as _, 1, idx_offset as _, vert_offset as _, 0);
+                        device.cmd_draw_indexed(cmd_buffer, n_idx, 1, idx_offset, vert_offset, 0);
                     }
                     vert_offset += n_vert;
                     idx_offset += n_idx;
@@ -257,7 +274,7 @@ impl UiRenderer {
         }
         device.debug(|d| d.cmd_end_label(cmd_buffer));
         engine.end_secondary_draw_commands(cmd_buffer)?;
-        Ok(drop_buffer)
+        Ok(())
     }
 
     pub fn rebuild_pipeline(&mut self, engine: &VulkanEngine) -> VulkanResult<()> {
@@ -285,7 +302,7 @@ impl Drop for UiRenderer {
             self.shader.cleanup(&self.device);
             self.set_layout.cleanup(&self.device);
             self.buffer.cleanup(&self.device);
-            self.cmd_pool.cleanup(&self.device);
+            self.cmd_buffers.cleanup(&self.device);
         }
     }
 }
