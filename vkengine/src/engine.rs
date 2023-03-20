@@ -718,12 +718,7 @@ impl UploadBuffer {
     }
 
     pub fn descriptor(&self, engine: &VulkanEngine) -> vk::DescriptorBufferInfo {
-        let buffer = self.get_current_buffer(engine);
-        vk::DescriptorBufferInfo {
-            buffer: buffer.handle,
-            offset: 0,
-            range: buffer.size(),
-        }
+        self.get_current_buffer(engine).descriptor()
     }
 }
 

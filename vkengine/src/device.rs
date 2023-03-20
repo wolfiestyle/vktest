@@ -909,6 +909,16 @@ impl<T> MemoryObject<T> {
     }
 }
 
+impl MemoryObject<vk::Buffer> {
+    pub fn descriptor(&self) -> vk::DescriptorBufferInfo {
+        vk::DescriptorBufferInfo {
+            buffer: self.handle,
+            offset: 0,
+            range: self.size(),
+        }
+    }
+}
+
 impl<T> std::ops::Deref for MemoryObject<T> {
     type Target = T;
     fn deref(&self) -> &Self::Target {
