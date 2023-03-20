@@ -20,8 +20,7 @@ pub struct VulkanEngine {
     window_size: UVec2,
     window_resized: bool,
     pub(crate) swapchain: Swapchain,
-    cmd_pool: vk::CommandPool,
-    main_cmd_buffers: Vec<vk::CommandBuffer>,
+    main_cmd_buffers: CmdBufferRing,
     frame_state: Vec<FrameState>,
     current_frame: u64,
     samplers: Mutex<HashMap<SamplerOptions, vk::Sampler>>,
@@ -46,9 +45,7 @@ impl VulkanEngine {
         let swapchain = Swapchain::new(&device, window_size, SWAPCHAIN_IMAGE_COUNT, depth_format, msaa_samples)?;
         eprintln!("color_format: {:?}, depth_format: {depth_format:?}", swapchain.format);
 
-        let cmd_pool = device.create_command_pool(device.dev_info.graphics_idx, vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)?;
-        // we use N + 1 command buffers so we can write on them right away without waiting for the previous frame
-        let main_cmd_buffers = device.create_command_buffers(cmd_pool, QUEUE_DEPTH as u32 + 1, vk::CommandBufferLevel::PRIMARY)?;
+        let main_cmd_buffers = CmdBufferRing::new_with_level(&device, vk::CommandBufferLevel::PRIMARY)?;
         let frame_state = (0..QUEUE_DEPTH).map(|_| FrameState::new(&device)).collect::<Result<Vec<_>, _>>()?;
 
         let pixel = [255, 255, 255, 255];
@@ -64,7 +61,6 @@ impl VulkanEngine {
             window_size,
             window_resized: false,
             swapchain,
-            cmd_pool,
             main_cmd_buffers,
             frame_state,
             current_frame: 0,
@@ -310,12 +306,11 @@ impl VulkanEngine {
 
     pub fn submit_draw_commands(&mut self, draw_commands: impl IntoIterator<Item = DrawPayload>) -> VulkanResult<bool> {
         let frame_idx = (self.current_frame % self.frame_state.len() as u64) as usize;
-        let cmdbuf_idx = (self.current_frame % self.main_cmd_buffers.len() as u64) as usize;
         let frame = &self.frame_state[frame_idx];
         let image_avail_sem = frame.image_avail_sem;
         let render_finish_sem = frame.render_finished_sem;
         let in_flight_sem = frame.in_flight_sem;
-        let command_buffer = self.main_cmd_buffers[cmdbuf_idx];
+        let command_buffer = self.main_cmd_buffers[self.current_frame];
 
         // the swapchain image id is available before it's actually ready to use
         let image_idx = unsafe {
@@ -404,7 +399,7 @@ impl Drop for VulkanEngine {
         unsafe {
             self.device.device_wait_idle().unwrap();
             self.frame_state.cleanup(&self.device);
-            self.cmd_pool.cleanup(&self.device);
+            self.main_cmd_buffers.cleanup(&self.device);
             self.swapchain.cleanup(&self.device);
             self.samplers.lock().unwrap().cleanup(&self.device);
             self.default_texture.cleanup(&self.device);
@@ -654,20 +649,34 @@ pub struct CmdBufferRing {
 }
 
 impl CmdBufferRing {
+    #[inline]
     pub fn new(device: &VulkanDevice) -> VulkanResult<Self> {
+        Self::new_with_level(device, vk::CommandBufferLevel::SECONDARY)
+    }
+
+    fn new_with_level(device: &VulkanDevice, level: vk::CommandBufferLevel) -> VulkanResult<Self> {
         let pool = device.create_command_pool(device.dev_info.graphics_idx, vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)?;
+        // we use N + 1 command buffers so we can write on them right away without waiting for the previous frame
         let buffers = device
-            .create_command_buffers(pool, QUEUE_DEPTH as u32 + 1, vk::CommandBufferLevel::SECONDARY)?
+            .create_command_buffers(pool, QUEUE_DEPTH as u32 + 1, level)?
             .try_into()
             .unwrap();
         Ok(Self { pool, buffers })
     }
 
     pub fn get_current_buffer(&self, engine: &VulkanEngine) -> VulkanResult<vk::CommandBuffer> {
-        let idx = (engine.get_current_frame() % (QUEUE_DEPTH as u64 + 1)) as usize;
-        let cmd_buffer = self.buffers[idx];
+        let cmd_buffer = self[engine.current_frame];
         unsafe { engine.device.reset_command_buffer(cmd_buffer, Default::default())? };
         Ok(cmd_buffer)
+    }
+}
+
+impl std::ops::Index<u64> for CmdBufferRing {
+    type Output = vk::CommandBuffer;
+
+    #[inline]
+    fn index(&self, index: u64) -> &Self::Output {
+        &self.buffers[(index % (QUEUE_DEPTH as u64 + 1)) as usize]
     }
 }
 
@@ -694,14 +703,14 @@ impl UploadBuffer {
         Ok(this)
     }
 
+    #[inline]
     pub fn get_current_buffer(&self, engine: &VulkanEngine) -> &VkBuffer {
-        let idx = (engine.get_current_frame() % (QUEUE_DEPTH as u64 + 1)) as usize;
-        &self.buffers[idx]
+        &self[engine.current_frame]
     }
 
+    #[inline]
     pub fn get_current_buffer_mut(&mut self, engine: &VulkanEngine) -> &mut VkBuffer {
-        let idx = (engine.get_current_frame() % (QUEUE_DEPTH as u64 + 1)) as usize;
-        &mut self.buffers[idx]
+        &mut self[engine.current_frame]
     }
 
     pub fn map(&mut self, engine: &VulkanEngine) -> VulkanResult<MappedMemory> {
@@ -715,6 +724,22 @@ impl UploadBuffer {
             offset: 0,
             range: buffer.size(),
         }
+    }
+}
+
+impl std::ops::Index<u64> for UploadBuffer {
+    type Output = VkBuffer;
+
+    #[inline]
+    fn index(&self, index: u64) -> &Self::Output {
+        &self.buffers[(index % (QUEUE_DEPTH as u64 + 1)) as usize]
+    }
+}
+
+impl std::ops::IndexMut<u64> for UploadBuffer {
+    #[inline]
+    fn index_mut(&mut self, index: u64) -> &mut Self::Output {
+        &mut self.buffers[(index % (QUEUE_DEPTH as u64 + 1)) as usize]
     }
 }
 
