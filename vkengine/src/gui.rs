@@ -164,6 +164,7 @@ impl UiRenderer {
                         vk::Format::R8G8B8A8_SRGB,
                         bytes,
                         vk::Sampler::null(),
+                        false,
                     )?);
                 }
                 Entry::Occupied(mut entry) => {

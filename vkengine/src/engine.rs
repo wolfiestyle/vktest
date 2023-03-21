@@ -49,7 +49,7 @@ impl VulkanEngine {
         let frame_state = (0..QUEUE_DEPTH).map(|_| FrameState::new(&device)).collect::<Result<Vec<_>, _>>()?;
 
         let pixel = [255, 255, 255, 255];
-        let default_texture = Texture::new(&device, 1, 1, vk::Format::R8G8B8A8_UNORM, &pixel, vk::Sampler::null())?;
+        let default_texture = Texture::new(&device, 1, 1, vk::Format::R8G8B8A8_UNORM, &pixel, vk::Sampler::null(), false)?;
 
         let pipeline_cache = device.create_pipeline_cache(&[])?; //TODO: save/load cache data
 
@@ -159,6 +159,8 @@ impl VulkanEngine {
                     .unnormalized_coordinates(false)
                     .compare_enable(false)
                     .compare_op(vk::CompareOp::ALWAYS)
+                    .min_lod(0.0)
+                    .max_lod(vk::LOD_CLAMP_NONE)
                     .mipmap_mode(vk::SamplerMipmapMode::NEAREST);
                 let sampler = unsafe {
                     self.device
@@ -173,7 +175,7 @@ impl VulkanEngine {
 
     pub fn create_texture(&self, width: u32, height: u32, data: &[u8]) -> VulkanResult<Texture> {
         let sampler = self.get_sampler(vk::Filter::LINEAR, vk::Filter::LINEAR, vk::SamplerAddressMode::REPEAT, true)?;
-        Texture::new(&self.device, width, height, vk::Format::R8G8B8A8_SRGB, data, sampler)
+        Texture::new(&self.device, width, height, vk::Format::R8G8B8A8_SRGB, data, sampler, true)
     }
 
     fn record_primary_command_buffer(
@@ -232,6 +234,7 @@ impl VulkanEngine {
             self.swapchain.images[image_idx],
             self.swapchain.format,
             1,
+            1,
             vk::ImageLayout::UNDEFINED,
             vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
         );
@@ -261,6 +264,7 @@ impl VulkanEngine {
                 cmd_buffer,
                 self.swapchain.images[image_idx],
                 self.swapchain.format,
+                1,
                 1,
                 vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
                 vk::ImageLayout::PRESENT_SRC_KHR,
@@ -823,18 +827,26 @@ pub struct Texture {
 
 impl Texture {
     pub fn new(
-        device: &VulkanDevice, width: u32, height: u32, format: vk::Format, data: &[u8], sampler: vk::Sampler,
+        device: &VulkanDevice, width: u32, height: u32, format: vk::Format, data: &[u8], sampler: vk::Sampler, gen_mipmaps: bool,
     ) -> VulkanResult<Self> {
-        let image = device.create_image_from_data(width, height, format, ImageData::Single(data), Default::default())?;
-        let imgview = device.create_image_view(*image, format, 0, vk::ImageViewType::TYPE_2D, vk::ImageAspectFlags::COLOR)?;
+        let mips = if gen_mipmaps { width.max(height).ilog2() + 1 } else { 1 };
+        let image = device.create_image_from_data(width, height, mips, format, ImageData::Single(data), Default::default())?;
+        let imgview = device.create_image_view(*image, format, 0, mips, vk::ImageViewType::TYPE_2D, vk::ImageAspectFlags::COLOR)?;
         Ok(Self { image, imgview, sampler })
     }
 
     pub fn new_cubemap(
         device: &VulkanDevice, width: u32, height: u32, format: vk::Format, data: &[&[u8]; 6], sampler: vk::Sampler,
     ) -> VulkanResult<Self> {
-        let image = device.create_image_from_data(width, height, format, ImageData::Array(data), vk::ImageCreateFlags::CUBE_COMPATIBLE)?;
-        let imgview = device.create_image_view(*image, format, 0, vk::ImageViewType::CUBE, vk::ImageAspectFlags::COLOR)?;
+        let image = device.create_image_from_data(
+            width,
+            height,
+            1,
+            format,
+            ImageData::Array(data),
+            vk::ImageCreateFlags::CUBE_COMPATIBLE,
+        )?;
+        let imgview = device.create_image_view(*image, format, 0, 1, vk::ImageViewType::CUBE, vk::ImageAspectFlags::COLOR)?;
         Ok(Self { image, imgview, sampler })
     }
 

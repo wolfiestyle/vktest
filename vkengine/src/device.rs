@@ -271,7 +271,7 @@ impl VulkanDevice {
                 depth: 1,
             })
             .array_layers(params.layers)
-            .mip_levels(1)
+            .mip_levels(params.mip_levels)
             .samples(params.samples)
             .format(format)
             .tiling(vk::ImageTiling::OPTIMAL)
@@ -321,8 +321,8 @@ impl VulkanDevice {
     }
 
     pub fn transition_image_layout(
-        &self, cmd_buffer: vk::CommandBuffer, image: vk::Image, format: vk::Format, layer_count: u32, old_layout: vk::ImageLayout,
-        new_layout: vk::ImageLayout,
+        &self, cmd_buffer: vk::CommandBuffer, image: vk::Image, format: vk::Format, layer_count: u32, mip_levels: u32,
+        old_layout: vk::ImageLayout, new_layout: vk::ImageLayout,
     ) {
         fn layout_to_access_and_stage(layout: vk::ImageLayout, is_dst: bool) -> (vk::AccessFlags, vk::PipelineStageFlags) {
             match layout {
@@ -358,7 +358,7 @@ impl VulkanDevice {
             .subresource_range(vk::ImageSubresourceRange {
                 aspect_mask,
                 base_mip_level: 0,
-                level_count: 1,
+                level_count: mip_levels,
                 base_array_layer: 0,
                 layer_count,
             });
@@ -425,7 +425,7 @@ impl VulkanDevice {
 
     fn copy_buffer_to_image(
         &self, cmd_buffer: vk::CommandBuffer, buffer: vk::Buffer, image: vk::Image, offset: vk::Offset3D, extent: vk::Extent3D,
-        layer_count: u32,
+        layer_count: u32, mip_level: u32,
     ) {
         let region = vk::BufferImageCopy::builder()
             .buffer_offset(0)
@@ -433,7 +433,7 @@ impl VulkanDevice {
             .buffer_image_height(0)
             .image_subresource(vk::ImageSubresourceLayers {
                 aspect_mask: vk::ImageAspectFlags::COLOR,
-                mip_level: 0,
+                mip_level,
                 base_array_layer: 0,
                 layer_count,
             })
@@ -450,27 +450,149 @@ impl VulkanDevice {
         }
     }
 
+    unsafe fn generate_mipmaps(
+        &self, cmd_buffer: vk::CommandBuffer, image: vk::Image, mut width: u32, mut height: u32, mip_levels: u32, layer_count: u32,
+    ) {
+        let mut barrier = vk::ImageMemoryBarrier::builder()
+            .image(image)
+            .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .subresource_range(vk::ImageSubresourceRange {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: 0,
+                layer_count,
+            });
+        for i in 1..mip_levels {
+            // prepare source mip level for reading
+            barrier.subresource_range.base_mip_level = i - 1;
+            barrier.old_layout = vk::ImageLayout::TRANSFER_DST_OPTIMAL;
+            barrier.new_layout = vk::ImageLayout::TRANSFER_SRC_OPTIMAL;
+            barrier.src_access_mask = vk::AccessFlags::TRANSFER_WRITE;
+            barrier.dst_access_mask = vk::AccessFlags::TRANSFER_READ;
+            self.device.cmd_pipeline_barrier(
+                cmd_buffer,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                slice::from_ref(&barrier),
+            );
+            // perform the blit on the destination mip level
+            let width_2 = 1.max(width / 2);
+            let height_2 = 1.max(height / 2);
+            let blit = vk::ImageBlit::builder()
+                .src_offsets([
+                    vk::Offset3D::default(),
+                    vk::Offset3D {
+                        x: width as _,
+                        y: height as _,
+                        z: 1,
+                    },
+                ])
+                .src_subresource(vk::ImageSubresourceLayers {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    mip_level: i - 1,
+                    base_array_layer: 0,
+                    layer_count,
+                })
+                .dst_offsets([
+                    vk::Offset3D::default(),
+                    vk::Offset3D {
+                        x: width_2 as _,
+                        y: height_2 as _,
+                        z: 1,
+                    },
+                ])
+                .dst_subresource(vk::ImageSubresourceLayers {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    mip_level: i,
+                    base_array_layer: 0,
+                    layer_count,
+                });
+            self.device.cmd_blit_image(
+                cmd_buffer,
+                image,
+                vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                image,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                slice::from_ref(&blit),
+                vk::Filter::LINEAR,
+            );
+            // transition the source level into shader read
+            barrier.old_layout = vk::ImageLayout::TRANSFER_SRC_OPTIMAL;
+            barrier.new_layout = vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL;
+            barrier.src_access_mask = vk::AccessFlags::TRANSFER_READ;
+            barrier.dst_access_mask = vk::AccessFlags::SHADER_READ;
+            self.device.cmd_pipeline_barrier(
+                cmd_buffer,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::PipelineStageFlags::FRAGMENT_SHADER,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                slice::from_ref(&barrier),
+            );
+            // use the current destination image as the source for the next iteration
+            width = width_2;
+            height = height_2;
+        }
+        // transition the last mip level
+        barrier.subresource_range.base_mip_level = mip_levels - 1;
+        barrier.old_layout = vk::ImageLayout::TRANSFER_DST_OPTIMAL;
+        barrier.new_layout = vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL;
+        barrier.src_access_mask = vk::AccessFlags::TRANSFER_WRITE;
+        barrier.dst_access_mask = vk::AccessFlags::SHADER_READ;
+        self.device.cmd_pipeline_barrier(
+            cmd_buffer,
+            vk::PipelineStageFlags::TRANSFER,
+            vk::PipelineStageFlags::FRAGMENT_SHADER,
+            vk::DependencyFlags::empty(),
+            &[],
+            &[],
+            slice::from_ref(&barrier),
+        );
+    }
+
     pub fn create_image_from_data(
-        &self, width: u32, height: u32, format: vk::Format, data: ImageData, flags: vk::ImageCreateFlags,
+        &self, width: u32, height: u32, mip_levels: u32, format: vk::Format, data: ImageData, flags: vk::ImageCreateFlags,
     ) -> VulkanResult<VkImage> {
+        // check if this image format supports linear filtering (for mipmap generation)
+        if mip_levels > 1 {
+            let linear_filter_supp = unsafe {
+                self.instance
+                    .get_physical_device_format_properties(self.dev_info.phys_dev, format)
+                    .optimal_tiling_features
+                    .contains(vk::FormatFeatureFlags::SAMPLED_IMAGE_FILTER_LINEAR)
+            };
+            if !linear_filter_supp {
+                //FIXME: fallback to another method
+                return VkError::EngineError("image linear filter not supported").into();
+            }
+        }
         let layer_size = width as usize * height as usize * 4;
         let layers = data.layer_count();
         let size = layer_size as vk::DeviceSize * layers as vk::DeviceSize;
+        // create staging buffer that will contain the image bytes
         let mut src_buffer = self.allocate_buffer(size, vk::BufferUsageFlags::TRANSFER_SRC, MemoryLocation::CpuToGpu, "Staging")?;
+        // create destination image that will be usable from shaders
         let tex_image = self.allocate_image(
             ImageParams {
                 width,
                 height,
                 layers,
+                mip_levels,
                 ..Default::default()
             },
             format,
             flags,
-            vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
+            vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
             MemoryLocation::GpuOnly,
             "Texture image",
         )?;
-
+        // write image data to the staging buffer
         match data {
             ImageData::Single(bytes) => {
                 src_buffer.map()?.write_bytes(bytes, 0);
@@ -482,12 +604,14 @@ impl VulkanDevice {
                 }
             }
         }
+        // copy the image bytes into the base mip level
         let cmd_buffer = self.begin_one_time_commands()?;
         self.transition_image_layout(
             cmd_buffer,
             *tex_image,
             format,
             layers,
+            mip_levels,
             vk::ImageLayout::UNDEFINED,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
         );
@@ -498,15 +622,10 @@ impl VulkanDevice {
             vk::Offset3D::default(),
             vk::Extent3D { width, height, depth: 1 },
             layers,
+            0,
         );
-        self.transition_image_layout(
-            cmd_buffer,
-            *tex_image,
-            format,
-            layers,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-        );
+        // generate mipmaps and set image to the final layout
+        unsafe { self.generate_mipmaps(cmd_buffer, *tex_image, width, height, mip_levels, layers) };
         self.end_one_time_commands(cmd_buffer)?;
 
         unsafe { src_buffer.cleanup(self) };
@@ -541,6 +660,7 @@ impl VulkanDevice {
             image,
             vk::Format::R8G8B8A8_SRGB,
             layers,
+            1, //FIXME: support mip levels
             vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
         );
@@ -551,12 +671,14 @@ impl VulkanDevice {
             vk::Offset3D { x, y, z: 0 },
             vk::Extent3D { width, height, depth: 1 },
             layers,
+            0,
         );
         self.transition_image_layout(
             cmd_buffer,
             image,
             vk::Format::R8G8B8A8_SRGB,
             layers,
+            1, //FIXME: support mip levels
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
             vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
         );
@@ -567,7 +689,8 @@ impl VulkanDevice {
     }
 
     pub fn create_image_view(
-        &self, image: vk::Image, format: vk::Format, layer: u32, view_type: vk::ImageViewType, aspect_mask: vk::ImageAspectFlags,
+        &self, image: vk::Image, format: vk::Format, layer: u32, mip_levels: u32, view_type: vk::ImageViewType,
+        aspect_mask: vk::ImageAspectFlags,
     ) -> VulkanResult<vk::ImageView> {
         let layer_count = if view_type == vk::ImageViewType::CUBE { 6 } else { 1 };
         let imageview_ci = vk::ImageViewCreateInfo::builder()
@@ -577,7 +700,7 @@ impl VulkanDevice {
             .subresource_range(vk::ImageSubresourceRange {
                 aspect_mask,
                 base_mip_level: 0,
-                level_count: 1,
+                level_count: mip_levels,
                 base_array_layer: layer,
                 layer_count,
             });
@@ -742,6 +865,7 @@ impl Swapchain {
                     image,
                     surface_format.format,
                     0,
+                    1,
                     vk::ImageViewType::TYPE_2D,
                     vk::ImageAspectFlags::COLOR,
                 )
@@ -780,7 +904,7 @@ impl Swapchain {
             MemoryLocation::GpuOnly,
             "MSAA image",
         )?;
-        let imgview = device.create_image_view(*image, self.format, 0, vk::ImageViewType::TYPE_2D, vk::ImageAspectFlags::COLOR)?;
+        let imgview = device.create_image_view(*image, self.format, 0, 1, vk::ImageViewType::TYPE_2D, vk::ImageAspectFlags::COLOR)?;
 
         device.debug(|d| {
             d.set_object_name(device, &*image, "MSAA color image");
@@ -814,6 +938,7 @@ impl Swapchain {
             *depth_image,
             depth_format,
             0,
+            1,
             vk::ImageViewType::TYPE_2D,
             vk::ImageAspectFlags::DEPTH,
         )?;
@@ -983,6 +1108,7 @@ pub struct ImageParams {
     pub width: u32,
     pub height: u32,
     pub layers: u32,
+    pub mip_levels: u32,
     pub samples: vk::SampleCountFlags,
 }
 
@@ -993,6 +1119,7 @@ impl Default for ImageParams {
             width: 1,
             height: 1,
             layers: 1,
+            mip_levels: 1,
             samples: vk::SampleCountFlags::TYPE_1,
         }
     }
