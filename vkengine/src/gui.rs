@@ -1,6 +1,6 @@
 use crate::device::VulkanDevice;
 use crate::engine::{CmdBufferRing, DrawPayload, Pipeline, PipelineMode, Shader, Texture, UploadBuffer, VulkanEngine};
-use crate::types::{Cleanup, VulkanResult};
+use crate::types::{Cleanup, CreateFromInfo, VulkanResult};
 use ash::vk;
 use egui::epaint::{Primitive, Vertex};
 use egui::{ClippedPrimitive, Context, FullOutput, PlatformOutput, TextureId, TexturesDelta};
@@ -50,16 +50,16 @@ impl UiRenderer {
             include_spirv!("src/shaders/gui.frag.glsl", frag, glsl),
         )?;
         let sampler = engine.get_sampler(vk::Filter::LINEAR, vk::Filter::LINEAR, vk::SamplerAddressMode::CLAMP_TO_EDGE, false)?;
-        let set_layout = device.create_descriptor_set_layout(&[
-            // layout(binding = 0) uniform sampler2D texSampler
-            vk::DescriptorSetLayoutBinding::builder()
+        let set_layout = vk::DescriptorSetLayoutCreateInfo::builder()
+            .flags(vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR)
+            .bindings(&[vk::DescriptorSetLayoutBinding::builder()
                 .binding(0)
                 .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                 .descriptor_count(1)
                 .stage_flags(vk::ShaderStageFlags::FRAGMENT)
                 .immutable_samplers(slice::from_ref(&sampler))
-                .build(),
-        ])?;
+                .build()])
+            .create(&device)?;
         let push_constants = vk::PushConstantRange::builder()
             .stage_flags(vk::ShaderStageFlags::VERTEX)
             .offset(0)

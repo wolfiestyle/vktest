@@ -66,90 +66,25 @@ impl VulkanDevice {
             allocator: ManuallyDrop::new(allocator.into()),
         };
 
-        this.transfer_pool = this.create_command_pool(family, vk::CommandPoolCreateFlags::TRANSIENT)?;
+        this.transfer_pool = vk::CommandPoolCreateInfo::builder()
+            .flags(vk::CommandPoolCreateFlags::TRANSIENT)
+            .queue_family_index(family)
+            .create(&this)?;
 
         Ok(this)
     }
 
-    pub fn create_shader_module(&self, spirv_code: &[u32]) -> VulkanResult<vk::ShaderModule> {
-        let shader_ci = vk::ShaderModuleCreateInfo::builder().code(spirv_code);
-
-        unsafe {
-            self.device
-                .create_shader_module(&shader_ci, None)
-                .describe_err("Failed to create shader module")
-        }
-    }
-
-    pub fn create_descriptor_set_layout(
-        &self, layout_bindings: &[vk::DescriptorSetLayoutBinding],
-    ) -> VulkanResult<vk::DescriptorSetLayout> {
-        let desc_layout_ci = vk::DescriptorSetLayoutCreateInfo::builder()
-            .flags(vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR)
-            .bindings(layout_bindings);
-
-        unsafe {
-            self.device
-                .create_descriptor_set_layout(&desc_layout_ci, None)
-                .describe_err("Failed to create descriptor set layout")
-        }
-    }
-
-    pub fn create_pipeline_layout(
-        &self, set_layouts: &[vk::DescriptorSetLayout], push_constants: &[vk::PushConstantRange],
-    ) -> VulkanResult<vk::PipelineLayout> {
-        let pipeline_layout_ci = vk::PipelineLayoutCreateInfo::builder()
-            .set_layouts(set_layouts)
-            .push_constant_ranges(push_constants);
-
-        unsafe {
-            self.device
-                .create_pipeline_layout(&pipeline_layout_ci, None)
-                .describe_err("Failed to create pipeline layout")
-        }
-    }
-
-    pub fn create_pipeline_cache(&self, initial_data: &[u8]) -> VulkanResult<vk::PipelineCache> {
-        let cache_ci = vk::PipelineCacheCreateInfo::builder().initial_data(initial_data);
-        unsafe {
-            self.device
-                .create_pipeline_cache(&cache_ci, None)
-                .describe_err("Failed to create pipeline cache")
-        }
-    }
-
-    pub fn create_command_pool(&self, family_idx: u32, flags: vk::CommandPoolCreateFlags) -> VulkanResult<vk::CommandPool> {
-        let command_pool_ci = vk::CommandPoolCreateInfo::builder().flags(flags).queue_family_index(family_idx);
-
-        unsafe {
-            self.device
-                .create_command_pool(&command_pool_ci, None)
-                .describe_err("Failed to create command pool")
-        }
-    }
-
-    pub fn create_command_buffers(
-        &self, pool: vk::CommandPool, count: u32, level: vk::CommandBufferLevel,
-    ) -> VulkanResult<Vec<vk::CommandBuffer>> {
-        let alloc_info = vk::CommandBufferAllocateInfo::builder()
-            .command_pool(pool)
-            .level(level)
-            .command_buffer_count(count);
-
-        unsafe {
-            self.device
-                .allocate_command_buffers(&alloc_info)
-                .describe_err("Failed to allocate command buffers")
-        }
-    }
-
-    #[inline]
-    pub fn create_command_buffer(&self, pool: vk::CommandPool, level: vk::CommandBufferLevel) -> VulkanResult<vk::CommandBuffer> {
-        self.create_command_buffers(pool, 1, level).map(|vec| vec[0])
+    pub fn make_semaphore(&self, sem_type: vk::SemaphoreType) -> VulkanResult<vk::Semaphore> {
+        let mut sem_type_ci = vk::SemaphoreTypeCreateInfo::builder().semaphore_type(sem_type);
+        vk::SemaphoreCreateInfo::builder().push_next(&mut sem_type_ci).create(&self.device)
     }
 
     fn begin_one_time_commands(&self) -> VulkanResult<vk::CommandBuffer> {
-        let cmd_buffer = self.create_command_buffers(self.transfer_pool, 1, vk::CommandBufferLevel::PRIMARY)?[0];
+        let cmd_buffer = vk::CommandBufferAllocateInfo::builder()
+            .command_pool(self.transfer_pool)
+            .level(vk::CommandBufferLevel::PRIMARY)
+            .command_buffer_count(1)
+            .create(&self.device)?[0];
         let begin_info = vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
         unsafe {
             self.device
@@ -174,21 +109,6 @@ impl VulkanDevice {
             self.device.free_command_buffers(self.transfer_pool, slice::from_ref(&cmd_buffer));
         }
         Ok(())
-    }
-
-    pub fn create_semaphore(&self, sem_type: vk::SemaphoreType) -> VulkanResult<vk::Semaphore> {
-        let mut sem_type_ci = vk::SemaphoreTypeCreateInfo::builder().semaphore_type(sem_type);
-        let semaphore_ci = vk::SemaphoreCreateInfo::builder().push_next(&mut sem_type_ci);
-        unsafe {
-            self.device
-                .create_semaphore(&semaphore_ci, None)
-                .describe_err("Failed to create semaphore")
-        }
-    }
-
-    pub fn create_fence(&self) -> VulkanResult<vk::Fence> {
-        let fence_ci = vk::FenceCreateInfo::builder().flags(vk::FenceCreateFlags::SIGNALED);
-        unsafe { self.device.create_fence(&fence_ci, None).describe_err("Failed to create fence") }
     }
 
     pub fn allocate_buffer(
@@ -688,30 +608,6 @@ impl VulkanDevice {
         Ok(())
     }
 
-    pub fn create_image_view(
-        &self, image: vk::Image, format: vk::Format, layer: u32, mip_levels: u32, view_type: vk::ImageViewType,
-        aspect_mask: vk::ImageAspectFlags,
-    ) -> VulkanResult<vk::ImageView> {
-        let layer_count = if view_type == vk::ImageViewType::CUBE { 6 } else { 1 };
-        let imageview_ci = vk::ImageViewCreateInfo::builder()
-            .image(image)
-            .view_type(view_type)
-            .format(format)
-            .subresource_range(vk::ImageSubresourceRange {
-                aspect_mask,
-                base_mip_level: 0,
-                level_count: mip_levels,
-                base_array_layer: layer,
-                layer_count,
-            });
-
-        unsafe {
-            self.device
-                .create_image_view(&imageview_ci, None)
-                .describe_err("Failed to create image view")
-        }
-    }
-
     pub fn find_supported_format(
         &self, candidates: &[vk::Format], tiling: vk::ImageTiling, features: vk::FormatFeatureFlags,
     ) -> VulkanResult<vk::Format> {
@@ -776,6 +672,116 @@ impl Drop for VulkanDevice {
             self.instance.surface_utils.destroy_surface(self.surface, None);
             self.device.destroy_device(None);
         }
+    }
+}
+
+impl CreateFromInfo for vk::ShaderModuleCreateInfo {
+    type Output = vk::ShaderModule;
+
+    #[inline]
+    fn create(&self, device: &ash::Device) -> VulkanResult<Self::Output> {
+        unsafe {
+            device
+                .create_shader_module(self, None)
+                .describe_err("Failed to create shader module")
+        }
+    }
+}
+
+impl CreateFromInfo for vk::DescriptorSetLayoutCreateInfo {
+    type Output = vk::DescriptorSetLayout;
+
+    #[inline]
+    fn create(&self, device: &ash::Device) -> VulkanResult<Self::Output> {
+        unsafe {
+            device
+                .create_descriptor_set_layout(self, None)
+                .describe_err("Failed to create descriptor set layout")
+        }
+    }
+}
+
+impl CreateFromInfo for vk::PipelineLayoutCreateInfo {
+    type Output = vk::PipelineLayout;
+
+    #[inline]
+    fn create(&self, device: &ash::Device) -> VulkanResult<Self::Output> {
+        unsafe {
+            device
+                .create_pipeline_layout(self, None)
+                .describe_err("Failed to create pipeline layout")
+        }
+    }
+}
+
+impl CreateFromInfo for vk::PipelineCacheCreateInfo {
+    type Output = vk::PipelineCache;
+
+    #[inline]
+    fn create(&self, device: &ash::Device) -> VulkanResult<Self::Output> {
+        unsafe {
+            device
+                .create_pipeline_cache(self, None)
+                .describe_err("Failed to create pipeline cache")
+        }
+    }
+}
+
+impl CreateFromInfo for vk::CommandPoolCreateInfo {
+    type Output = vk::CommandPool;
+
+    #[inline]
+    fn create(&self, device: &ash::Device) -> VulkanResult<Self::Output> {
+        unsafe { device.create_command_pool(self, None).describe_err("Failed to create command pool") }
+    }
+}
+
+impl CreateFromInfo for vk::CommandBufferAllocateInfo {
+    type Output = Vec<vk::CommandBuffer>;
+
+    #[inline]
+    fn create(&self, device: &ash::Device) -> VulkanResult<Self::Output> {
+        unsafe {
+            device
+                .allocate_command_buffers(self)
+                .describe_err("Failed to allocate command buffers")
+        }
+    }
+}
+
+impl CreateFromInfo for vk::SemaphoreCreateInfo {
+    type Output = vk::Semaphore;
+
+    #[inline]
+    fn create(&self, device: &ash::Device) -> VulkanResult<Self::Output> {
+        unsafe { device.create_semaphore(self, None).describe_err("Failed to create semaphore") }
+    }
+}
+
+impl CreateFromInfo for vk::FenceCreateInfo {
+    type Output = vk::Fence;
+
+    #[inline]
+    fn create(&self, device: &ash::Device) -> VulkanResult<Self::Output> {
+        unsafe { device.create_fence(self, None).describe_err("Failed to create fence") }
+    }
+}
+
+impl CreateFromInfo for vk::ImageViewCreateInfo {
+    type Output = vk::ImageView;
+
+    #[inline]
+    fn create(&self, device: &ash::Device) -> VulkanResult<Self::Output> {
+        unsafe { device.create_image_view(self, None).describe_err("Failed to create image view") }
+    }
+}
+
+impl CreateFromInfo for vk::SamplerCreateInfo {
+    type Output = vk::Sampler;
+
+    #[inline]
+    fn create(&self, device: &ash::Device) -> VulkanResult<Self::Output> {
+        unsafe { device.create_sampler(self, None).describe_err("Failed to create texture sampler") }
     }
 }
 
@@ -861,14 +867,18 @@ impl Swapchain {
         let image_views = images
             .iter()
             .map(|&image| {
-                device.create_image_view(
-                    image,
-                    surface_format.format,
-                    0,
-                    1,
-                    vk::ImageViewType::TYPE_2D,
-                    vk::ImageAspectFlags::COLOR,
-                )
+                vk::ImageViewCreateInfo::builder()
+                    .image(image)
+                    .format(surface_format.format)
+                    .view_type(vk::ImageViewType::TYPE_2D)
+                    .subresource_range(vk::ImageSubresourceRange {
+                        aspect_mask: vk::ImageAspectFlags::COLOR,
+                        base_mip_level: 0,
+                        level_count: 1,
+                        base_array_layer: 0,
+                        layer_count: 1,
+                    })
+                    .create(device)
             })
             .collect::<Result<_, _>>()?;
 
@@ -904,7 +914,18 @@ impl Swapchain {
             MemoryLocation::GpuOnly,
             "MSAA image",
         )?;
-        let imgview = device.create_image_view(*image, self.format, 0, 1, vk::ImageViewType::TYPE_2D, vk::ImageAspectFlags::COLOR)?;
+        let imgview = vk::ImageViewCreateInfo::builder()
+            .image(*image)
+            .format(self.format)
+            .view_type(vk::ImageViewType::TYPE_2D)
+            .subresource_range(vk::ImageSubresourceRange {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: 0,
+                layer_count: 1,
+            })
+            .create(device)?;
 
         device.debug(|d| {
             d.set_object_name(device, &*image, "MSAA color image");
@@ -934,14 +955,18 @@ impl Swapchain {
             "Depth image",
         )?;
 
-        let depth_imgview = device.create_image_view(
-            *depth_image,
-            depth_format,
-            0,
-            1,
-            vk::ImageViewType::TYPE_2D,
-            vk::ImageAspectFlags::DEPTH,
-        )?;
+        let depth_imgview = vk::ImageViewCreateInfo::builder()
+            .image(*depth_image)
+            .format(depth_format)
+            .view_type(vk::ImageViewType::TYPE_2D)
+            .subresource_range(vk::ImageSubresourceRange {
+                aspect_mask: vk::ImageAspectFlags::DEPTH,
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: 0,
+                layer_count: 1,
+            })
+            .create(device)?;
 
         device.debug(|d| {
             d.set_object_name(device, &*depth_image, "Depth image");

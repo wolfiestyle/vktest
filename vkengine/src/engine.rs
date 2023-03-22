@@ -52,7 +52,7 @@ impl VulkanEngine {
         let pixel = [255, 255, 255, 255];
         let default_texture = Texture::new(&device, 1, 1, vk::Format::R8G8B8A8_UNORM, &pixel, vk::Sampler::null(), false)?;
 
-        let pipeline_cache = device.create_pipeline_cache(&[])?; //TODO: save/load cache data
+        let pipeline_cache = vk::PipelineCacheCreateInfo::builder().create(&device)?; //TODO: save/load cache data
 
         let camera = Camera::default();
         let now = Instant::now();
@@ -148,7 +148,7 @@ impl VulkanEngine {
         match self.samplers.lock().unwrap().entry(key) {
             Entry::Occupied(entry) => Ok(*entry.get()),
             Entry::Vacant(entry) => {
-                let sampler_ci = vk::SamplerCreateInfo::builder()
+                let sampler = vk::SamplerCreateInfo::builder()
                     .mag_filter(mag_filter)
                     .min_filter(min_filter)
                     .address_mode_u(addr_mode)
@@ -162,12 +162,8 @@ impl VulkanEngine {
                     .compare_op(vk::CompareOp::ALWAYS)
                     .min_lod(0.0)
                     .max_lod(vk::LOD_CLAMP_NONE)
-                    .mipmap_mode(vk::SamplerMipmapMode::NEAREST);
-                let sampler = unsafe {
-                    self.device
-                        .create_sampler(&sampler_ci, None)
-                        .describe_err("Failed to create texture sampler")?
-                };
+                    .mipmap_mode(vk::SamplerMipmapMode::NEAREST)
+                    .create(&self.device)?;
                 entry.insert(sampler);
                 Ok(sampler)
             }
@@ -474,7 +470,10 @@ impl<'a> PipelineBuilder<'a> {
     }
 
     pub fn build(self, engine: &VulkanEngine) -> VulkanResult<Pipeline> {
-        let layout = engine.device.create_pipeline_layout(&self.desc_layouts, self.push_constants)?;
+        let layout = vk::PipelineLayoutCreateInfo::builder()
+            .set_layouts(&self.desc_layouts)
+            .push_constant_ranges(&self.push_constants)
+            .create(&engine.device)?;
         let handle = Pipeline::create_pipeline(engine, layout, self)?;
         Ok(Pipeline { handle, layout })
     }
@@ -660,10 +659,16 @@ impl CmdBufferRing {
     }
 
     fn new_with_level(device: &VulkanDevice, level: vk::CommandBufferLevel) -> VulkanResult<Self> {
-        let pool = device.create_command_pool(device.dev_info.graphics_idx, vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)?;
+        let pool = vk::CommandPoolCreateInfo::builder()
+            .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
+            .queue_family_index(device.dev_info.graphics_idx)
+            .create(device)?;
         // we use N + 1 command buffers so we can write on them right away without waiting for the previous frame
-        let buffers = device
-            .create_command_buffers(pool, QUEUE_DEPTH as u32 + 1, level)?
+        let buffers = vk::CommandBufferAllocateInfo::builder()
+            .command_pool(pool)
+            .level(level)
+            .command_buffer_count(QUEUE_DEPTH as u32 + 1)
+            .create(device)?
             .try_into()
             .unwrap();
         Ok(Self { pool, buffers })
@@ -785,9 +790,9 @@ struct FrameState {
 
 impl FrameState {
     fn new(device: &VulkanDevice) -> VulkanResult<Self> {
-        let image_avail_sem = device.create_semaphore(vk::SemaphoreType::BINARY)?;
-        let render_finished_sem = device.create_semaphore(vk::SemaphoreType::BINARY)?;
-        let in_flight_sem = device.create_semaphore(vk::SemaphoreType::TIMELINE)?;
+        let image_avail_sem = device.make_semaphore(vk::SemaphoreType::BINARY)?;
+        let render_finished_sem = device.make_semaphore(vk::SemaphoreType::BINARY)?;
+        let in_flight_sem = device.make_semaphore(vk::SemaphoreType::TIMELINE)?;
         device.debug(|d| {
             d.set_object_name(device, &image_avail_sem, "Image available semaphore");
             d.set_object_name(device, &render_finished_sem, "Render finished semaphore");
@@ -832,7 +837,18 @@ impl Texture {
     ) -> VulkanResult<Self> {
         let mips = if gen_mipmaps { width.max(height).ilog2() + 1 } else { 1 };
         let image = device.create_image_from_data(width, height, mips, format, ImageData::Single(data), Default::default())?;
-        let imgview = device.create_image_view(*image, format, 0, mips, vk::ImageViewType::TYPE_2D, vk::ImageAspectFlags::COLOR)?;
+        let imgview = vk::ImageViewCreateInfo::builder()
+            .image(*image)
+            .format(format)
+            .view_type(vk::ImageViewType::TYPE_2D)
+            .subresource_range(vk::ImageSubresourceRange {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                base_mip_level: 0,
+                level_count: mips,
+                base_array_layer: 0,
+                layer_count: 1,
+            })
+            .create(device)?;
         Ok(Self { image, imgview, sampler })
     }
 
@@ -847,7 +863,18 @@ impl Texture {
             ImageData::Array(data),
             vk::ImageCreateFlags::CUBE_COMPATIBLE,
         )?;
-        let imgview = device.create_image_view(*image, format, 0, 1, vk::ImageViewType::CUBE, vk::ImageAspectFlags::COLOR)?;
+        let imgview = vk::ImageViewCreateInfo::builder()
+            .image(*image)
+            .format(format)
+            .view_type(vk::ImageViewType::CUBE)
+            .subresource_range(vk::ImageSubresourceRange {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: 0,
+                layer_count: 6,
+            })
+            .create(device)?;
         Ok(Self { image, imgview, sampler })
     }
 
@@ -888,8 +915,8 @@ pub struct Shader {
 
 impl Shader {
     pub fn new(device: &VulkanDevice, vert_spv: &[u32], frag_spv: &[u32]) -> VulkanResult<Self> {
-        let vert = device.create_shader_module(vert_spv)?;
-        let frag = device.create_shader_module(frag_spv)?;
+        let vert = vk::ShaderModuleCreateInfo::builder().code(vert_spv).create(device)?;
+        let frag = vk::ShaderModuleCreateInfo::builder().code(frag_spv).create(device)?;
         Ok(Self { vert, frag })
     }
 }
