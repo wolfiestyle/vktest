@@ -1,6 +1,7 @@
 use crate::device::{VkBuffer, VulkanDevice};
 use crate::engine::{CmdBufferRing, DrawPayload, Pipeline, PipelineMode, Shader, Texture, UploadBuffer, VulkanEngine};
-use crate::types::{Cleanup, IndexInput, VertexInput, VulkanResult};
+use crate::types::{Cleanup, VulkanResult};
+use crate::vertex::{IndexInput, VertexInput};
 use ash::vk;
 use bytemuck_derive::{Pod, Zeroable};
 use glam::{Affine3A, Mat4, Vec3, Vec4};

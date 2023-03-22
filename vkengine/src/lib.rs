@@ -5,6 +5,7 @@ mod engine;
 mod instance;
 mod renderer;
 mod types;
+mod vertex;
 
 pub use camera::{Camera, CameraController};
 pub use device::VulkanDevice;
