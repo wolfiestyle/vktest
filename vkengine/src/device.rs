@@ -785,6 +785,30 @@ impl CreateFromInfo for vk::SamplerCreateInfo {
     }
 }
 
+impl Cleanup<ash::Device> for vk::CommandPool {
+    unsafe fn cleanup(&mut self, device: &ash::Device) {
+        device.destroy_command_pool(*self, None);
+    }
+}
+
+impl Cleanup<ash::Device> for vk::Sampler {
+    unsafe fn cleanup(&mut self, device: &ash::Device) {
+        device.destroy_sampler(*self, None);
+    }
+}
+
+impl Cleanup<ash::Device> for vk::DescriptorSetLayout {
+    unsafe fn cleanup(&mut self, device: &ash::Device) {
+        device.destroy_descriptor_set_layout(*self, None);
+    }
+}
+
+impl Cleanup<ash::Device> for vk::ImageView {
+    unsafe fn cleanup(&mut self, device: &ash::Device) {
+        device.destroy_image_view(*self, None);
+    }
+}
+
 #[derive(Debug)]
 pub struct Swapchain {
     pub handle: vk::SwapchainKHR,
