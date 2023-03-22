@@ -1,5 +1,5 @@
 use crate::camera::Camera;
-use crate::device::{ImageData, MappedMemory, Swapchain, VkBuffer, VkImage, VulkanDevice};
+use crate::device::{ImageData, ImageParams, MappedMemory, Swapchain, VkBuffer, VkImage, VulkanDevice};
 use crate::instance::DeviceSelection;
 use crate::types::*;
 use crate::vertex::VertexInput;
@@ -229,9 +229,7 @@ impl VulkanEngine {
         self.device.transition_image_layout(
             cmd_buffer,
             self.swapchain.images[image_idx],
-            self.swapchain.format,
-            1,
-            1,
+            Swapchain::SUBRESOURCE_RANGE,
             vk::ImageLayout::UNDEFINED,
             vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
         );
@@ -239,7 +237,6 @@ impl VulkanEngine {
             cmd_buffer,
             self.swapchain.depth_image.as_ref().expect("missing depth image").handle,
             self.swapchain.depth_format,
-            1,
             vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
         );
         if let Some(image) = &self.swapchain.msaa_image {
@@ -247,7 +244,6 @@ impl VulkanEngine {
                 cmd_buffer,
                 image.handle,
                 self.swapchain.format,
-                1,
                 vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
             );
         }
@@ -260,9 +256,7 @@ impl VulkanEngine {
             self.device.transition_image_layout(
                 cmd_buffer,
                 self.swapchain.images[image_idx],
-                self.swapchain.format,
-                1,
-                1,
+                Swapchain::SUBRESOURCE_RANGE,
                 vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
                 vk::ImageLayout::PRESENT_SRC_KHR,
             );
@@ -835,19 +829,19 @@ impl Texture {
     pub fn new(
         device: &VulkanDevice, width: u32, height: u32, format: vk::Format, data: &[u8], sampler: vk::Sampler, gen_mipmaps: bool,
     ) -> VulkanResult<Self> {
-        let mips = if gen_mipmaps { width.max(height).ilog2() + 1 } else { 1 };
-        let image = device.create_image_from_data(width, height, mips, format, ImageData::Single(data), Default::default())?;
+        let params = ImageParams {
+            width,
+            height,
+            format,
+            mip_levels: if gen_mipmaps { width.max(height).ilog2() + 1 } else { 1 },
+            ..Default::default()
+        };
+        let image = device.create_image_from_data(params, ImageData::Single(data), Default::default())?;
         let imgview = vk::ImageViewCreateInfo::builder()
             .image(*image)
             .format(format)
             .view_type(vk::ImageViewType::TYPE_2D)
-            .subresource_range(vk::ImageSubresourceRange {
-                aspect_mask: vk::ImageAspectFlags::COLOR,
-                base_mip_level: 0,
-                level_count: mips,
-                base_array_layer: 0,
-                layer_count: 1,
-            })
+            .subresource_range(image.props.subresource_range())
             .create(device)?;
         Ok(Self { image, imgview, sampler })
     }
@@ -855,32 +849,30 @@ impl Texture {
     pub fn new_cubemap(
         device: &VulkanDevice, width: u32, height: u32, format: vk::Format, data: &[&[u8]; 6], sampler: vk::Sampler,
     ) -> VulkanResult<Self> {
-        let image = device.create_image_from_data(
+        let params = ImageParams {
             width,
             height,
-            1,
             format,
-            ImageData::Array(data),
-            vk::ImageCreateFlags::CUBE_COMPATIBLE,
-        )?;
+            layers: 6,
+            ..Default::default()
+        };
+        let image = device.create_image_from_data(params, ImageData::Array(data), vk::ImageCreateFlags::CUBE_COMPATIBLE)?;
         let imgview = vk::ImageViewCreateInfo::builder()
             .image(*image)
             .format(format)
             .view_type(vk::ImageViewType::CUBE)
-            .subresource_range(vk::ImageSubresourceRange {
-                aspect_mask: vk::ImageAspectFlags::COLOR,
-                base_mip_level: 0,
-                level_count: 1,
-                base_array_layer: 0,
-                layer_count: 6,
-            })
+            .subresource_range(image.props.subresource_range())
             .create(device)?;
         Ok(Self { image, imgview, sampler })
     }
 
     pub fn update(&mut self, device: &VulkanDevice, x: u32, y: u32, width: u32, height: u32, data: &[u8]) -> VulkanResult<()> {
-        //TODO: validate params
-        device.update_image_from_data(*self.image, x as _, y as _, width, height, ImageData::Single(data))
+        let w = self.image.props.width;
+        let h = self.image.props.height;
+        if x >= w || y >= h || x + width >= w || y + height >= h {
+            return VkError::EngineError("Texture update rect out of bounds").into();
+        }
+        device.update_image_from_data(&self.image, x as _, y as _, width, height, 0, ImageData::Single(data))
     }
 
     pub(crate) fn descriptor(&self) -> vk::DescriptorImageInfo {
