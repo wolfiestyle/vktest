@@ -4,7 +4,7 @@ use ash::extensions::{ext, khr};
 use ash::vk;
 use cstr::cstr;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 use std::convert::identity;
 use std::ffi::{c_char, CStr, CString};
 
@@ -216,7 +216,7 @@ impl VulkanInstance {
                 .enumerate_device_extension_properties(phys_dev)
                 .describe_err("Failed to enumerate device extensions")?
         };
-        let extensions: HashSet<_> = ext_list.iter().map(|ext| vk_to_cstr(&ext.extension_name).to_owned()).collect();
+        let extensions: BTreeSet<_> = ext_list.iter().map(|ext| vk_to_cstr(&ext.extension_name).to_owned()).collect();
         //eprintln!("Supported device extensions: {extensions:#?}");
         let missing_ext = DEVICE_EXTENSIONS
             .into_iter()
@@ -357,7 +357,7 @@ pub struct DeviceInfo {
     pub graphics_idx: u32,
     pub present_idx: u32,
     pub unique_families: Vec<u32>,
-    pub extensions: HashSet<CString>,
+    pub extensions: BTreeSet<CString>,
     pub msaa_support: vk::SampleCountFlags,
     pub max_aniso: f32,
 }
