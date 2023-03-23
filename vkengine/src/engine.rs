@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 const SWAPCHAIN_IMAGE_COUNT: u32 = 3;
 pub const QUEUE_DEPTH: usize = 2;
 
+#[derive(Debug)]
 pub struct VulkanEngine {
     pub(crate) device: Arc<VulkanDevice>,
     window_size: UVec2,
@@ -754,6 +755,15 @@ pub struct DrawPayload {
     pub on_frame_finish: Option<Box<dyn FnOnce(&VulkanDevice) + Send + Sync>>,
 }
 
+impl std::fmt::Debug for DrawPayload {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DrawPayload")
+            .field("cmd_buffer", &self.cmd_buffer)
+            .field("on_frame_finish", &self.on_frame_finish.as_ref().map(|_| "..."))
+            .finish()
+    }
+}
+
 impl DrawPayload {
     #[inline]
     pub fn new(cmd_buffer: vk::CommandBuffer) -> Self {
@@ -775,6 +785,7 @@ impl DrawPayload {
     }
 }
 
+#[derive(Debug)]
 struct FrameState {
     image_avail_sem: vk::Semaphore,     // present -> image acquired
     render_finished_sem: vk::Semaphore, // queue submit -> present

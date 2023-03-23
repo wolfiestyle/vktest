@@ -343,6 +343,12 @@ impl std::ops::Deref for VulkanInstance {
     }
 }
 
+impl std::fmt::Debug for VulkanInstance {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VulkanInstance").finish_non_exhaustive()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct DeviceInfo {
     pub phys_dev: vk::PhysicalDevice,

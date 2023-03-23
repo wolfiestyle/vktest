@@ -638,6 +638,19 @@ impl Drop for VulkanDevice {
     }
 }
 
+impl std::fmt::Debug for VulkanDevice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VulkanDevice")
+            .field("instance", &self.instance)
+            .field("surface", &self.surface)
+            .field("dev_info", &self.dev_info)
+            .field("graphics_queue", &self.graphics_queue)
+            .field("present_queue", &self.present_queue)
+            .field("transfer_pool", &self.transfer_pool)
+            .finish_non_exhaustive()
+    }
+}
+
 impl CreateFromInfo for vk::ShaderModuleCreateInfo {
     type Output = vk::ShaderModule;
 
