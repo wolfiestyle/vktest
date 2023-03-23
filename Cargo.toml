@@ -8,3 +8,13 @@ members = [
 # Some crates, like image, are *really* slow on unoptimized debug mode
 [profile.dev.package."*"]
 opt-level = 1
+
+# For profiling support
+[profile.release-prof]
+inherits = "release"
+debug = true
+
+# LTO-enabled release
+[profile.release-lto]
+inherits = "release"
+lto = true
