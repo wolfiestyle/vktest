@@ -4,6 +4,7 @@ mod device;
 mod engine;
 mod instance;
 mod renderer;
+mod swapchain;
 mod types;
 mod vertex;
 

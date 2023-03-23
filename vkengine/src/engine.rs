@@ -1,6 +1,7 @@
 use crate::camera::Camera;
-use crate::device::{ImageData, ImageParams, MappedMemory, Swapchain, VkBuffer, VkImage, VulkanDevice};
+use crate::device::{ImageData, ImageParams, MappedMemory, VkBuffer, VkImage, VulkanDevice};
 use crate::instance::DeviceSelection;
+use crate::swapchain::Swapchain;
 use crate::types::*;
 use crate::vertex::VertexInput;
 use ash::vk;
