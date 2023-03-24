@@ -277,9 +277,10 @@ fn main() -> VulkanResult<()> {
             vk_app.submit_draw_commands(draw_cmds.into_iter().map(|res| res.unwrap())).unwrap();
 
             let cur_time = vk_app.get_frame_timestamp();
-            if cur_time - prev_time > Duration::from_secs(1) {
+            let dt = cur_time - prev_time;
+            if dt >= Duration::from_millis(500) {
                 let frame_count = vk_app.get_current_frame();
-                fps = frame_count - prev_frame_count;
+                fps = (frame_count - prev_frame_count) * 1000 / dt.as_millis() as u64;
                 gpu_time = vk_app.get_gpu_time();
                 cpu_time = vk_app.get_frame_time().saturating_sub(gpu_time);
                 prev_time = cur_time;
