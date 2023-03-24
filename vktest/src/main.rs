@@ -105,6 +105,8 @@ fn main() -> VulkanResult<()> {
     let mut prev_time = Instant::now();
     let mut prev_frame_count = 0;
     let mut fps = 0;
+    let mut cpu_time = Default::default();
+    let mut gpu_time = Default::default();
 
     let mut fullscreen = false;
     let mut msaa_samples = vk_app.get_msaa_samples();
@@ -169,6 +171,9 @@ fn main() -> VulkanResult<()> {
                     .show_animated(ctx, show_gui, |ui| {
                         ui.heading("VKtest 3D engine");
                         ui.label(format!("{fps} fps"));
+                        ui.label(format!("cpu time: {:?}", cpu_time));
+                        ui.label(format!("gpu time: {:?}", gpu_time));
+                        ui.add_space(10.0);
                         egui::ComboBox::from_label("MSAA")
                             .selected_text(format!("{msaa_samples}x"))
                             .show_ui(ui, |ui| {
@@ -275,6 +280,8 @@ fn main() -> VulkanResult<()> {
             if cur_time - prev_time > Duration::from_secs(1) {
                 let frame_count = vk_app.get_current_frame();
                 fps = frame_count - prev_frame_count;
+                gpu_time = vk_app.get_gpu_time();
+                cpu_time = vk_app.get_frame_time().saturating_sub(gpu_time);
                 prev_time = cur_time;
                 prev_frame_count = frame_count;
             }

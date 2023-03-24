@@ -31,6 +31,7 @@ pub struct VulkanEngine {
     pub(crate) pipeline_cache: vk::PipelineCache,
     prev_frame_time: Instant,
     last_frame_time: Instant,
+    gpu_time: u64,
     pub camera: Camera,
     pub view_proj: Mat4,
     pub sunlight: Vec3,
@@ -72,6 +73,7 @@ impl VulkanEngine {
             pipeline_cache,
             prev_frame_time: now,
             last_frame_time: now,
+            gpu_time: 0,
             camera,
             view_proj: Mat4::IDENTITY,
             sunlight: Vec3::Y,
@@ -137,6 +139,10 @@ impl VulkanEngine {
         self.current_frame
     }
 
+    pub fn get_gpu_time(&self) -> Duration {
+        Duration::from_nanos((self.gpu_time as f64 * self.device.dev_info.timestamp_period as f64) as u64)
+    }
+
     pub fn get_sampler(
         &self, mag_filter: vk::Filter, min_filter: vk::Filter, addr_mode: vk::SamplerAddressMode, aniso_enabled: bool,
     ) -> VulkanResult<vk::Sampler> {
@@ -178,13 +184,16 @@ impl VulkanEngine {
     }
 
     fn record_primary_command_buffer(
-        &self, cmd_buffer: vk::CommandBuffer, image_idx: usize, draw_cmds: &[DrawPayload],
+        &self, cmd_buffer: vk::CommandBuffer, draw_cmds: &[DrawPayload], image_idx: usize, frame: &FrameState,
     ) -> VulkanResult<()> {
         let begin_info = vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
         unsafe {
             self.device
                 .begin_command_buffer(cmd_buffer, &begin_info)
                 .describe_err("Failed to begin recording command buffer")?;
+            self.device.cmd_reset_query_pool(cmd_buffer, frame.time_query, 0, 2);
+            self.device
+                .cmd_write_timestamp(cmd_buffer, vk::PipelineStageFlags::TOP_OF_PIPE, frame.time_query, 0);
         }
 
         let color_attach = if let Some(msaa_imgview) = self.swapchain.msaa_imgview {
@@ -263,6 +272,8 @@ impl VulkanEngine {
                 vk::ImageLayout::PRESENT_SRC_KHR,
             );
             self.device
+                .cmd_write_timestamp(cmd_buffer, vk::PipelineStageFlags::BOTTOM_OF_PIPE, frame.time_query, 1);
+            self.device
                 .end_command_buffer(cmd_buffer)
                 .describe_err("Failed to end recording command buffer")?;
         }
@@ -333,7 +344,7 @@ impl VulkanEngine {
                 .describe_err("Failed to reset command buffer")?;
         }
         let draw_cmds: Vec<_> = draw_commands.into_iter().collect();
-        self.record_primary_command_buffer(command_buffer, image_idx as _, &draw_cmds)?;
+        self.record_primary_command_buffer(command_buffer, &draw_cmds, image_idx as _, frame)?;
 
         // now we can wait for frame finished, then we can modify resources
         let wait_info = vk::SemaphoreWaitInfo::builder()
@@ -349,6 +360,15 @@ impl VulkanEngine {
         let next_frame = self.current_frame + 1;
         frame.wait_frame = next_frame;
         frame.payload.extend(draw_cmds);
+        // get timestamp data
+        let mut query_data = [0u64; 2];
+        let query_res = unsafe {
+            self.device
+                .get_query_pool_results(frame.time_query, 0, 2, &mut query_data, vk::QueryResultFlags::TYPE_64)
+        };
+        if query_res.is_ok() {
+            self.gpu_time = query_data[1].saturating_sub(query_data[0]);
+        }
         self.prev_frame_time = self.last_frame_time;
         self.last_frame_time = Instant::now();
 
@@ -792,6 +812,7 @@ struct FrameState {
     in_flight_sem: vk::Semaphore,       // queue submit -> frame finished
     wait_frame: u64,
     payload: Vec<DrawPayload>,
+    time_query: vk::QueryPool,
 }
 
 impl FrameState {
@@ -799,10 +820,15 @@ impl FrameState {
         let image_avail_sem = device.make_semaphore(vk::SemaphoreType::BINARY)?;
         let render_finished_sem = device.make_semaphore(vk::SemaphoreType::BINARY)?;
         let in_flight_sem = device.make_semaphore(vk::SemaphoreType::TIMELINE)?;
+        let time_query = vk::QueryPoolCreateInfo::builder()
+            .query_type(vk::QueryType::TIMESTAMP)
+            .query_count(2)
+            .create(&device)?;
         device.debug(|d| {
             d.set_object_name(device, &image_avail_sem, "Image available semaphore");
             d.set_object_name(device, &render_finished_sem, "Render finished semaphore");
-            d.set_object_name(device, &in_flight_sem, "In-flight semaphore")
+            d.set_object_name(device, &in_flight_sem, "In-flight semaphore");
+            d.set_object_name(device, &time_query, "Timestamp QueryPool");
         });
         Ok(Self {
             image_avail_sem,
@@ -810,6 +836,7 @@ impl FrameState {
             in_flight_sem,
             wait_frame: 0,
             payload: vec![],
+            time_query,
         })
     }
 
@@ -827,6 +854,7 @@ impl Cleanup<VulkanDevice> for FrameState {
         device.destroy_semaphore(self.image_avail_sem, None);
         device.destroy_semaphore(self.render_finished_sem, None);
         device.destroy_semaphore(self.in_flight_sem, None);
+        device.destroy_query_pool(self.time_query, None);
     }
 }
 

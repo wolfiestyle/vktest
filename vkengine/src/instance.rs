@@ -237,6 +237,7 @@ impl VulkanInstance {
             extensions,
             msaa_support,
             max_aniso: properties.limits.max_sampler_anisotropy,
+            timestamp_period: properties.limits.timestamp_period,
         })
     }
 
@@ -360,6 +361,7 @@ pub struct DeviceInfo {
     pub extensions: BTreeSet<CString>,
     pub msaa_support: vk::SampleCountFlags,
     pub max_aniso: f32,
+    pub timestamp_period: f32,
 }
 
 impl DeviceInfo {

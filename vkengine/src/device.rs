@@ -761,6 +761,15 @@ impl CreateFromInfo for vk::SamplerCreateInfo {
     }
 }
 
+impl CreateFromInfo for vk::QueryPoolCreateInfo {
+    type Output = vk::QueryPool;
+
+    #[inline]
+    fn create(&self, device: &ash::Device) -> VulkanResult<Self::Output> {
+        unsafe { device.create_query_pool(self, None).describe_err("Failed to create query pool") }
+    }
+}
+
 impl Cleanup<ash::Device> for vk::CommandPool {
     unsafe fn cleanup(&mut self, device: &ash::Device) {
         device.destroy_command_pool(*self, None);
