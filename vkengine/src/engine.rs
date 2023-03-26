@@ -502,7 +502,7 @@ impl<'a> PipelineBuilder<'a> {
     pub fn build(self, engine: &VulkanEngine) -> VulkanResult<Pipeline> {
         let layout = vk::PipelineLayoutCreateInfo::builder()
             .set_layouts(&self.desc_layouts)
-            .push_constant_ranges(&self.push_constants)
+            .push_constant_ranges(self.push_constants)
             .create(&engine.device)?;
         let handle = Pipeline::create_pipeline(engine, layout, self)?;
         Ok(Pipeline { handle, layout })
@@ -837,7 +837,7 @@ impl FrameState {
         let time_query = vk::QueryPoolCreateInfo::builder()
             .query_type(vk::QueryType::TIMESTAMP)
             .query_count(2)
-            .create(&device)?;
+            .create(device)?;
         device.debug(|d| {
             d.set_object_name(device, &image_avail_sem, "Image available semaphore");
             d.set_object_name(device, &render_finished_sem, "Render finished semaphore");
