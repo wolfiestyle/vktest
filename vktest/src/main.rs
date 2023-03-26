@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use structopt::StructOpt;
 use vkengine::gui::{egui, UiRenderer};
-use vkengine::{CameraController, MeshRenderer, SkyboxRenderer, VkError, VulkanEngine, VulkanResult};
+use vkengine::{CameraController, CubeData, MeshRenderer, SkyboxRenderer, VkError, VulkanEngine, VulkanResult};
 use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
@@ -46,12 +46,7 @@ fn main() -> VulkanResult<()> {
             })
             .map(|jh| jh.join().unwrap())
     });
-    let skybox_raw = skybox
-        .iter()
-        .map(|img| img.as_raw().as_slice())
-        .collect::<Vec<_>>()
-        .try_into()
-        .unwrap();
+    let cube_data = CubeData::try_from_iter(skybox.iter().map(|img| img.as_raw().as_slice())).unwrap();
 
     let event_loop = EventLoop::new();
     let window = winit::window::WindowBuilder::new()
@@ -95,7 +90,7 @@ fn main() -> VulkanResult<()> {
     vk_app.camera.look_at([0.0; 3]);
     let mut controller = CameraController::new(&vk_app.camera);
 
-    let mut skybox = SkyboxRenderer::new(&vk_app, skybox[0].dimensions(), &skybox_raw)?;
+    let mut skybox = SkyboxRenderer::new(&vk_app, skybox[0].dimensions(), cube_data)?;
 
     let mut gui = UiRenderer::new(&event_loop, &vk_app)?;
     let mut show_gui = true;

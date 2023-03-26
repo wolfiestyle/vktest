@@ -51,8 +51,15 @@ impl VulkanEngine {
         let main_cmd_buffers = CmdBufferRing::new_with_level(&device, vk::CommandBufferLevel::PRIMARY)?;
         let frame_state = (0..QUEUE_DEPTH).map(|_| FrameState::new(&device)).collect::<Result<Vec<_>, _>>()?;
 
-        let pixel = [255, 255, 255, 255];
-        let default_texture = Texture::new(&device, 1, 1, vk::Format::R8G8B8A8_UNORM, &pixel, vk::Sampler::null(), false)?;
+        let default_texture = Texture::new(
+            &device,
+            1,
+            1,
+            vk::Format::R8G8B8A8_UNORM,
+            ImageData::Single(&[255; 4]),
+            vk::Sampler::null(),
+            false,
+        )?;
 
         let pipeline_cache = vk::PipelineCacheCreateInfo::builder().create(&device)?; //TODO: save/load cache data
 
@@ -179,7 +186,15 @@ impl VulkanEngine {
 
     pub fn create_texture(&self, width: u32, height: u32, data: &[u8]) -> VulkanResult<Texture> {
         let sampler = self.get_sampler(vk::Filter::LINEAR, vk::Filter::LINEAR, vk::SamplerAddressMode::REPEAT, true)?;
-        Texture::new(&self.device, width, height, vk::Format::R8G8B8A8_SRGB, data, sampler, true)
+        Texture::new(
+            &self.device,
+            width,
+            height,
+            vk::Format::R8G8B8A8_SRGB,
+            ImageData::Single(data),
+            sampler,
+            true,
+        )
     }
 
     fn record_primary_command_buffer(
@@ -866,40 +881,21 @@ pub struct Texture {
 
 impl Texture {
     pub fn new(
-        device: &VulkanDevice, width: u32, height: u32, format: vk::Format, data: &[u8], sampler: vk::Sampler, gen_mipmaps: bool,
+        device: &VulkanDevice, width: u32, height: u32, format: vk::Format, data: ImageData, sampler: vk::Sampler, gen_mipmaps: bool,
     ) -> VulkanResult<Self> {
         let params = ImageParams {
             width,
             height,
             format,
+            layers: data.layer_count(),
             mip_levels: if gen_mipmaps { width.max(height).ilog2() + 1 } else { 1 },
             ..Default::default()
         };
-        let image = device.create_image_from_data(params, ImageData::Single(data), Default::default())?;
+        let image = device.create_image_from_data(params, data, data.image_create_flags())?;
         let imgview = vk::ImageViewCreateInfo::builder()
             .image(*image)
             .format(format)
-            .view_type(vk::ImageViewType::TYPE_2D)
-            .subresource_range(image.props.subresource_range())
-            .create(device)?;
-        Ok(Self { image, imgview, sampler })
-    }
-
-    pub fn new_cubemap(
-        device: &VulkanDevice, width: u32, height: u32, format: vk::Format, data: &[&[u8]; 6], sampler: vk::Sampler,
-    ) -> VulkanResult<Self> {
-        let params = ImageParams {
-            width,
-            height,
-            format,
-            layers: 6,
-            ..Default::default()
-        };
-        let image = device.create_image_from_data(params, ImageData::Array(data), vk::ImageCreateFlags::CUBE_COMPATIBLE)?;
-        let imgview = vk::ImageViewCreateInfo::builder()
-            .image(*image)
-            .format(format)
-            .view_type(vk::ImageViewType::CUBE)
+            .view_type(data.view_type())
             .subresource_range(image.props.subresource_range())
             .create(device)?;
         Ok(Self { image, imgview, sampler })

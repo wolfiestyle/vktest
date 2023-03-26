@@ -9,7 +9,7 @@ mod types;
 mod vertex;
 
 pub use camera::{Camera, CameraController};
-pub use device::VulkanDevice;
+pub use device::{CubeData, ImageData, VulkanDevice};
 pub use engine::VulkanEngine;
 pub use instance::{DeviceInfo, DeviceSelection, DeviceType};
 pub use renderer::{MeshRenderer, SkyboxRenderer};

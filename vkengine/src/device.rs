@@ -480,17 +480,8 @@ impl VulkanDevice {
             "Texture image",
         )?;
         // write image data to the staging buffer
-        match data {
-            ImageData::Single(bytes) => {
-                src_buffer.map()?.write_bytes(bytes, 0);
-            }
-            ImageData::Array(bytes_arr) => {
-                let mut mem = src_buffer.map()?;
-                for (i, &bytes) in bytes_arr.iter().enumerate() {
-                    mem.write_bytes(bytes, layer_size * i);
-                }
-            }
-        }
+        let mut mem = src_buffer.map()?;
+        data.write_to_buffer(&mut mem, layer_size);
         // setup all layers and mip levels for transfer
         let cmd_buffer = self.begin_one_time_commands()?;
         self.transition_image_layout(
@@ -540,17 +531,8 @@ impl VulkanDevice {
         let size = layer_size as vk::DeviceSize * layers as vk::DeviceSize;
         let mut src_buffer = self.allocate_cpu_buffer(size, vk::BufferUsageFlags::TRANSFER_SRC, "Staging")?;
 
-        match data {
-            ImageData::Single(bytes) => {
-                src_buffer.map()?.write_bytes(bytes, 0);
-            }
-            ImageData::Array(bytes_arr) => {
-                let mut mem = src_buffer.map()?;
-                for (i, &bytes) in bytes_arr.iter().enumerate() {
-                    mem.write_bytes(bytes, layer_size * i);
-                }
-            }
-        }
+        let mut mem = src_buffer.map()?;
+        data.write_to_buffer(&mut mem, layer_size);
 
         let cmd_buffer = self.begin_one_time_commands()?;
         self.transition_image_layout(
@@ -906,16 +888,89 @@ impl MappedMemory<'_> {
 }
 
 #[derive(Debug, Clone, Copy)]
+pub struct CubeData<'a> {
+    posx: &'a [u8],
+    negx: &'a [u8],
+    posy: &'a [u8],
+    negy: &'a [u8],
+    posz: &'a [u8],
+    negz: &'a [u8],
+}
+
+impl<'a> CubeData<'a> {
+    pub fn from_array(array: [&'a [u8]; 6]) -> Self {
+        CubeData {
+            posx: array[0],
+            negx: array[1],
+            posy: array[2],
+            negy: array[3],
+            posz: array[4],
+            negz: array[5],
+        }
+    }
+
+    pub fn try_from_iter(iter: impl IntoIterator<Item = &'a [u8]>) -> Option<Self> {
+        let mut iter = iter.into_iter();
+        Some(CubeData {
+            posx: iter.next()?,
+            negx: iter.next()?,
+            posy: iter.next()?,
+            negy: iter.next()?,
+            posz: iter.next()?,
+            negz: iter.next()?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub enum ImageData<'a> {
     Single(&'a [u8]),
     Array(&'a [&'a [u8]]),
+    Cube(CubeData<'a>),
 }
 
-impl ImageData<'_> {
-    fn layer_count(self) -> u32 {
+impl<'a> ImageData<'a> {
+    pub fn layer_count(&self) -> u32 {
         match self {
             Self::Single(_) => 1,
             Self::Array(s) => s.len() as _,
+            Self::Cube(_) => 6,
+        }
+    }
+
+    pub(crate) fn image_create_flags(&self) -> vk::ImageCreateFlags {
+        match self {
+            Self::Cube(_) => vk::ImageCreateFlags::CUBE_COMPATIBLE,
+            _ => vk::ImageCreateFlags::empty(),
+        }
+    }
+
+    pub(crate) fn view_type(&self) -> vk::ImageViewType {
+        match self {
+            Self::Single(_) | Self::Array(_) => vk::ImageViewType::TYPE_2D,
+            Self::Cube(_) => vk::ImageViewType::CUBE,
+        }
+    }
+
+    #[rustfmt::skip]
+    fn write_to_buffer(self, mem: &mut MappedMemory, layer_size: usize) {
+        match self {
+            ImageData::Single(bytes) => {
+                mem.write_bytes(bytes, 0);
+            }
+            ImageData::Array(bytes_arr) => {
+                for (i, &bytes) in bytes_arr.iter().enumerate() {
+                    mem.write_bytes(bytes, layer_size * i);
+                }
+            }
+            ImageData::Cube(CubeData { posx, negx, posy, negy, posz, negz })=> {
+                mem.write_bytes(posx, 0);
+                mem.write_bytes(negx, layer_size);
+                mem.write_bytes(posy, layer_size * 2);
+                mem.write_bytes(negy, layer_size * 3);
+                mem.write_bytes(posz, layer_size * 4);
+                mem.write_bytes(negz, layer_size * 5);
+            }
         }
     }
 }

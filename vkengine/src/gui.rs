@@ -1,4 +1,4 @@
-use crate::device::VulkanDevice;
+use crate::device::{ImageData, VulkanDevice};
 use crate::engine::{CmdBufferRing, DrawPayload, Pipeline, PipelineMode, Shader, Texture, UploadBuffer, VulkanEngine};
 use crate::types::{Cleanup, CreateFromInfo, VulkanResult};
 use ash::vk;
@@ -159,7 +159,7 @@ impl UiRenderer {
                         width,
                         height,
                         vk::Format::R8G8B8A8_SRGB,
-                        bytes,
+                        ImageData::Single(bytes),
                         vk::Sampler::null(),
                         false,
                     )?);

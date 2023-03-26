@@ -1,4 +1,4 @@
-use crate::device::{VkBuffer, VulkanDevice};
+use crate::device::{CubeData, ImageData, VkBuffer, VulkanDevice};
 use crate::engine::{CmdBufferRing, DrawPayload, Pipeline, PipelineMode, Shader, Texture, UploadBuffer, VulkanEngine};
 use crate::types::{Cleanup, CreateFromInfo, VulkanResult};
 use crate::vertex::{IndexInput, VertexInput};
@@ -198,7 +198,7 @@ pub struct SkyboxRenderer {
 }
 
 impl SkyboxRenderer {
-    pub fn new(engine: &VulkanEngine, skybox_dims: (u32, u32), skybox_data: &[&[u8]; 6]) -> VulkanResult<Self> {
+    pub fn new(engine: &VulkanEngine, skybox_dims: (u32, u32), skybox_data: CubeData) -> VulkanResult<Self> {
         let device = engine.device.clone();
         let shader = Shader::new(
             &device,
@@ -229,13 +229,14 @@ impl SkyboxRenderer {
             .topology(vk::PrimitiveTopology::TRIANGLE_STRIP)
             .build(engine)?;
 
-        let texture = Texture::new_cubemap(
+        let texture = Texture::new(
             &device,
             skybox_dims.0,
             skybox_dims.1,
             vk::Format::R8G8B8A8_SRGB,
-            skybox_data,
+            ImageData::Cube(skybox_data),
             vk::Sampler::null(),
+            false,
         )?;
 
         let cmd_buffers = CmdBufferRing::new(&device)?;
