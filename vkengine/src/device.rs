@@ -168,7 +168,7 @@ impl VulkanDevice {
 
     pub fn copy_buffer(&self, src_buffer: &VkBuffer, dst_buffer: &VkBuffer, dst_offset: u64) -> VulkanResult<()> {
         if src_buffer.size() > dst_offset + dst_buffer.size() {
-            return VkError::EngineError("buffer write out of bounds").into();
+            return VkError::InvalidArgument("Buffer write out of bounds").into();
         }
         let cmd_buffer = self.begin_one_time_commands()?;
         let copy_region = vk::BufferCopy {
@@ -449,10 +449,10 @@ impl VulkanDevice {
 
     pub fn create_image_from_data(&self, params: ImageParams, data: ImageData, flags: vk::ImageCreateFlags) -> VulkanResult<VkImage> {
         if params.layers != data.layer_count() {
-            return VkError::EngineError("image and data layer count doesn't match").into();
+            return VkError::InvalidArgument("Image and data layer count doesn't match").into();
         }
         if params.samples != vk::SampleCountFlags::TYPE_1 {
-            return VkError::EngineError("creating multisampled texture is not supported").into();
+            return VkError::InvalidArgument("Creating multisampled texture is not supported").into();
         }
         // check if this image format supports linear filtering (for mipmap generation)
         if params.mip_levels > 1 {
@@ -464,7 +464,7 @@ impl VulkanDevice {
             };
             if !linear_filter_supp {
                 //FIXME: fallback to another method
-                return VkError::EngineError("image linear filter not supported").into();
+                return VkError::EngineError("Image linear filter not supported").into();
             }
         }
         let layer_size = params.width as usize * params.height as usize * 4; //FIXME: calc size from format
@@ -534,7 +534,7 @@ impl VulkanDevice {
     ) -> VulkanResult<()> {
         let layers = data.layer_count();
         if base_layer + layers > image.props.layers {
-            return VkError::EngineError("data layer count out of bounds").into();
+            return VkError::InvalidArgument("Data layer count out of bounds").into();
         }
         let layer_size = width as usize * height as usize * 4;
         let size = layer_size as vk::DeviceSize * layers as vk::DeviceSize;

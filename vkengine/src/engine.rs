@@ -110,11 +110,11 @@ impl VulkanEngine {
 
     pub fn set_msaa_samples(&mut self, samples: u32) -> VulkanResult<()> {
         if !samples.is_power_of_two() {
-            return VkError::EngineError("Invalid argument").into();
+            return VkError::InvalidArgument("Sample count is not power of two").into();
         }
         let samples = vk::SampleCountFlags::from_raw(samples);
         if !self.device.dev_info.msaa_support.contains(samples) {
-            return VkError::EngineError("Unsupported sample count").into();
+            return VkError::InvalidArgument("Unsupported sample count").into();
         }
         if samples != self.swapchain.samples {
             self.swapchain.samples = samples;
@@ -909,7 +909,7 @@ impl Texture {
         let w = self.image.props.width;
         let h = self.image.props.height;
         if x >= w || y >= h || x + width >= w || y + height >= h {
-            return VkError::EngineError("Texture update rect out of bounds").into();
+            return VkError::InvalidArgument("Texture update rect out of bounds").into();
         }
         device.update_image_from_data(&self.image, x as _, y as _, width, height, 0, ImageData::Single(data))
     }

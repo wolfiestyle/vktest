@@ -11,6 +11,7 @@ pub enum VkError {
     Vulkan(vk::Result),
     VulkanMsg(&'static str, vk::Result),
     MemoryAlloc(gpu_allocator::AllocationError),
+    InvalidArgument(&'static str),
     EngineError(&'static str),
     UnsuitableDevice, // used internally
     UnfinishedJob,    // used internally
@@ -23,6 +24,7 @@ impl std::fmt::Display for VkError {
             Self::Vulkan(err) => write!(f, "Vulkan error: {err}"),
             Self::VulkanMsg(msg, err) => write!(f, "{msg}: {err}"),
             Self::MemoryAlloc(err) => write!(f, "Memory allocation error: {err}"),
+            Self::InvalidArgument(desc) => write!(f, "Invalid argument: {desc}"),
             Self::EngineError(desc) => write!(f, "{desc}"),
             Self::UnsuitableDevice => write!(f, "Unsuitable device"),
             Self::UnfinishedJob => write!(f, "Unfinished job"),
