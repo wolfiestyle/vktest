@@ -41,11 +41,9 @@ impl Swapchain {
         let mut swapchain = Swapchain::create(device, win_size.x, win_size.y, self.images.len() as _, self.handle)?;
         swapchain.create_msaa_attachment(device, self.samples)?;
         swapchain.create_depth_attachment(device, self.depth_format)?;
-        let mut old_swapchain = std::mem::replace(self, swapchain);
-        unsafe {
-            device.device_wait_idle()?;
-            old_swapchain.cleanup(device);
-        }
+        let old_swapchain = std::mem::replace(self, swapchain);
+        unsafe { device.device_wait_idle()? };
+        device.dispose_of(old_swapchain);
         Ok(())
     }
 

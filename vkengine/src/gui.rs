@@ -123,14 +123,12 @@ impl UiRenderer {
             self.local_frame += 1;
             self.platform_output = Some(run_output.platform_output);
             self.primitives = self.context.tessellate(run_output.shapes);
-            let mut drop_textures = self.update_textures(run_output.textures_delta)?;
+            let drop_textures = self.update_textures(run_output.textures_delta)?;
             self.update_buffers()?;
 
             let cmd_buffer = self.cmd_buffers.get_current_buffer(engine)?;
             self.build_draw_commands(cmd_buffer, engine)?;
-            let payload = DrawPayload::new_with_callback(cmd_buffer, move |dev| unsafe {
-                drop_textures.cleanup(dev);
-            });
+            let payload = DrawPayload::new_with_callback(cmd_buffer, |dev| dev.dispose_of(drop_textures));
             Ok(payload)
         } else {
             // build a command buffer from the old primitives
@@ -198,8 +196,8 @@ impl UiRenderer {
                 vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::INDEX_BUFFER,
                 "UiRenderer buffer",
             )?;
-            let mut drop_buffer = std::mem::replace(&mut self.buffers[self.local_frame], new_buffer);
-            unsafe { drop_buffer.cleanup(&self.device) };
+            let drop_buffer = std::mem::replace(&mut self.buffers[self.local_frame], new_buffer);
+            self.device.dispose_of(drop_buffer);
         }
         // write vertices and indices on the same buffer
         let mut vert_offset = 0;
@@ -287,10 +285,8 @@ impl UiRenderer {
             .render_to_swapchain(&engine.swapchain)
             .mode(PipelineMode::Overlay)
             .build(engine)?;
-        unsafe {
-            self.pipeline.cleanup(&self.device);
-        }
-        self.pipeline = pipeline;
+        let old_pipeline = std::mem::replace(&mut self.pipeline, pipeline);
+        self.device.dispose_of(old_pipeline);
         Ok(())
     }
 }

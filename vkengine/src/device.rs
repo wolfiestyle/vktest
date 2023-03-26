@@ -191,8 +191,7 @@ impl VulkanDevice {
         src_buffer.map()?.write_slice(data, 0);
         self.copy_buffer(&src_buffer, &dst_buffer, 0)?;
 
-        unsafe { src_buffer.cleanup(self) };
-
+        self.dispose_of(src_buffer);
         Ok(dst_buffer)
     }
 
@@ -524,7 +523,7 @@ impl VulkanDevice {
         }
         self.end_one_time_commands(cmd_buffer)?;
 
-        unsafe { src_buffer.cleanup(self) };
+        self.dispose_of(src_buffer);
         self.debug(|d| d.set_object_name(&self.device, &tex_image.handle, &format!("Texture image {params:?}")));
 
         Ok(tex_image)
@@ -589,7 +588,7 @@ impl VulkanDevice {
         );
         self.end_one_time_commands(cmd_buffer)?;
 
-        unsafe { src_buffer.cleanup(self) };
+        self.dispose_of(src_buffer);
         Ok(())
     }
 
@@ -635,6 +634,11 @@ impl VulkanDevice {
         self.instance.debug(debug_f)
     }
 
+    #[inline]
+    pub fn dispose_of(&self, mut obj: impl Cleanup<Self>) {
+        unsafe { obj.cleanup(self) };
+    }
+
     pub fn get_memory_info(&self) -> String {
         format!("{:#?}", self.allocator.lock().unwrap())
     }
@@ -653,7 +657,7 @@ impl Drop for VulkanDevice {
     fn drop(&mut self) {
         unsafe {
             ManuallyDrop::drop(&mut self.allocator);
-            self.transfer_pool.cleanup(&self.device);
+            self.device.destroy_command_pool(self.transfer_pool, None);
             self.instance.surface_utils.destroy_surface(self.surface, None);
             self.device.destroy_device(None);
         }
@@ -792,26 +796,26 @@ impl CreateFromInfo for vk::QueryPoolCreateInfo {
     }
 }
 
-impl Cleanup<ash::Device> for vk::CommandPool {
-    unsafe fn cleanup(&mut self, device: &ash::Device) {
+impl Cleanup<VulkanDevice> for vk::CommandPool {
+    unsafe fn cleanup(&mut self, device: &VulkanDevice) {
         device.destroy_command_pool(*self, None);
     }
 }
 
-impl Cleanup<ash::Device> for vk::Sampler {
-    unsafe fn cleanup(&mut self, device: &ash::Device) {
+impl Cleanup<VulkanDevice> for vk::Sampler {
+    unsafe fn cleanup(&mut self, device: &VulkanDevice) {
         device.destroy_sampler(*self, None);
     }
 }
 
-impl Cleanup<ash::Device> for vk::DescriptorSetLayout {
-    unsafe fn cleanup(&mut self, device: &ash::Device) {
+impl Cleanup<VulkanDevice> for vk::DescriptorSetLayout {
+    unsafe fn cleanup(&mut self, device: &VulkanDevice) {
         device.destroy_descriptor_set_layout(*self, None);
     }
 }
 
-impl Cleanup<ash::Device> for vk::ImageView {
-    unsafe fn cleanup(&mut self, device: &ash::Device) {
+impl Cleanup<VulkanDevice> for vk::ImageView {
+    unsafe fn cleanup(&mut self, device: &VulkanDevice) {
         device.destroy_image_view(*self, None);
     }
 }

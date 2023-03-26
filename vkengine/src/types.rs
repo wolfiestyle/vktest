@@ -99,6 +99,14 @@ impl<C, T: Cleanup<C>> Cleanup<C> for [T] {
     }
 }
 
+impl<C, T: Cleanup<C>> Cleanup<C> for Vec<T> {
+    unsafe fn cleanup(&mut self, context: &C) {
+        for item in self {
+            item.cleanup(context);
+        }
+    }
+}
+
 impl<C, K, V: Cleanup<C>> Cleanup<C> for std::collections::HashMap<K, V> {
     unsafe fn cleanup(&mut self, context: &C) {
         for item in self.values_mut() {

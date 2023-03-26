@@ -156,10 +156,8 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
             .descriptor_layout(self.desc_layout)
             .render_to_swapchain(&engine.swapchain)
             .build(engine)?;
-        unsafe {
-            self.pipeline.cleanup(&self.device);
-        }
-        self.pipeline = pipeline;
+        let old_pipeline = std::mem::replace(&mut self.pipeline, pipeline);
+        self.device.dispose_of(old_pipeline);
         Ok(())
     }
 }
@@ -300,10 +298,8 @@ impl SkyboxRenderer {
             .mode(PipelineMode::Background)
             .topology(vk::PrimitiveTopology::TRIANGLE_STRIP)
             .build(engine)?;
-        unsafe {
-            self.pipeline.cleanup(&self.device);
-        }
-        self.pipeline = pipeline;
+        let old_pipeline = std::mem::replace(&mut self.pipeline, pipeline);
+        self.device.dispose_of(old_pipeline);
         Ok(())
     }
 }

@@ -705,8 +705,8 @@ impl std::ops::Index<u64> for CmdBufferRing {
     }
 }
 
-impl Cleanup<ash::Device> for CmdBufferRing {
-    unsafe fn cleanup(&mut self, device: &ash::Device) {
+impl Cleanup<VulkanDevice> for CmdBufferRing {
+    unsafe fn cleanup(&mut self, device: &VulkanDevice) {
         self.pool.cleanup(device);
     }
 }
