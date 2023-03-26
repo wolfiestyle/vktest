@@ -6,7 +6,6 @@ use egui::epaint::{Primitive, Vertex};
 use egui::{ClippedPrimitive, Context, FullOutput, PlatformOutput, TextureId, TexturesDelta};
 use egui_winit::{EventResponse, State};
 use glam::Mat4;
-use gpu_allocator::MemoryLocation;
 use inline_spirv::include_spirv;
 use std::collections::{hash_map::Entry, HashMap};
 use std::mem::size_of;
@@ -194,10 +193,9 @@ impl UiRenderer {
         // allocate nearest power of two sized buffer if necessary
         if total_bytes as u64 > self.buffers[self.local_frame].size() {
             let new_size = 1u64 << ((total_bytes - 1).ilog2() + 1);
-            let new_buffer = self.device.allocate_buffer(
+            let new_buffer = self.device.allocate_cpu_buffer(
                 new_size,
                 vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::INDEX_BUFFER,
-                MemoryLocation::CpuToGpu,
                 "UiRenderer buffer",
             )?;
             let mut drop_buffer = std::mem::replace(&mut self.buffers[self.local_frame], new_buffer);

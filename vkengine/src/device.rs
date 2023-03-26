@@ -110,9 +110,9 @@ impl VulkanDevice {
         Ok(())
     }
 
-    pub fn allocate_buffer(
+    fn allocate_buffer(
         &self, size: vk::DeviceSize, buf_usage: vk::BufferUsageFlags, location: MemoryLocation, name: &str,
-    ) -> VulkanResult<VkBuffer> {
+    ) -> VulkanResult<MemoryObject<vk::Buffer, MemoryLocation>> {
         let buffer_ci = vk::BufferCreateInfo::builder()
             .size(size)
             .usage(buf_usage)
@@ -149,29 +149,47 @@ impl VulkanDevice {
                 .describe_err("Failed to bind buffer memory")?
         };
 
-        Ok(VkBuffer::new(buffer, allocation, ()))
+        Ok(MemoryObject {
+            handle: buffer,
+            memory: ManuallyDrop::new(allocation),
+            props: location,
+        })
     }
 
-    fn copy_buffer(&self, dst_buffer: vk::Buffer, src_buffer: vk::Buffer, size: vk::DeviceSize) -> VulkanResult<()> {
+    #[inline]
+    pub fn allocate_cpu_buffer(&self, size: vk::DeviceSize, buf_usage: vk::BufferUsageFlags, name: &str) -> VulkanResult<VkBuffer> {
+        self.allocate_buffer(size, buf_usage, MemoryLocation::CpuToGpu, name)
+    }
+
+    #[inline]
+    pub fn allocate_gpu_buffer(&self, size: vk::DeviceSize, buf_usage: vk::BufferUsageFlags, name: &str) -> VulkanResult<VkBuffer> {
+        self.allocate_buffer(size, buf_usage, MemoryLocation::GpuOnly, name)
+    }
+
+    pub fn copy_buffer(&self, src_buffer: &VkBuffer, dst_buffer: &VkBuffer, dst_offset: u64) -> VulkanResult<()> {
+        if src_buffer.size() > dst_offset + dst_buffer.size() {
+            return VkError::EngineError("buffer write out of bounds").into();
+        }
         let cmd_buffer = self.begin_one_time_commands()?;
         let copy_region = vk::BufferCopy {
             src_offset: 0,
-            dst_offset: 0,
-            size,
+            dst_offset,
+            size: src_buffer.size(),
         };
         unsafe {
-            self.device.cmd_copy_buffer(cmd_buffer, src_buffer, dst_buffer, &[copy_region]);
+            self.device
+                .cmd_copy_buffer(cmd_buffer, src_buffer.handle, dst_buffer.handle, slice::from_ref(&copy_region));
         }
         self.end_one_time_commands(cmd_buffer)
     }
 
     pub fn create_buffer_from_data<T: Copy>(&self, data: &[T], usage: vk::BufferUsageFlags, name: &str) -> VulkanResult<VkBuffer> {
         let size = size_of_val(data) as _;
-        let mut src_buffer = self.allocate_buffer(size, vk::BufferUsageFlags::TRANSFER_SRC, MemoryLocation::CpuToGpu, "Staging")?;
-        let dst_buffer = self.allocate_buffer(size, vk::BufferUsageFlags::TRANSFER_DST | usage, MemoryLocation::GpuOnly, name)?;
+        let mut src_buffer = self.allocate_cpu_buffer(size, vk::BufferUsageFlags::TRANSFER_SRC, "Staging")?;
+        let dst_buffer = self.allocate_gpu_buffer(size, vk::BufferUsageFlags::TRANSFER_DST | usage, name)?;
 
         src_buffer.map()?.write_slice(data, 0);
-        self.copy_buffer(*dst_buffer, *src_buffer, size)?;
+        self.copy_buffer(&src_buffer, &dst_buffer, 0)?;
 
         unsafe { src_buffer.cleanup(self) };
 
@@ -225,7 +243,11 @@ impl VulkanDevice {
                 .describe_err("Failed to bind image memory")?;
         }
 
-        Ok(VkImage::new(image, allocation, params))
+        Ok(VkImage {
+            handle: image,
+            memory: ManuallyDrop::new(allocation),
+            props: params,
+        })
     }
 
     pub fn transition_image_layout(
@@ -449,7 +471,7 @@ impl VulkanDevice {
         let layer_size = params.width as usize * params.height as usize * 4; //FIXME: calc size from format
         let size = layer_size as vk::DeviceSize * params.layers as vk::DeviceSize;
         // create staging buffer that will contain the image bytes
-        let mut src_buffer = self.allocate_buffer(size, vk::BufferUsageFlags::TRANSFER_SRC, MemoryLocation::CpuToGpu, "Staging")?;
+        let mut src_buffer = self.allocate_cpu_buffer(size, vk::BufferUsageFlags::TRANSFER_SRC, "Staging")?;
         // create destination image that will be usable from shaders
         let tex_image = self.allocate_image(
             params,
@@ -517,7 +539,7 @@ impl VulkanDevice {
         }
         let layer_size = width as usize * height as usize * 4;
         let size = layer_size as vk::DeviceSize * layers as vk::DeviceSize;
-        let mut src_buffer = self.allocate_buffer(size, vk::BufferUsageFlags::TRANSFER_SRC, MemoryLocation::CpuToGpu, "Staging")?;
+        let mut src_buffer = self.allocate_cpu_buffer(size, vk::BufferUsageFlags::TRANSFER_SRC, "Staging")?;
 
         match data {
             ImageData::Single(bytes) => {
@@ -794,7 +816,7 @@ impl Cleanup<ash::Device> for vk::ImageView {
     }
 }
 
-pub type VkBuffer = MemoryObject<vk::Buffer, ()>;
+pub type VkBuffer = MemoryObject<vk::Buffer, MemoryLocation>;
 pub type VkImage = MemoryObject<vk::Image, ImageParams>;
 
 #[derive(Debug)]
@@ -805,14 +827,6 @@ pub struct MemoryObject<T, P> {
 }
 
 impl<T, P> MemoryObject<T, P> {
-    fn new(handle: T, memory: Allocation, props: P) -> Self {
-        Self {
-            handle,
-            memory: ManuallyDrop::new(memory),
-            props,
-        }
-    }
-
     #[inline]
     pub fn size(&self) -> u64 {
         self.memory.size()
@@ -854,7 +868,7 @@ impl<P> Cleanup<VulkanDevice> for MemoryObject<vk::Image, P> {
     }
 }
 
-impl VkBuffer {
+impl<P> MemoryObject<vk::Buffer, P> {
     pub fn descriptor(&self) -> vk::DescriptorBufferInfo {
         vk::DescriptorBufferInfo {
             buffer: self.handle,

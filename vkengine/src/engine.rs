@@ -7,7 +7,6 @@ use crate::vertex::VertexInput;
 use ash::vk;
 use cstr::cstr;
 use glam::{Mat4, UVec2, Vec3};
-use gpu_allocator::MemoryLocation;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use std::collections::HashMap;
 use std::slice;
@@ -720,7 +719,7 @@ pub struct UploadBuffer {
 impl UploadBuffer {
     pub fn new(device: &VulkanDevice, size: vk::DeviceSize, usage: vk::BufferUsageFlags, name: &str) -> VulkanResult<Self> {
         let buffers = (0..QUEUE_DEPTH + 1)
-            .map(|_| device.allocate_buffer(size, usage, MemoryLocation::CpuToGpu, name))
+            .map(|_| device.allocate_cpu_buffer(size, usage, name))
             .collect::<Result<Vec<_>, _>>()?
             .try_into()
             .unwrap();
