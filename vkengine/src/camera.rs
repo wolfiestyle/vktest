@@ -122,35 +122,35 @@ impl CameraController {
         use winit::event::{ElementState::*, KeyboardInput, MouseButton::*, VirtualKeyCode as Key};
 
         match event {
-            WindowEvent::KeyboardInput { input, .. } => match input {
-                KeyboardInput { state: Pressed, virtual_keycode: Some(Key::W), .. } => {
+            WindowEvent::KeyboardInput { input: KeyboardInput { state, virtual_keycode: Some(keycode), .. }, .. } => match (state, keycode) {
+                (Pressed, Key::W) => {
                     self.forward_speed = self.speed;
                 }
-                KeyboardInput { state: Pressed, virtual_keycode: Some(Key::S), .. } => {
+                (Pressed, Key::S) => {
                     self.forward_speed = -self.speed;
                 }
-                KeyboardInput { state: Released, virtual_keycode: Some(Key::W | Key::S), .. } => {
+                (Released, Key::W | Key::S) => {
                     self.forward_speed = 0.0;
                 }
-                KeyboardInput { state: Pressed, virtual_keycode: Some(Key::A), .. } => {
+                (Pressed, Key::A) => {
                     self.right_speed = -self.speed;
                 }
-                KeyboardInput { state: Pressed, virtual_keycode: Some(Key::D), .. } => {
+                (Pressed, Key::D) => {
                     self.right_speed = self.speed;
                 }
-                KeyboardInput { state: Released, virtual_keycode: Some(Key::A | Key::D), .. } => {
+                (Released, Key::A | Key::D) => {
                     self.right_speed = 0.0;
                 }
-                KeyboardInput { state: Pressed, virtual_keycode: Some(Key::Space), .. } => {
+                (Pressed, Key::Space) => {
                     self.up_speed = self.speed;
                 }
-                KeyboardInput { state: Pressed, virtual_keycode: Some(Key::C), .. } => {
+                (Pressed, Key::C) => {
                     self.up_speed = -self.speed;
                 }
-                KeyboardInput { state: Released, virtual_keycode: Some(Key::Space | Key::C), .. } => {
+                (Released, Key::Space | Key::C) => {
                     self.up_speed = 0.0;
                 }
-                KeyboardInput { state: Released, virtual_keycode: Some(Key::F), .. } => {
+                (Released, Key::F) => {
                     self.flying = !self.flying;
                 }
                 _ => (),

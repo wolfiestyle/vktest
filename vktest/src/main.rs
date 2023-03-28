@@ -118,36 +118,21 @@ fn main() -> VulkanResult<()> {
                     input:
                         KeyboardInput {
                             state: ElementState::Pressed,
-                            virtual_keycode: Some(VirtualKeyCode::Escape),
+                            virtual_keycode: Some(keycode),
                             ..
                         },
                     ..
-                } => {
-                    show_gui = !show_gui;
-                }
-                WindowEvent::KeyboardInput {
-                    input:
-                        KeyboardInput {
-                            state: ElementState::Pressed,
-                            virtual_keycode: Some(VirtualKeyCode::F1),
-                            ..
-                        },
-                    ..
-                } => {
-                    eprintln!("{}", vk_app.device().get_memory_info());
-                }
-                WindowEvent::KeyboardInput {
-                    input:
-                        KeyboardInput {
-                            state: ElementState::Pressed,
-                            virtual_keycode: Some(VirtualKeyCode::F11),
-                            ..
-                        },
-                    ..
-                } => {
-                    fullscreen = !fullscreen;
-                    window.set_fullscreen(fullscreen.then_some(Fullscreen::Borderless(None)));
-                }
+                } => match keycode {
+                    VirtualKeyCode::Escape => show_gui = !show_gui,
+                    VirtualKeyCode::F1 => {
+                        eprintln!("{}", vk_app.device().get_memory_info());
+                    }
+                    VirtualKeyCode::F11 => {
+                        fullscreen = !fullscreen;
+                        window.set_fullscreen(fullscreen.then_some(Fullscreen::Borderless(None)));
+                    }
+                    _ => controller.update_from_window_event(&event),
+                },
                 WindowEvent::Resized(size) => {
                     vk_app.resize(size.width, size.height);
                 }
