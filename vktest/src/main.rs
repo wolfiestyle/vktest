@@ -95,7 +95,8 @@ fn main() -> VulkanResult<()> {
     let mut gui = UiRenderer::new(&event_loop, &vk_app)?;
     let mut show_gui = true;
 
-    let thread_pool = yastl::Pool::new(4);
+    let thread_pool = yastl::Pool::new(16);
+    let mut draw_buffer = vec![];
 
     let mut prev_time = Instant::now();
     let mut prev_frame_count = 0;
@@ -234,27 +235,25 @@ fn main() -> VulkanResult<()> {
             vk_app.update();
 
             let objects = &mut scenes[cur_scene];
-            let mut draw_cmds = Vec::with_capacity(objects.len());
+            draw_buffer.resize_with(objects.len(), || VkError::UnfinishedJob.into());
             let mut skybox_cmds = VkError::UnfinishedJob.into();
             let mut gui_cmds = VkError::UnfinishedJob.into();
             thread_pool.scoped(|scope| {
-                scope.execute(|| {
-                    draw_cmds.extend(
-                        objects
-                            .iter_mut()
-                            .enumerate()
-                            .filter(|&(i, _)| mesh_enabled[cur_scene][i])
-                            .map(|(_, obj)| obj.render(&vk_app)),
-                    )
-                });
+                let draw_chunks = draw_buffer.chunks_mut(1);
+                for (i, (obj, draw_ret)) in objects.iter_mut().zip(draw_chunks).enumerate() {
+                    if mesh_enabled[cur_scene][i] {
+                        scope.execute(|| {
+                            draw_ret[0] = obj.render(&vk_app);
+                        });
+                    }
+                }
                 scope.execute(|| skybox_cmds = skybox.render(&vk_app));
                 scope.execute(|| gui_cmds = gui.draw(&vk_app));
             });
 
-            draw_cmds.push(skybox_cmds);
-            draw_cmds.push(gui_cmds);
+            let draw_cmds = draw_buffer.drain(..).chain([skybox_cmds, gui_cmds]).map(|res| res.unwrap());
 
-            vk_app.submit_draw_commands(draw_cmds.into_iter().map(|res| res.unwrap())).unwrap();
+            vk_app.submit_draw_commands(draw_cmds).unwrap();
 
             let cur_time = vk_app.get_frame_timestamp();
             let dt = cur_time - prev_time;
