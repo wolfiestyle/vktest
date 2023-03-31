@@ -2,6 +2,7 @@
 members = [
     "vkengine",
     "vktest",
+    "gltf-import",
 ]
 
 # Always compile deps with optimization.

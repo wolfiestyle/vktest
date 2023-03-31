@@ -1,0 +1,11 @@
+[package]
+name = "gltf-import"
+version = "0.1.0"
+authors = ["SnowDerg <slayerbeast@gmail.com>"]
+edition = "2021"
+
+[dependencies]
+gltf = "1.1.0"
+image = "0.24.5"
+urlencoding = "2.1.2"
+base64 = "0.21.0"
