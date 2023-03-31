@@ -152,6 +152,7 @@ impl VulkanDevice {
         Ok(MemoryObject {
             handle: buffer,
             memory: ManuallyDrop::new(allocation),
+            size,
             props: location,
         })
     }
@@ -245,6 +246,7 @@ impl VulkanDevice {
         Ok(VkImage {
             handle: image,
             memory: ManuallyDrop::new(allocation),
+            size: requirements.size,
             props: params,
         })
     }
@@ -809,13 +811,14 @@ pub type VkImage = MemoryObject<vk::Image, ImageParams>;
 pub struct MemoryObject<T, P> {
     pub handle: T,
     memory: ManuallyDrop<Allocation>,
+    size: u64,
     pub props: P,
 }
 
 impl<T, P> MemoryObject<T, P> {
     #[inline]
     pub fn size(&self) -> u64 {
-        self.memory.size()
+        self.size
     }
 
     pub fn map(&mut self) -> VulkanResult<MappedMemory> {
