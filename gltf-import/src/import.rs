@@ -1,7 +1,8 @@
 use crate::types::*;
 use crate::uri::Uri;
-use gltf::Document;
-use gltf::Gltf;
+use crate::vertex::{VertexAttribs, VertexOutput};
+use gltf::mesh::util::{ReadColors, ReadTexCoords};
+use gltf::{Document, Gltf, Semantic};
 use image::{DynamicImage, ImageFormat};
 use std::borrow::Cow;
 use std::fs::File;
@@ -38,6 +39,56 @@ impl GltfData {
             buffers,
             images,
         })
+    }
+
+    pub fn read_vertices<T: VertexOutput>(&self, prim: &gltf::mesh::Primitive, output: &mut T) {
+        let mut attribs = VertexAttribs::default();
+        let mut count = 0;
+        for (semantic, accessor) in prim.attributes() {
+            match semantic {
+                Semantic::Positions => attribs.position = true,
+                Semantic::Normals => attribs.normal = true,
+                Semantic::Tangents => attribs.tangent = true,
+                Semantic::TexCoords(n) => attribs.texcoord = attribs.texcoord.max(n + 1),
+                Semantic::Colors(n) => attribs.color = attribs.color.max(n + 1),
+                _ => (),
+            }
+            count = count.max(accessor.count());
+        }
+        output.init(count, attribs);
+
+        let reader = prim.reader(|buffer| self.buffers.0.get(buffer.index()).map(Vec::as_slice));
+        if let Some(iter) = reader.read_positions() {
+            output.write_positions(iter);
+        }
+        if let Some(iter) = reader.read_normals() {
+            output.write_normals(iter);
+        }
+        if let Some(iter) = reader.read_tangents() {
+            output.write_tangents(iter);
+        }
+        for set in 0..attribs.texcoord {
+            if let Some(ty) = reader.read_tex_coords(set) {
+                match ty {
+                    ReadTexCoords::U8(iter) => output.write_texcoords_u8(set, iter),
+                    ReadTexCoords::U16(iter) => output.write_texcoords_u16(set, iter),
+                    ReadTexCoords::F32(iter) => output.write_texcoords_f32(set, iter),
+                }
+            }
+        }
+        for set in 0..attribs.color {
+            if let Some(ty) = reader.read_colors(set) {
+                match ty {
+                    ReadColors::RgbU8(iter) => output.write_colors_u8(set, iter.map(|[r, g, b]| [r, g, b, u8::MAX])),
+                    ReadColors::RgbU16(iter) => output.write_colors_u16(set, iter.map(|[r, g, b]| [r, g, b, u16::MAX])),
+                    ReadColors::RgbF32(iter) => output.write_colors_f32(set, iter.map(|[r, g, b]| [r, g, b, 1.0])),
+                    ReadColors::RgbaU8(iter) => output.write_colors_u8(set, iter),
+                    ReadColors::RgbaU16(iter) => output.write_colors_u16(set, iter),
+                    ReadColors::RgbaF32(iter) => output.write_colors_f32(set, iter),
+                }
+            }
+        }
+        output.finish();
     }
 }
 
