@@ -12,38 +12,28 @@ pub struct VertexAttribs {
     pub color: u32,
 }
 
-pub trait VertexOutput {
-    fn init(&mut self, vert_count: usize, index_count: Option<usize>, attribs: VertexAttribs, mode: Mode, material_id: Option<usize>);
+pub trait VertexStorage: Default {
+    fn count(&self) -> usize;
 
-    fn write_positions(&mut self, data: impl Iterator<Item = [f32; 3]>);
+    fn set_count(&mut self, new_size: usize);
 
-    fn write_normals(&mut self, data: impl Iterator<Item = [f32; 3]>);
+    fn write_position(&mut self, index: usize, value: [f32; 3]);
 
-    fn write_tangents(&mut self, data: impl Iterator<Item = [f32; 4]>);
+    fn write_normal(&mut self, index: usize, value: [f32; 3]);
 
-    fn write_texcoords_f32(&mut self, set: u32, data: impl Iterator<Item = [f32; 2]>);
+    fn write_tangent(&mut self, index: usize, value: [f32; 4]);
 
-    fn write_texcoords_u8(&mut self, set: u32, data: impl Iterator<Item = [u8; 2]>) {
-        self.write_texcoords_f32(set, data.map(|t| t.map(|n| n as f32 / 255.0)))
-    }
+    fn write_texcoord_f32(&mut self, index: usize, set: u32, value: [f32; 2]);
 
-    fn write_texcoords_u16(&mut self, set: u32, data: impl Iterator<Item = [u16; 2]>) {
-        self.write_texcoords_f32(set, data.map(|t| t.map(|n| n as f32 / 65535.0)))
-    }
+    fn write_texcoord_u8(&mut self, index: usize, set: u32, value: [u8; 2]);
 
-    fn write_colors_f32(&mut self, set: u32, data: impl Iterator<Item = [f32; 4]>);
+    fn write_texcoord_u16(&mut self, index: usize, set: u32, value: [u16; 2]);
 
-    fn write_colors_u8(&mut self, set: u32, data: impl Iterator<Item = [u8; 4]>) {
-        self.write_colors_f32(set, data.map(|c| c.map(|n| n as f32 / 255.0)))
-    }
+    fn write_color_f32(&mut self, index: usize, set: u32, value: [f32; 4]);
 
-    fn write_colors_u16(&mut self, set: u32, data: impl Iterator<Item = [u16; 4]>) {
-        self.write_colors_f32(set, data.map(|c| c.map(|n| n as f32 / 65536.0)))
-    }
+    fn write_color_u8(&mut self, index: usize, set: u32, value: [u8; 4]);
 
-    fn write_indices(&mut self, data: impl Iterator<Item = u32>);
-
-    fn finish(&mut self);
+    fn write_color_u16(&mut self, index: usize, set: u32, value: [u16; 4]);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -67,6 +57,56 @@ impl Default for Vertex {
     }
 }
 
+impl VertexStorage for Vec<Vertex> {
+    fn count(&self) -> usize {
+        self.len()
+    }
+
+    fn set_count(&mut self, new_count: usize) {
+        self.resize_with(new_count, Default::default)
+    }
+
+    fn write_position(&mut self, index: usize, value: [f32; 3]) {
+        self[index].position = value;
+    }
+
+    fn write_normal(&mut self, index: usize, value: [f32; 3]) {
+        self[index].normal = value;
+    }
+
+    fn write_tangent(&mut self, index: usize, value: [f32; 4]) {
+        self[index].tangent = value;
+    }
+
+    fn write_texcoord_f32(&mut self, index: usize, set: u32, value: [f32; 2]) {
+        if set == 0 {
+            self[index].texcoord = value;
+        }
+    }
+
+    fn write_texcoord_u8(&mut self, index: usize, set: u32, value: [u8; 2]) {
+        self.write_texcoord_f32(index, set, value.map(|n| n as f32 / 255.0))
+    }
+
+    fn write_texcoord_u16(&mut self, index: usize, set: u32, value: [u16; 2]) {
+        self.write_texcoord_f32(index, set, value.map(|n| n as f32 / 65535.0))
+    }
+
+    fn write_color_f32(&mut self, index: usize, set: u32, value: [f32; 4]) {
+        if set == 0 {
+            self[index].color = value;
+        }
+    }
+
+    fn write_color_u8(&mut self, index: usize, set: u32, value: [u8; 4]) {
+        self.write_color_f32(index, set, value.map(|n| n as f32 / 255.0))
+    }
+
+    fn write_color_u16(&mut self, index: usize, set: u32, value: [u16; 4]) {
+        self.write_color_f32(index, set, value.map(|n| n as f32 / 65535.0))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Submesh {
     index_range: Range<usize>,
@@ -75,16 +115,16 @@ pub struct Submesh {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct MeshData {
-    pub vertices: Vec<Vertex>,
+pub struct MeshData<V> {
+    pub vertices: V,
     pub indices: Vec<u32>,
     pub attribs: VertexAttribs,
     pub submeshes: Vec<Submesh>,
-    vert_offset: usize,
-    idx_offset: usize,
+    pub(crate) vert_offset: usize,
+    pub(crate) idx_offset: usize,
 }
 
-impl MeshData {
+impl<V: VertexStorage> MeshData<V> {
     pub(crate) fn import_meshes(document: &Document, buffers: &BufferData) -> Vec<Self> {
         document
             .meshes()
@@ -97,12 +137,12 @@ impl MeshData {
             })
             .collect()
     }
-}
 
-impl VertexOutput for MeshData {
-    fn init(&mut self, vert_count: usize, index_count: Option<usize>, attribs: VertexAttribs, mode: Mode, material_id: Option<usize>) {
-        let vert_offset = self.vertices.len();
-        self.vertices.resize_with(vert_offset + vert_count, Default::default);
+    pub(crate) fn begin_primitives(
+        &mut self, vert_count: usize, index_count: Option<usize>, attribs: VertexAttribs, mode: Mode, material_id: Option<usize>,
+    ) {
+        let vert_offset = self.vertices.count();
+        self.vertices.set_count(vert_offset + vert_count);
         self.vert_offset = vert_offset;
         let idx_offset = self.indices.len();
         if let Some(idx_count) = index_count {
@@ -124,49 +164,6 @@ impl VertexOutput for MeshData {
             });
         }
         self.idx_offset = idx_offset;
-        self.attribs = attribs;
+        self.attribs = attribs; //FIXME: this could change between submeshes
     }
-
-    fn write_positions(&mut self, data: impl Iterator<Item = [f32; 3]>) {
-        for (pos, i) in data.zip(self.vert_offset..) {
-            self.vertices[i].position = pos;
-        }
-    }
-
-    fn write_normals(&mut self, data: impl Iterator<Item = [f32; 3]>) {
-        for (normal, i) in data.zip(self.vert_offset..) {
-            self.vertices[i].normal = normal;
-        }
-    }
-
-    fn write_tangents(&mut self, data: impl Iterator<Item = [f32; 4]>) {
-        for (tangent, i) in data.zip(self.vert_offset..) {
-            self.vertices[i].tangent = tangent;
-        }
-    }
-
-    fn write_texcoords_f32(&mut self, set: u32, data: impl Iterator<Item = [f32; 2]>) {
-        if set == 0 {
-            for (texc, i) in data.zip(self.vert_offset..) {
-                self.vertices[i].texcoord = texc;
-            }
-        }
-    }
-
-    fn write_colors_f32(&mut self, set: u32, data: impl Iterator<Item = [f32; 4]>) {
-        if set == 0 {
-            for (color, i) in data.zip(self.vert_offset..) {
-                self.vertices[i].color = color;
-            }
-        }
-    }
-
-    fn write_indices(&mut self, data: impl Iterator<Item = u32>) {
-        let base = self.vert_offset as u32;
-        for (index, i) in data.zip(self.idx_offset..) {
-            self.indices[i] = index + base;
-        }
-    }
-
-    fn finish(&mut self) {}
 }
