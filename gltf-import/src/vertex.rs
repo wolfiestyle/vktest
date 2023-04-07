@@ -1,6 +1,5 @@
-use crate::import::BufferData;
+use crate::import::GltfData;
 use gltf::mesh::Mode;
-use gltf::Document;
 use std::ops::Range;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -125,13 +124,13 @@ pub struct MeshData<V> {
 }
 
 impl<V: VertexStorage> MeshData<V> {
-    pub(crate) fn import_meshes(document: &Document, buffers: &BufferData) -> Vec<Self> {
-        document
+    pub fn read_meshes(gltf: &GltfData) -> Vec<Self> {
+        gltf.document
             .meshes()
             .map(|mesh| {
                 let mut data = MeshData::default();
                 for prim in mesh.primitives() {
-                    buffers.read_primitive(&prim, &mut data);
+                    gltf.buffers.read_primitive(&prim, &mut data);
                 }
                 data
             })

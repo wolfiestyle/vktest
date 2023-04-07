@@ -15,7 +15,6 @@ pub struct GltfData {
     pub document: Document,
     pub buffers: BufferData,
     pub images: Vec<ImageData>,
-    pub meshes: Vec<MeshData<Vec<Vertex>>>,
 }
 
 impl GltfData {
@@ -35,13 +34,16 @@ impl GltfData {
     fn import_gltf(gltf: Gltf, base_path: Option<&Path>) -> ImportResult<Self> {
         let buffers = BufferData::import_buffers(&gltf.document, gltf.blob, base_path)?;
         let images = ImageData::import_images(&gltf.document, &buffers, base_path);
-        let meshes = MeshData::import_meshes(&gltf.document, &buffers);
+
         Ok(Self {
             document: gltf.document,
             buffers,
             images,
-            meshes,
         })
+    }
+
+    pub fn import_meshes(&self) -> Vec<MeshData<Vec<Vertex>>> {
+        MeshData::read_meshes(&self)
     }
 }
 
