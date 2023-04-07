@@ -1,9 +1,8 @@
 use crate::material::{Material, Texture};
 use crate::types::*;
 use crate::uri::Uri;
-use crate::vertex::{MeshData, Vertex, VertexAttribs, VertexStorage};
-use gltf::mesh::util::{ReadColors, ReadTexCoords};
-use gltf::{Document, Gltf, Semantic};
+use crate::vertex::{MeshData, Vertex};
+use gltf::{Document, Gltf};
 use image::{DynamicImage, ImageFormat};
 use std::borrow::Cow;
 use std::fs::File;
@@ -88,104 +87,6 @@ impl BufferData {
         let offset = view.offset();
         let size = view.length();
         &buffer[offset..offset + size]
-    }
-
-    pub fn read_primitive<V: VertexStorage>(&self, prim: &gltf::mesh::Primitive, output: &mut MeshData<V>) {
-        let mut attribs = VertexAttribs::default();
-        let mut vert_count = 0;
-        for (semantic, accessor) in prim.attributes() {
-            match semantic {
-                Semantic::Positions => attribs.position = true,
-                Semantic::Normals => attribs.normal = true,
-                Semantic::Tangents => attribs.tangent = true,
-                Semantic::TexCoords(n) => attribs.texcoord = attribs.texcoord.max(n + 1),
-                Semantic::Colors(n) => attribs.color = attribs.color.max(n + 1),
-                _ => (),
-            }
-            vert_count = vert_count.max(accessor.count());
-        }
-        let idx_count = prim.indices().map(|acc| acc.count());
-        output.begin_primitives(vert_count, idx_count, attribs, prim.mode(), prim.material().index());
-
-        let reader = prim.reader(|buffer| self.0.get(buffer.index()).map(Vec::as_slice));
-        if let Some(iter) = reader.read_positions() {
-            for (pos, i) in iter.zip(output.vert_offset..) {
-                output.vertices.write_position(i, pos);
-            }
-        }
-        if let Some(iter) = reader.read_normals() {
-            for (normal, i) in iter.zip(output.vert_offset..) {
-                output.vertices.write_normal(i, normal);
-            }
-        }
-        if let Some(iter) = reader.read_tangents() {
-            for (tangent, i) in iter.zip(output.vert_offset..) {
-                output.vertices.write_tangent(i, tangent);
-            }
-        }
-        for set in 0..attribs.texcoord {
-            if let Some(ty) = reader.read_tex_coords(set) {
-                match ty {
-                    ReadTexCoords::U8(iter) => {
-                        for (texc, i) in iter.zip(output.vert_offset..) {
-                            output.vertices.write_texcoord_u8(i, set, texc);
-                        }
-                    }
-                    ReadTexCoords::U16(iter) => {
-                        for (texc, i) in iter.zip(output.vert_offset..) {
-                            output.vertices.write_texcoord_u16(i, set, texc);
-                        }
-                    }
-                    ReadTexCoords::F32(iter) => {
-                        for (texc, i) in iter.zip(output.vert_offset..) {
-                            output.vertices.write_texcoord_f32(i, set, texc);
-                        }
-                    }
-                }
-            }
-        }
-        for set in 0..attribs.color {
-            if let Some(ty) = reader.read_colors(set) {
-                match ty {
-                    ReadColors::RgbU8(iter) => {
-                        for ([r, g, b], i) in iter.zip(output.vert_offset..) {
-                            output.vertices.write_color_u8(i, set, [r, g, b, u8::MAX]);
-                        }
-                    }
-                    ReadColors::RgbU16(iter) => {
-                        for ([r, g, b], i) in iter.zip(output.vert_offset..) {
-                            output.vertices.write_color_u16(i, set, [r, g, b, u16::MAX]);
-                        }
-                    }
-                    ReadColors::RgbF32(iter) => {
-                        for ([r, g, b], i) in iter.zip(output.vert_offset..) {
-                            output.vertices.write_color_f32(i, set, [r, g, b, 1.0]);
-                        }
-                    }
-                    ReadColors::RgbaU8(iter) => {
-                        for (color, i) in iter.zip(output.vert_offset..) {
-                            output.vertices.write_color_u8(i, set, color);
-                        }
-                    }
-                    ReadColors::RgbaU16(iter) => {
-                        for (color, i) in iter.zip(output.vert_offset..) {
-                            output.vertices.write_color_u16(i, set, color);
-                        }
-                    }
-                    ReadColors::RgbaF32(iter) => {
-                        for (color, i) in iter.zip(output.vert_offset..) {
-                            output.vertices.write_color_f32(i, set, color);
-                        }
-                    }
-                }
-            }
-        }
-        if let Some(iter) = reader.read_indices() {
-            let base = output.vert_offset as u32;
-            for (index, i) in iter.into_u32().zip(output.idx_offset..) {
-                output.indices[i] = index + base;
-            }
-        }
     }
 }
 
