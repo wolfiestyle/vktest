@@ -59,6 +59,9 @@ impl Default for Material {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MaterialId(pub usize);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TextureInfo {
     pub index: usize,
     pub uv_set: u32,

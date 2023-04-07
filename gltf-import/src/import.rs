@@ -15,6 +15,8 @@ pub struct GltfData {
     pub document: Document,
     pub buffers: BufferData,
     pub images: Vec<ImageData>,
+    pub materials: Vec<Material>,
+    pub textures: Vec<Texture>,
 }
 
 impl GltfData {
@@ -34,24 +36,21 @@ impl GltfData {
     fn import_gltf(gltf: Gltf, base_path: Option<&Path>) -> ImportResult<Self> {
         let buffers = BufferData::import_buffers(&gltf.document, gltf.blob, base_path)?;
         let images = ImageData::import_images(&gltf.document, &buffers, base_path);
+        let materials = gltf.document.materials().map(Material::read).collect();
+        let textures = gltf.document.textures().map(Texture::read).collect();
 
         Ok(Self {
             document: gltf.document,
             buffers,
             images,
+            materials,
+            textures,
         })
     }
 
+    #[inline]
     pub fn import_meshes(&self) -> Vec<MeshData<Vec<Vertex>>> {
         MeshData::read_meshes(&self)
-    }
-
-    pub fn import_materials(&self) -> Vec<Material> {
-        self.document.materials().map(Material::read).collect()
-    }
-
-    pub fn import_textures(&self) -> Vec<Texture> {
-        self.document.textures().map(Texture::read).collect()
     }
 }
 

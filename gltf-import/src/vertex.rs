@@ -1,4 +1,5 @@
-use crate::{import::GltfData, BufferData};
+use crate::import::{BufferData, GltfData};
+use crate::material::MaterialId;
 use gltf::mesh::util::{ReadColors, ReadTexCoords};
 use gltf::mesh::Mode;
 use gltf::Semantic;
@@ -37,6 +38,7 @@ pub trait VertexStorage: Default {
     fn write_color_u16(&mut self, index: usize, set: u32, value: [u16; 4]);
 }
 
+#[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Vertex {
     pub position: [f32; 3],
@@ -110,9 +112,9 @@ impl VertexStorage for Vec<Vertex> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Submesh {
-    index_range: Range<usize>,
-    mode: Mode,
-    material_id: Option<usize>,
+    pub index_range: Range<usize>,
+    pub mode: Mode,
+    pub material: Option<MaterialId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -140,7 +142,7 @@ impl<V: VertexStorage> MeshData<V> {
     }
 
     pub(crate) fn begin_primitives(
-        &mut self, vert_count: usize, index_count: Option<usize>, attribs: VertexAttribs, mode: Mode, material_id: Option<usize>,
+        &mut self, vert_count: usize, index_count: Option<usize>, attribs: VertexAttribs, mode: Mode, material: Option<MaterialId>,
     ) {
         let vert_offset = self.vertices.count();
         self.vertices.set_count(vert_offset + vert_count);
@@ -152,7 +154,7 @@ impl<V: VertexStorage> MeshData<V> {
             self.submeshes.push(Submesh {
                 index_range: idx_offset..idx_end,
                 mode,
-                material_id,
+                material,
             });
         } else {
             let first = vert_offset as u32;
@@ -161,7 +163,7 @@ impl<V: VertexStorage> MeshData<V> {
             self.submeshes.push(Submesh {
                 index_range: idx_offset..idx_offset + vert_count,
                 mode,
-                material_id,
+                material,
             });
         }
         self.idx_offset = idx_offset;
@@ -183,7 +185,7 @@ impl<V: VertexStorage> MeshData<V> {
             vert_count = vert_count.max(accessor.count());
         }
         let idx_count = prim.indices().map(|acc| acc.count());
-        output.begin_primitives(vert_count, idx_count, attribs, prim.mode(), prim.material().index());
+        output.begin_primitives(vert_count, idx_count, attribs, prim.mode(), prim.material().index().map(MaterialId));
 
         let reader = prim.reader(|buffer| buffers.0.get(buffer.index()).map(Vec::as_slice));
         if let Some(iter) = reader.read_positions() {
