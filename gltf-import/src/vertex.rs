@@ -1,3 +1,8 @@
+use crate::import::BufferData;
+use gltf::mesh::Mode;
+use gltf::Document;
+use std::ops::Range;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct VertexAttribs {
     pub position: bool,
@@ -8,7 +13,7 @@ pub struct VertexAttribs {
 }
 
 pub trait VertexOutput {
-    fn init(&mut self, vert_count: usize, index_count: Option<usize>, attrib_present: VertexAttribs);
+    fn init(&mut self, vert_count: usize, index_count: Option<usize>, attribs: VertexAttribs, mode: Mode, material_id: Option<usize>);
 
     fn write_positions(&mut self, data: impl Iterator<Item = [f32; 3]>);
 
@@ -62,36 +67,64 @@ impl Default for Vertex {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Submesh {
+    index_range: Range<usize>,
+    mode: Mode,
+    material_id: Option<usize>,
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct MeshData {
     pub vertices: Vec<Vertex>,
     pub indices: Vec<u32>,
     pub attribs: VertexAttribs,
+    pub submeshes: Vec<Submesh>,
     vert_offset: usize,
     idx_offset: usize,
 }
 
 impl MeshData {
-    pub fn new() -> Self {
-        Default::default()
+    pub(crate) fn import_meshes(document: &Document, buffers: &BufferData) -> Vec<Self> {
+        document
+            .meshes()
+            .map(|mesh| {
+                let mut data = MeshData::default();
+                for prim in mesh.primitives() {
+                    buffers.read_primitive(&prim, &mut data);
+                }
+                data
+            })
+            .collect()
     }
 }
 
 impl VertexOutput for MeshData {
-    fn init(&mut self, vert_count: usize, index_count: Option<usize>, attrib_present: VertexAttribs) {
+    fn init(&mut self, vert_count: usize, index_count: Option<usize>, attribs: VertexAttribs, mode: Mode, material_id: Option<usize>) {
         let vert_offset = self.vertices.len();
         self.vertices.resize_with(vert_offset + vert_count, Default::default);
         self.vert_offset = vert_offset;
         let idx_offset = self.indices.len();
         if let Some(idx_count) = index_count {
-            self.indices.resize_with(idx_offset + idx_count, Default::default);
+            let idx_end = idx_offset + idx_count;
+            self.indices.resize_with(idx_end, Default::default);
+            self.submeshes.push(Submesh {
+                index_range: idx_offset..idx_end,
+                mode,
+                material_id,
+            });
         } else {
             let first = vert_offset as u32;
             let last = first + vert_count as u32;
             self.indices.extend(first..last);
+            self.submeshes.push(Submesh {
+                index_range: idx_offset..idx_offset + vert_count,
+                mode,
+                material_id,
+            });
         }
         self.idx_offset = idx_offset;
-        self.attribs = attrib_present;
+        self.attribs = attribs;
     }
 
     fn write_positions(&mut self, data: impl Iterator<Item = [f32; 3]>) {
