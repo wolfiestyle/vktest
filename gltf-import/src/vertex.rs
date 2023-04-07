@@ -8,7 +8,7 @@ pub struct VertexAttribs {
 }
 
 pub trait VertexOutput {
-    fn init(&mut self, vert_count: usize, attrib_present: VertexAttribs);
+    fn init(&mut self, vert_count: usize, index_count: Option<usize>, attrib_present: VertexAttribs);
 
     fn write_positions(&mut self, data: impl Iterator<Item = [f32; 3]>);
 
@@ -36,6 +36,8 @@ pub trait VertexOutput {
         self.write_colors_f32(set, data.map(|c| c.map(|n| n as f32 / 65536.0)))
     }
 
+    fn write_indices(&mut self, data: impl Iterator<Item = u32>);
+
     fn finish(&mut self);
 }
 
@@ -61,47 +63,58 @@ impl Default for Vertex {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct VerticesInterleaved {
+pub struct MeshData {
     pub vertices: Vec<Vertex>,
+    pub indices: Vec<u32>,
     pub attribs: VertexAttribs,
-    offset: usize,
+    vert_offset: usize,
+    idx_offset: usize,
 }
 
-impl VerticesInterleaved {
+impl MeshData {
     pub fn new() -> Self {
         Default::default()
     }
 }
 
-impl VertexOutput for VerticesInterleaved {
-    fn init(&mut self, vert_count: usize, attrib_present: VertexAttribs) {
-        let offset = self.vertices.len();
-        self.vertices.resize_with(offset + vert_count, Default::default);
+impl VertexOutput for MeshData {
+    fn init(&mut self, vert_count: usize, index_count: Option<usize>, attrib_present: VertexAttribs) {
+        let vert_offset = self.vertices.len();
+        self.vertices.resize_with(vert_offset + vert_count, Default::default);
+        self.vert_offset = vert_offset;
+        let idx_offset = self.indices.len();
+        if let Some(idx_count) = index_count {
+            self.indices.resize_with(idx_offset + idx_count, Default::default);
+        } else {
+            let first = vert_offset as u32;
+            let last = first + vert_count as u32;
+            self.indices.extend(first..last);
+        }
+        self.idx_offset = idx_offset;
         self.attribs = attrib_present;
-        self.offset = offset;
     }
 
     fn write_positions(&mut self, data: impl Iterator<Item = [f32; 3]>) {
-        for (pos, i) in data.zip(self.offset..) {
+        for (pos, i) in data.zip(self.vert_offset..) {
             self.vertices[i].position = pos;
         }
     }
 
     fn write_normals(&mut self, data: impl Iterator<Item = [f32; 3]>) {
-        for (normal, i) in data.zip(self.offset..) {
+        for (normal, i) in data.zip(self.vert_offset..) {
             self.vertices[i].normal = normal;
         }
     }
 
     fn write_tangents(&mut self, data: impl Iterator<Item = [f32; 4]>) {
-        for (tangent, i) in data.zip(self.offset..) {
+        for (tangent, i) in data.zip(self.vert_offset..) {
             self.vertices[i].tangent = tangent;
         }
     }
 
     fn write_texcoords_f32(&mut self, set: u32, data: impl Iterator<Item = [f32; 2]>) {
         if set == 0 {
-            for (texc, i) in data.zip(self.offset..) {
+            for (texc, i) in data.zip(self.vert_offset..) {
                 self.vertices[i].texcoord = texc;
             }
         }
@@ -109,13 +122,18 @@ impl VertexOutput for VerticesInterleaved {
 
     fn write_colors_f32(&mut self, set: u32, data: impl Iterator<Item = [f32; 4]>) {
         if set == 0 {
-            for (color, i) in data.zip(self.offset..) {
+            for (color, i) in data.zip(self.vert_offset..) {
                 self.vertices[i].color = color;
             }
         }
     }
 
-    fn finish(&mut self) {
-        //TODO: compute missing attributes
+    fn write_indices(&mut self, data: impl Iterator<Item = u32>) {
+        let base = self.vert_offset as u32;
+        for (index, i) in data.zip(self.idx_offset..) {
+            self.indices[i] = index + base;
+        }
     }
+
+    fn finish(&mut self) {}
 }

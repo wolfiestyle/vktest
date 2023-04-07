@@ -43,7 +43,7 @@ impl GltfData {
 
     pub fn read_vertices<T: VertexOutput>(&self, prim: &gltf::mesh::Primitive, output: &mut T) {
         let mut attribs = VertexAttribs::default();
-        let mut count = 0;
+        let mut vert_count = 0;
         for (semantic, accessor) in prim.attributes() {
             match semantic {
                 Semantic::Positions => attribs.position = true,
@@ -53,9 +53,10 @@ impl GltfData {
                 Semantic::Colors(n) => attribs.color = attribs.color.max(n + 1),
                 _ => (),
             }
-            count = count.max(accessor.count());
+            vert_count = vert_count.max(accessor.count());
         }
-        output.init(count, attribs);
+        let idx_count = prim.indices().map(|acc| acc.count());
+        output.init(vert_count, idx_count, attribs);
 
         let reader = prim.reader(|buffer| self.buffers.0.get(buffer.index()).map(Vec::as_slice));
         if let Some(iter) = reader.read_positions() {
@@ -87,6 +88,9 @@ impl GltfData {
                     ReadColors::RgbaF32(iter) => output.write_colors_f32(set, iter),
                 }
             }
+        }
+        if let Some(iter) = reader.read_indices() {
+            output.write_indices(iter.into_u32());
         }
         output.finish();
     }
