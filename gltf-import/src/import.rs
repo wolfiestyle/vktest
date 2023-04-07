@@ -1,3 +1,4 @@
+use crate::material::{Material, Texture};
 use crate::types::*;
 use crate::uri::Uri;
 use crate::vertex::{MeshData, Vertex, VertexAttribs, VertexStorage};
@@ -44,6 +45,14 @@ impl GltfData {
 
     pub fn import_meshes(&self) -> Vec<MeshData<Vec<Vertex>>> {
         MeshData::read_meshes(&self)
+    }
+
+    pub fn import_materials(&self) -> Vec<Material> {
+        self.document.materials().map(Material::read).collect()
+    }
+
+    pub fn import_textures(&self) -> Vec<Texture> {
+        self.document.textures().map(Texture::read).collect()
     }
 }
 
