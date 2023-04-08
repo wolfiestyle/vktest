@@ -1,4 +1,4 @@
-use gltf::material::AlphaMode;
+use gltf::material::{AlphaMode, NormalTexture, OcclusionTexture};
 use gltf::texture::{MagFilter, MinFilter, WrappingMode};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -7,6 +7,8 @@ pub struct Material {
     pub metallic: f32,
     pub roughness: f32,
     pub emissive: [f32; 3],
+    pub normal_scale: f32,
+    pub occlusion_strength: f32,
     pub color_tex: Option<TextureInfo>,
     pub metallic_roughness_tex: Option<TextureInfo>,
     pub normal_tex: Option<TextureInfo>,
@@ -19,15 +21,20 @@ pub struct Material {
 
 impl From<gltf::Material<'_>> for Material {
     fn from(material: gltf::Material) -> Self {
+        let pbr = material.pbr_metallic_roughness();
+        let normal_info = material.normal_texture();
+        let occl_info = material.occlusion_texture();
         Self {
-            base_color: material.pbr_metallic_roughness().base_color_factor(),
-            metallic: material.pbr_metallic_roughness().metallic_factor(),
-            roughness: material.pbr_metallic_roughness().roughness_factor(),
+            base_color: pbr.base_color_factor(),
+            metallic: pbr.metallic_factor(),
+            roughness: pbr.roughness_factor(),
             emissive: material.emissive_factor(),
-            color_tex: material.pbr_metallic_roughness().base_color_texture().map(From::from),
-            metallic_roughness_tex: material.pbr_metallic_roughness().metallic_roughness_texture().map(From::from),
-            normal_tex: material.normal_texture().map(From::from),
-            occlusion_tex: material.occlusion_texture().map(From::from),
+            normal_scale: normal_info.as_ref().map(NormalTexture::scale).unwrap_or(1.0),
+            occlusion_strength: occl_info.as_ref().map(OcclusionTexture::strength).unwrap_or(1.0),
+            color_tex: pbr.base_color_texture().map(From::from),
+            metallic_roughness_tex: pbr.metallic_roughness_texture().map(From::from),
+            normal_tex: normal_info.map(From::from),
+            occlusion_tex: occl_info.map(From::from),
             emissive_tex: material.emissive_texture().map(From::from),
             alpha_mode: material.alpha_mode(),
             alpha_cutoff: material.alpha_cutoff().unwrap_or(0.5),
@@ -43,6 +50,8 @@ impl Default for Material {
             metallic: 1.0,
             roughness: 1.0,
             emissive: [0.0; 3],
+            normal_scale: 1.0,
+            occlusion_strength: 1.0,
             color_tex: None,
             metallic_roughness_tex: None,
             normal_tex: None,
