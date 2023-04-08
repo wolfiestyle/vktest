@@ -44,11 +44,11 @@ impl<V: VertexStorage> GltfData<V> {
         let buffers = BufferData::import_buffers(&gltf.document, gltf.blob, base_path)?;
         let images = ImageData::import_images(&gltf.document, &buffers, base_path);
         let meshes = MeshData::import_meshes(&gltf.document, &buffers);
-        let materials = gltf.document.materials().map(Material::read).collect();
-        let textures = gltf.document.textures().map(Texture::read).collect();
-        let nodes = gltf.document.nodes().map(Node::read).collect();
-        let scenes = gltf.document.scenes().map(Scene::read).collect();
-        let cameras = gltf.document.cameras().map(Camera::read).collect();
+        let materials = gltf.document.materials().map(From::from).collect();
+        let textures = gltf.document.textures().map(From::from).collect();
+        let nodes = gltf.document.nodes().map(From::from).collect();
+        let scenes = gltf.document.scenes().map(From::from).collect();
+        let cameras = gltf.document.cameras().map(From::from).collect();
 
         Ok(Self {
             document: gltf.document,

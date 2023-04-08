@@ -9,8 +9,8 @@ pub struct Node {
     pub children: Vec<NodeId>,
 }
 
-impl Node {
-    pub(crate) fn read(node: gltf::Node) -> Self {
+impl From<gltf::Node<'_>> for Node {
+    fn from(node: gltf::Node) -> Self {
         Self {
             transform: node.transform(),
             mesh: node.mesh().map(|m| MeshId(m.index())),
@@ -28,8 +28,8 @@ pub struct Scene {
     pub nodes: Vec<NodeId>,
 }
 
-impl Scene {
-    pub(crate) fn read(scene: gltf::Scene) -> Self {
+impl From<gltf::Scene<'_>> for Scene {
+    fn from(scene: gltf::Scene) -> Self {
         Self {
             nodes: scene.nodes().map(|n| NodeId(n.index())).collect(),
         }
@@ -41,10 +41,10 @@ pub struct Camera {
     pub projection: Projection,
 }
 
-impl Camera {
-    pub(crate) fn read(camera: gltf::Camera) -> Self {
+impl From<gltf::Camera<'_>> for Camera {
+    fn from(camera: gltf::Camera) -> Self {
         Self {
-            projection: Projection::read(camera.projection()),
+            projection: camera.projection().into(),
         }
     }
 }
@@ -68,8 +68,8 @@ pub enum Projection {
     },
 }
 
-impl Projection {
-    pub(crate) fn read(proj: gltf::camera::Projection) -> Self {
+impl From<gltf::camera::Projection<'_>> for Projection {
+    fn from(proj: gltf::camera::Projection) -> Self {
         match proj {
             gltf::camera::Projection::Orthographic(ortho) => Projection::Ortographic {
                 xmag: ortho.xmag(),

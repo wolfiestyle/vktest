@@ -17,21 +17,18 @@ pub struct Material {
     pub double_sided: bool,
 }
 
-impl Material {
-    pub(crate) fn read(material: gltf::Material) -> Self {
+impl From<gltf::Material<'_>> for Material {
+    fn from(material: gltf::Material) -> Self {
         Self {
             base_color: material.pbr_metallic_roughness().base_color_factor(),
             metallic: material.pbr_metallic_roughness().metallic_factor(),
             roughness: material.pbr_metallic_roughness().roughness_factor(),
             emissive: material.emissive_factor(),
-            color_tex: material.pbr_metallic_roughness().base_color_texture().map(TextureInfo::read),
-            metallic_roughness_tex: material
-                .pbr_metallic_roughness()
-                .metallic_roughness_texture()
-                .map(TextureInfo::read),
-            normal_tex: material.normal_texture().map(TextureInfo::read_normal),
-            occlusion_tex: material.occlusion_texture().map(TextureInfo::read_occlusion),
-            emissive_tex: material.emissive_texture().map(TextureInfo::read),
+            color_tex: material.pbr_metallic_roughness().base_color_texture().map(From::from),
+            metallic_roughness_tex: material.pbr_metallic_roughness().metallic_roughness_texture().map(From::from),
+            normal_tex: material.normal_texture().map(From::from),
+            occlusion_tex: material.occlusion_texture().map(From::from),
+            emissive_tex: material.emissive_texture().map(From::from),
             alpha_mode: material.alpha_mode(),
             alpha_cutoff: material.alpha_cutoff().unwrap_or(0.5),
             double_sided: material.double_sided(),
@@ -67,22 +64,26 @@ pub struct TextureInfo {
     pub uv_set: u32,
 }
 
-impl TextureInfo {
-    fn read(info: gltf::texture::Info) -> Self {
+impl From<gltf::texture::Info<'_>> for TextureInfo {
+    fn from(info: gltf::texture::Info) -> Self {
         Self {
             index: info.texture().index(),
             uv_set: info.tex_coord(),
         }
     }
+}
 
-    fn read_normal(info: gltf::material::NormalTexture) -> Self {
+impl From<gltf::material::NormalTexture<'_>> for TextureInfo {
+    fn from(info: gltf::material::NormalTexture) -> Self {
         Self {
             index: info.texture().index(),
             uv_set: info.tex_coord(),
         }
     }
+}
 
-    fn read_occlusion(info: gltf::material::OcclusionTexture) -> Self {
+impl From<gltf::material::OcclusionTexture<'_>> for TextureInfo {
+    fn from(info: gltf::material::OcclusionTexture) -> Self {
         Self {
             index: info.texture().index(),
             uv_set: info.tex_coord(),
@@ -102,8 +103,8 @@ pub struct Texture {
     pub wrap_t: WrappingMode,
 }
 
-impl Texture {
-    pub(crate) fn read(tex: gltf::Texture) -> Self {
+impl From<gltf::Texture<'_>> for Texture {
+    fn from(tex: gltf::Texture) -> Self {
         let sampler = tex.sampler();
         Self {
             image: ImageId(tex.source().index()),
