@@ -7,6 +7,7 @@ pub struct Node {
     pub mesh: Option<MeshId>,
     pub camera: Option<CameraId>,
     pub children: Vec<NodeId>,
+    pub name: Option<String>,
 }
 
 impl From<gltf::Node<'_>> for Node {
@@ -16,6 +17,7 @@ impl From<gltf::Node<'_>> for Node {
             mesh: node.mesh().map(|m| MeshId(m.index())),
             camera: node.camera().map(|c| CameraId(c.index())),
             children: node.children().map(|n| NodeId(n.index())).collect(),
+            name: node.name().map(str::to_string),
         }
     }
 }
@@ -26,12 +28,14 @@ pub struct NodeId(pub usize);
 #[derive(Debug, Clone, PartialEq)]
 pub struct Scene {
     pub nodes: Vec<NodeId>,
+    pub name: Option<String>,
 }
 
 impl From<gltf::Scene<'_>> for Scene {
     fn from(scene: gltf::Scene) -> Self {
         Self {
             nodes: scene.nodes().map(|n| NodeId(n.index())).collect(),
+            name: scene.name().map(str::to_string),
         }
     }
 }
@@ -39,12 +43,14 @@ impl From<gltf::Scene<'_>> for Scene {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Camera {
     pub projection: Projection,
+    pub name: Option<String>,
 }
 
 impl From<gltf::Camera<'_>> for Camera {
     fn from(camera: gltf::Camera) -> Self {
         Self {
             projection: camera.projection().into(),
+            name: camera.name().map(str::to_string),
         }
     }
 }

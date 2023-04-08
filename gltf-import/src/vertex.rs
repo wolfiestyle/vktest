@@ -123,6 +123,7 @@ pub struct MeshData<V> {
     pub indices: Vec<u32>,
     pub attribs: VertexAttribs,
     pub submeshes: Vec<Submesh>,
+    pub name: Option<String>,
     pub(crate) vert_offset: usize,
     pub(crate) idx_offset: usize,
 }
@@ -132,7 +133,10 @@ impl<V: VertexStorage> MeshData<V> {
         document
             .meshes()
             .map(|mesh| {
-                let mut data = MeshData::default();
+                let mut data = MeshData {
+                    name: mesh.name().map(str::to_string),
+                    ..Default::default()
+                };
                 for prim in mesh.primitives() {
                     data.read_primitive(buffers, &prim);
                 }

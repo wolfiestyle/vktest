@@ -17,6 +17,7 @@ pub struct Material {
     pub alpha_mode: AlphaMode,
     pub alpha_cutoff: f32,
     pub double_sided: bool,
+    pub name: Option<String>,
 }
 
 impl From<gltf::Material<'_>> for Material {
@@ -39,6 +40,7 @@ impl From<gltf::Material<'_>> for Material {
             alpha_mode: material.alpha_mode(),
             alpha_cutoff: material.alpha_cutoff().unwrap_or(0.5),
             double_sided: material.double_sided(),
+            name: material.name().map(str::to_string),
         }
     }
 }
@@ -60,6 +62,7 @@ impl Default for Material {
             alpha_mode: AlphaMode::Opaque,
             alpha_cutoff: 0.5,
             double_sided: false,
+            name: None,
         }
     }
 }
@@ -110,6 +113,7 @@ pub struct Texture {
     pub min_filter: MinFilter,
     pub wrap_s: WrappingMode,
     pub wrap_t: WrappingMode,
+    pub name: Option<String>,
 }
 
 impl From<gltf::Texture<'_>> for Texture {
@@ -121,6 +125,7 @@ impl From<gltf::Texture<'_>> for Texture {
             min_filter: sampler.min_filter().unwrap_or(MinFilter::Linear),
             wrap_s: sampler.wrap_s(),
             wrap_t: sampler.wrap_t(),
+            name: tex.name().map(str::to_string),
         }
     }
 }
