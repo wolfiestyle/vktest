@@ -17,7 +17,7 @@ pub type Gltf = GltfData<Vec<Vertex>>;
 #[derive(Debug, Clone)]
 pub struct GltfData<V> {
     pub document: Document,
-    pub buffers: BufferData,
+    pub buffers: Vec<BufferData>,
     pub images: Vec<ImageData>,
     pub meshes: Vec<MeshData<V>>,
     pub materials: Vec<Material>,
@@ -111,10 +111,13 @@ impl<V> ops::Index<CameraId> for GltfData<V> {
 }
 
 #[derive(Debug, Clone)]
-pub struct BufferData(pub Vec<Vec<u8>>);
+pub struct BufferData {
+    pub data: Vec<u8>,
+    pub name: Option<String>,
+}
 
 impl BufferData {
-    fn import_buffers(document: &Document, mut blob: Option<Vec<u8>>, base_path: Option<&Path>) -> ImportResult<Self> {
+    fn import_buffers(document: &Document, mut blob: Option<Vec<u8>>, base_path: Option<&Path>) -> ImportResult<Vec<Self>> {
         use gltf::buffer::Source;
 
         document
@@ -131,17 +134,19 @@ impl BufferData {
                         expected: buffer.length(),
                     });
                 }
-                Ok(data)
+                Ok(Self {
+                    data,
+                    name: buffer.name().map(str::to_string),
+                })
             })
             .collect::<Result<_, _>>()
-            .map(Self)
     }
 
-    pub fn view_slice(&self, view: &gltf::buffer::View) -> &[u8] {
-        let buffer = &self.0[view.buffer().index()];
+    pub fn view_slice<'a>(buffers: &'a [Self], view: &gltf::buffer::View) -> &'a [u8] {
+        let buffer = &buffers[view.buffer().index()];
         let offset = view.offset();
         let size = view.length();
-        &buffer[offset..offset + size]
+        &buffer.data[offset..offset + size]
     }
 }
 
@@ -154,7 +159,7 @@ pub enum ImageData {
 }
 
 impl ImageData {
-    fn import_images(document: &Document, buffers: &BufferData, base_path: Option<&Path>) -> Vec<Self> {
+    fn import_images(document: &Document, buffers: &[BufferData], base_path: Option<&Path>) -> Vec<Self> {
         use gltf::image::Source;
 
         document
@@ -173,7 +178,7 @@ impl ImageData {
                     }
                 }
                 Source::View { view, mime_type } => {
-                    let data = buffers.view_slice(&view);
+                    let data = BufferData::view_slice(buffers, &view);
                     Self::decode(Some(mime_type), data.into())
                 }
             })

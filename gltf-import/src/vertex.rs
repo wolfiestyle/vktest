@@ -129,7 +129,7 @@ pub struct MeshData<V> {
 }
 
 impl<V: VertexStorage> MeshData<V> {
-    pub(crate) fn import_meshes(document: &gltf::Document, buffers: &BufferData) -> Vec<Self> {
+    pub(crate) fn import_meshes(document: &gltf::Document, buffers: &[BufferData]) -> Vec<Self> {
         document
             .meshes()
             .map(|mesh| {
@@ -174,7 +174,7 @@ impl<V: VertexStorage> MeshData<V> {
         self.attribs = attribs; //FIXME: this could change between submeshes
     }
 
-    fn read_primitive(&mut self, buffers: &BufferData, prim: &gltf::mesh::Primitive) {
+    fn read_primitive(&mut self, buffers: &[BufferData], prim: &gltf::mesh::Primitive) {
         let mut attribs = VertexAttribs::default();
         let mut vert_count = 0;
         for (semantic, accessor) in prim.attributes() {
@@ -191,7 +191,7 @@ impl<V: VertexStorage> MeshData<V> {
         let idx_count = prim.indices().map(|acc| acc.count());
         self.begin_primitives(vert_count, idx_count, attribs, prim.mode(), prim.material().index().map(MaterialId));
 
-        let reader = prim.reader(|buffer| buffers.0.get(buffer.index()).map(Vec::as_slice));
+        let reader = prim.reader(|buffer| buffers.get(buffer.index()).map(|buf| buf.data.as_slice()));
         if let Some(iter) = reader.read_positions() {
             for (pos, i) in iter.zip(self.vert_offset..) {
                 self.vertices.write_position(i, pos);
