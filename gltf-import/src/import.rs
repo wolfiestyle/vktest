@@ -1,8 +1,8 @@
 use crate::material::{ImageId, Material, MaterialId, Texture, TextureInfo};
+use crate::mesh::{MeshData, Vertex, VertexStorage};
 use crate::scene::{Camera, CameraId, Node, NodeId, Scene};
 use crate::types::*;
 use crate::uri::Uri;
-use crate::vertex::{MeshData, Vertex, VertexStorage};
 use gltf::Document;
 use image::{DynamicImage, ImageFormat};
 use std::borrow::Cow;

@@ -1,4 +1,4 @@
-use crate::vertex::MeshId;
+use crate::mesh::MeshId;
 use gltf::scene::Transform;
 
 #[derive(Debug, Clone)]
