@@ -8,6 +8,7 @@ use image::{DynamicImage, ImageFormat};
 use std::borrow::Cow;
 use std::fs::File;
 use std::io::BufReader;
+use std::ops;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -64,7 +65,7 @@ impl<V: VertexStorage> GltfData<V> {
     }
 }
 
-impl<V> std::ops::Index<ImageId> for GltfData<V> {
+impl<V> ops::Index<ImageId> for GltfData<V> {
     type Output = ImageData;
 
     #[inline]
@@ -73,7 +74,7 @@ impl<V> std::ops::Index<ImageId> for GltfData<V> {
     }
 }
 
-impl<V> std::ops::Index<MaterialId> for GltfData<V> {
+impl<V> ops::Index<MaterialId> for GltfData<V> {
     type Output = Material;
 
     #[inline]
@@ -82,16 +83,16 @@ impl<V> std::ops::Index<MaterialId> for GltfData<V> {
     }
 }
 
-impl<V> std::ops::Index<TextureInfo> for GltfData<V> {
+impl<V> ops::Index<TextureInfo> for GltfData<V> {
     type Output = Texture;
 
     #[inline]
     fn index(&self, info: TextureInfo) -> &Self::Output {
-        &self.textures[info.index]
+        &self.textures[info.id]
     }
 }
 
-impl<V> std::ops::Index<NodeId> for GltfData<V> {
+impl<V> ops::Index<NodeId> for GltfData<V> {
     type Output = Node;
 
     #[inline]
@@ -100,9 +101,10 @@ impl<V> std::ops::Index<NodeId> for GltfData<V> {
     }
 }
 
-impl<V> std::ops::Index<CameraId> for GltfData<V> {
+impl<V> ops::Index<CameraId> for GltfData<V> {
     type Output = Camera;
 
+    #[inline]
     fn index(&self, id: CameraId) -> &Self::Output {
         &self.cameras[id.0]
     }

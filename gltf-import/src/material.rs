@@ -60,14 +60,14 @@ pub struct MaterialId(pub usize);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TextureInfo {
-    pub index: usize,
+    pub id: usize,
     pub uv_set: u32,
 }
 
 impl From<gltf::texture::Info<'_>> for TextureInfo {
     fn from(info: gltf::texture::Info) -> Self {
         Self {
-            index: info.texture().index(),
+            id: info.texture().index(),
             uv_set: info.tex_coord(),
         }
     }
@@ -76,7 +76,7 @@ impl From<gltf::texture::Info<'_>> for TextureInfo {
 impl From<gltf::material::NormalTexture<'_>> for TextureInfo {
     fn from(info: gltf::material::NormalTexture) -> Self {
         Self {
-            index: info.texture().index(),
+            id: info.texture().index(),
             uv_set: info.tex_coord(),
         }
     }
@@ -85,7 +85,7 @@ impl From<gltf::material::NormalTexture<'_>> for TextureInfo {
 impl From<gltf::material::OcclusionTexture<'_>> for TextureInfo {
     fn from(info: gltf::material::OcclusionTexture) -> Self {
         Self {
-            index: info.texture().index(),
+            id: info.texture().index(),
             uv_set: info.tex_coord(),
         }
     }
