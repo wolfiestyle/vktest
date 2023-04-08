@@ -159,17 +159,22 @@ pub struct Image {
 
 impl Image {
     fn import_images(document: &Document, buffers: &[BufferData], base_path: Option<&Path>) -> Vec<Self> {
-        document
-            .images()
-            .map(|image_src| {
-                let (data, mime_type) = ImageData::load(&image_src, buffers, base_path);
-                Image {
-                    data,
-                    name: image_src.name().map(str::to_string),
-                    mime_type,
-                }
-            })
-            .collect()
+        std::thread::scope(|scope| {
+            let threads: Vec<_> = document
+                .images()
+                .map(|image_src| {
+                    scope.spawn(move || {
+                        let (data, mime_type) = ImageData::load(&image_src, buffers, base_path);
+                        Image {
+                            data,
+                            name: image_src.name().map(str::to_string),
+                            mime_type,
+                        }
+                    })
+                })
+                .collect();
+            threads.into_iter().map(|jh| jh.join().unwrap()).collect()
+        })
     }
 }
 
