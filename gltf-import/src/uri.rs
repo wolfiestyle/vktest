@@ -41,7 +41,6 @@ impl<'a> Uri<'a> {
             Self::Data(_, Encoding::Base64, data) => BASE64.decode(data).map_err(ImportError::Base64),
             Self::Data(_, Encoding::UrlEnc, data) => Ok(urlencoding::decode_binary(data.as_bytes()).into_owned()),
             Self::Relative(path) if base_path.is_some() => {
-                eprintln!("buffer Relative: {path:?}, base_path: {base_path:?}");
                 let path = base_path.unwrap().join(&**path);
                 std::fs::read(&path).map_err(|err| ImportError::Io(err, path))
             }
