@@ -1,4 +1,4 @@
-use crate::material::{Material, Texture};
+use crate::material::{ImageId, Material, MaterialId, Texture, TextureInfo};
 use crate::types::*;
 use crate::uri::Uri;
 use crate::vertex::{MeshData, Vertex};
@@ -51,6 +51,33 @@ impl GltfData {
     #[inline]
     pub fn import_meshes(&self) -> Vec<MeshData<Vec<Vertex>>> {
         MeshData::read_meshes(&self)
+    }
+}
+
+impl std::ops::Index<ImageId> for GltfData {
+    type Output = ImageData;
+
+    #[inline]
+    fn index(&self, id: ImageId) -> &Self::Output {
+        &self.images[id.0]
+    }
+}
+
+impl std::ops::Index<MaterialId> for GltfData {
+    type Output = Material;
+
+    #[inline]
+    fn index(&self, id: MaterialId) -> &Self::Output {
+        &self.materials[id.0]
+    }
+}
+
+impl std::ops::Index<TextureInfo> for GltfData {
+    type Output = Texture;
+
+    #[inline]
+    fn index(&self, info: TextureInfo) -> &Self::Output {
+        &self.textures[info.index]
     }
 }
 
