@@ -2,8 +2,8 @@ use crate::material::{ImageId, Material, MaterialId, Texture, TextureInfo};
 use crate::scene::{Camera, CameraId, Node, NodeId, Scene};
 use crate::types::*;
 use crate::uri::Uri;
-use crate::vertex::{MeshData, Vertex};
-use gltf::{Document, Gltf};
+use crate::vertex::{MeshData, Vertex, VertexStorage};
+use gltf::Document;
 use image::{DynamicImage, ImageFormat};
 use std::borrow::Cow;
 use std::fs::File;
@@ -11,11 +11,14 @@ use std::io::BufReader;
 use std::path::Path;
 use std::sync::Arc;
 
+pub type Gltf = GltfData<Vec<Vertex>>;
+
 #[derive(Debug, Clone)]
-pub struct GltfData {
+pub struct GltfData<V> {
     pub document: Document,
     pub buffers: BufferData,
     pub images: Vec<ImageData>,
+    pub meshes: Vec<MeshData<V>>,
     pub materials: Vec<Material>,
     pub textures: Vec<Texture>,
     pub nodes: Vec<Node>,
@@ -23,23 +26,24 @@ pub struct GltfData {
     pub cameras: Vec<Camera>,
 }
 
-impl GltfData {
+impl<V: VertexStorage> GltfData<V> {
     pub fn from_file(path: impl AsRef<Path>) -> ImportResult<Self> {
         let path = path.as_ref();
         let base_path = path.parent().unwrap_or_else(|| Path::new("."));
         let file = File::open(path).map_err(|err| ImportError::Io(err, path.into()))?;
-        let gltf = Gltf::from_reader(BufReader::new(file))?;
+        let gltf = gltf::Gltf::from_reader(BufReader::new(file))?;
         Self::import_gltf(gltf, Some(base_path))
     }
 
     pub fn from_memory(bytes: &[u8]) -> ImportResult<Self> {
-        let gltf = Gltf::from_slice(bytes)?;
+        let gltf = gltf::Gltf::from_slice(bytes)?;
         Self::import_gltf(gltf, None)
     }
 
-    fn import_gltf(gltf: Gltf, base_path: Option<&Path>) -> ImportResult<Self> {
+    fn import_gltf(gltf: gltf::Gltf, base_path: Option<&Path>) -> ImportResult<Self> {
         let buffers = BufferData::import_buffers(&gltf.document, gltf.blob, base_path)?;
         let images = ImageData::import_images(&gltf.document, &buffers, base_path);
+        let meshes = MeshData::import_meshes(&gltf.document, &buffers);
         let materials = gltf.document.materials().map(Material::read).collect();
         let textures = gltf.document.textures().map(Texture::read).collect();
         let nodes = gltf.document.nodes().map(Node::read).collect();
@@ -50,6 +54,7 @@ impl GltfData {
             document: gltf.document,
             buffers,
             images,
+            meshes,
             materials,
             textures,
             nodes,
@@ -57,14 +62,9 @@ impl GltfData {
             cameras,
         })
     }
-
-    #[inline]
-    pub fn import_meshes(&self) -> Vec<MeshData<Vec<Vertex>>> {
-        MeshData::read_meshes(&self)
-    }
 }
 
-impl std::ops::Index<ImageId> for GltfData {
+impl<V> std::ops::Index<ImageId> for GltfData<V> {
     type Output = ImageData;
 
     #[inline]
@@ -73,7 +73,7 @@ impl std::ops::Index<ImageId> for GltfData {
     }
 }
 
-impl std::ops::Index<MaterialId> for GltfData {
+impl<V> std::ops::Index<MaterialId> for GltfData<V> {
     type Output = Material;
 
     #[inline]
@@ -82,7 +82,7 @@ impl std::ops::Index<MaterialId> for GltfData {
     }
 }
 
-impl std::ops::Index<TextureInfo> for GltfData {
+impl<V> std::ops::Index<TextureInfo> for GltfData<V> {
     type Output = Texture;
 
     #[inline]
@@ -91,7 +91,7 @@ impl std::ops::Index<TextureInfo> for GltfData {
     }
 }
 
-impl std::ops::Index<NodeId> for GltfData {
+impl<V> std::ops::Index<NodeId> for GltfData<V> {
     type Output = Node;
 
     #[inline]
@@ -100,7 +100,7 @@ impl std::ops::Index<NodeId> for GltfData {
     }
 }
 
-impl std::ops::Index<CameraId> for GltfData {
+impl<V> std::ops::Index<CameraId> for GltfData<V> {
     type Output = Camera;
 
     fn index(&self, id: CameraId) -> &Self::Output {
