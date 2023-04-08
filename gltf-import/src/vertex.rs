@@ -268,3 +268,6 @@ impl<V: VertexStorage> MeshData<V> {
         }
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MeshId(pub usize);

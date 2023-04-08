@@ -1,4 +1,5 @@
 use crate::material::{ImageId, Material, MaterialId, Texture, TextureInfo};
+use crate::scene::{Camera, CameraId, Node, NodeId, Scene};
 use crate::types::*;
 use crate::uri::Uri;
 use crate::vertex::{MeshData, Vertex};
@@ -17,6 +18,9 @@ pub struct GltfData {
     pub images: Vec<ImageData>,
     pub materials: Vec<Material>,
     pub textures: Vec<Texture>,
+    pub nodes: Vec<Node>,
+    pub scenes: Vec<Scene>,
+    pub cameras: Vec<Camera>,
 }
 
 impl GltfData {
@@ -38,6 +42,9 @@ impl GltfData {
         let images = ImageData::import_images(&gltf.document, &buffers, base_path);
         let materials = gltf.document.materials().map(Material::read).collect();
         let textures = gltf.document.textures().map(Texture::read).collect();
+        let nodes = gltf.document.nodes().map(Node::read).collect();
+        let scenes = gltf.document.scenes().map(Scene::read).collect();
+        let cameras = gltf.document.cameras().map(Camera::read).collect();
 
         Ok(Self {
             document: gltf.document,
@@ -45,6 +52,9 @@ impl GltfData {
             images,
             materials,
             textures,
+            nodes,
+            scenes,
+            cameras,
         })
     }
 
@@ -78,6 +88,23 @@ impl std::ops::Index<TextureInfo> for GltfData {
     #[inline]
     fn index(&self, info: TextureInfo) -> &Self::Output {
         &self.textures[info.index]
+    }
+}
+
+impl std::ops::Index<NodeId> for GltfData {
+    type Output = Node;
+
+    #[inline]
+    fn index(&self, id: NodeId) -> &Self::Output {
+        &self.nodes[id.0]
+    }
+}
+
+impl std::ops::Index<CameraId> for GltfData {
+    type Output = Camera;
+
+    fn index(&self, id: CameraId) -> &Self::Output {
+        &self.cameras[id.0]
     }
 }
 
