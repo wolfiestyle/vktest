@@ -1,6 +1,8 @@
+use crate::import::GltfData;
 use crate::mesh::MeshId;
 use glam::{Affine3A, Mat4, Quat};
 use gltf::scene::Transform;
+use std::collections::VecDeque;
 
 #[derive(Debug, Clone)]
 pub struct Node {
@@ -36,16 +38,69 @@ pub struct NodeId(pub usize);
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Scene {
-    pub nodes: Vec<NodeId>,
+    pub root_nodes: Vec<NodeId>,
     pub name: Option<String>,
+}
+
+impl Scene {
+    pub fn nodes<'a, V>(&self, gltf: &'a GltfData<V>) -> NodeTreeIter<'a> {
+        NodeTreeIter {
+            nodes: &gltf.nodes,
+            queue: VecDeque::from(self.root_nodes.clone()),
+        }
+    }
+
+    pub fn nodes_with_parent<'a, V>(&self, gltf: &'a GltfData<V>) -> NodeParentTreeIter<'a> {
+        NodeParentTreeIter {
+            nodes: &gltf.nodes,
+            queue: self.root_nodes.iter().map(|&node| (node, None)).collect(),
+        }
+    }
 }
 
 impl From<gltf::Scene<'_>> for Scene {
     fn from(scene: gltf::Scene) -> Self {
         Self {
-            nodes: scene.nodes().map(|n| NodeId(n.index())).collect(),
+            root_nodes: scene.nodes().map(|n| NodeId(n.index())).collect(),
             name: scene.name().map(str::to_string),
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct NodeTreeIter<'a> {
+    nodes: &'a [Node],
+    queue: VecDeque<NodeId>,
+}
+
+impl<'a> Iterator for NodeTreeIter<'a> {
+    type Item = &'a Node;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.queue.pop_front().map(|curr_id| {
+            let curr_node = &self.nodes[curr_id.0];
+            self.queue.extend(curr_node.children.iter());
+            curr_node
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct NodeParentTreeIter<'a> {
+    nodes: &'a [Node],
+    queue: VecDeque<(NodeId, Option<NodeId>)>,
+}
+
+impl<'a> Iterator for NodeParentTreeIter<'a> {
+    type Item = (&'a Node, Option<&'a Node>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.queue.pop_front().map(|(curr_id, parent_id)| {
+            let curr_node = &self.nodes[curr_id.0];
+            let parent_node = parent_id.map(|id| &self.nodes[id.0]);
+            self.queue.extend(curr_node.children.iter().map(|&id| (id, Some(curr_id))));
+            (curr_node, parent_node)
+        })
     }
 }
 
