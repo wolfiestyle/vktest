@@ -1,9 +1,10 @@
 use crate::mesh::MeshId;
+use glam::{Affine3A, Mat4, Quat};
 use gltf::scene::Transform;
 
 #[derive(Debug, Clone)]
 pub struct Node {
-    pub transform: Transform,
+    pub transform: Affine3A,
     pub mesh: Option<MeshId>,
     pub camera: Option<CameraId>,
     pub children: Vec<NodeId>,
@@ -12,8 +13,16 @@ pub struct Node {
 
 impl From<gltf::Node<'_>> for Node {
     fn from(node: gltf::Node) -> Self {
+        let transform = match node.transform() {
+            Transform::Matrix { matrix } => Affine3A::from_mat4(Mat4::from_cols_array_2d(&matrix)),
+            Transform::Decomposed {
+                translation,
+                rotation,
+                scale,
+            } => Affine3A::from_scale_rotation_translation(scale.into(), Quat::from_array(rotation), translation.into()),
+        };
         Self {
-            transform: node.transform(),
+            transform,
             mesh: node.mesh().map(|m| MeshId(m.index())),
             camera: node.camera().map(|c| CameraId(c.index())),
             children: node.children().map(|n| NodeId(n.index())).collect(),
