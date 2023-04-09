@@ -1,5 +1,5 @@
 use crate::material::{ImageId, Material, MaterialId, Texture, TextureInfo};
-use crate::mesh::{MeshData, Vertex, VertexStorage};
+use crate::mesh::{MeshData, MeshId, Vertex, VertexStorage};
 use crate::scene::{Camera, CameraId, Node, NodeId, Scene};
 use crate::types::*;
 use crate::uri::Uri;
@@ -71,6 +71,15 @@ impl<V> ops::Index<ImageId> for GltfData<V> {
     #[inline]
     fn index(&self, id: ImageId) -> &Self::Output {
         &self.images[id.0]
+    }
+}
+
+impl<V> ops::Index<MeshId> for GltfData<V> {
+    type Output = MeshData<V>;
+
+    #[inline]
+    fn index(&self, id: MeshId) -> &Self::Output {
+        &self.meshes[id.0]
     }
 }
 
