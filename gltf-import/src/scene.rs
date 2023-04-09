@@ -83,6 +83,41 @@ pub enum Projection {
     },
 }
 
+impl Projection {
+    pub fn to_matrix(self, viewport_aspect: f32) -> Mat4 {
+        match self {
+            Self::Ortographic { xmag, ymag, znear, zfar } => {
+                // copied from the spec, not sure about this
+                let dz = znear - zfar;
+                Mat4::from_cols(
+                    [1.0 / xmag, 0.0, 0.0, 0.0].into(),
+                    [0.0, 1.0 / ymag, 0.0, 0.0].into(),
+                    [0.0, 0.0, 2.0 / dz, 0.0].into(),
+                    [0.0, 0.0, (zfar + znear) / dz, 1.0].into(),
+                )
+            }
+            Self::Perspective {
+                aspect,
+                yfov,
+                znear,
+                zfar: Some(zfar),
+            } => {
+                let aspect = aspect.unwrap_or(viewport_aspect);
+                Mat4::perspective_rh(yfov, aspect, znear, zfar)
+            }
+            Self::Perspective {
+                aspect,
+                yfov,
+                znear,
+                zfar: None,
+            } => {
+                let aspect = aspect.unwrap_or(viewport_aspect);
+                Mat4::perspective_infinite_rh(yfov, aspect, znear)
+            }
+        }
+    }
+}
+
 impl From<gltf::camera::Projection<'_>> for Projection {
     fn from(proj: gltf::camera::Projection) -> Self {
         match proj {
