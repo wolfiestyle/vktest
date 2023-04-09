@@ -78,15 +78,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "approx"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f2a05fd1bd10b2527e20a2cd32d8873d115b8b39fe219ee25f42a8aca6ba278"
-dependencies = [
- "num-traits",
-]
-
-[[package]]
 name = "arboard"
 version = "3.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -300,16 +291,6 @@ name = "cfg_aliases"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fd16c4719339c4530435d38e511904438d07cce7950afa3718a84ac36c10e89e"
-
-[[package]]
-name = "cgmath"
-version = "0.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a98d30140e3296250832bbaaff83b27dcd6fa3cc70fb6f1f3e5c9c0023b5317"
-dependencies = [
- "approx",
- "num-traits",
-]
 
 [[package]]
 name = "clap"
@@ -544,17 +525,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9ea835d29036a4087793836fa931b08837ad5e957da9e23886b29586fb9b6650"
 
 [[package]]
-name = "easy-gltf"
-version = "1.0.0"
-source = "git+https://github.com/wolfiestyle/easy-gltf.git#035e42db17ac423833e9e7e64fb9f75f6c230859"
-dependencies = [
- "base64 0.21.0",
- "cgmath",
- "gltf",
- "image",
-]
-
-[[package]]
 name = "ecolor"
 version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -786,6 +756,7 @@ name = "gltf-import"
 version = "0.1.0"
 dependencies = [
  "base64 0.21.0",
+ "glam",
  "gltf",
  "image",
  "urlencoding",
@@ -1950,12 +1921,11 @@ dependencies = [
  "ash-window",
  "bytemuck",
  "bytemuck_derive",
- "cgmath",
  "cstr",
- "easy-gltf",
  "egui",
  "egui-winit",
  "glam",
+ "gltf-import",
  "gpu-allocator",
  "inline-spirv",
  "memoffset 0.8.0",
@@ -1967,7 +1937,7 @@ dependencies = [
 name = "vktest"
 version = "0.1.0"
 dependencies = [
- "easy-gltf",
+ "gltf-import",
  "image",
  "structopt",
  "vkengine",

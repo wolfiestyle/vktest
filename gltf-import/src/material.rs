@@ -111,8 +111,8 @@ pub struct Texture {
     pub image: ImageId,
     pub mag_filter: MagFilter,
     pub min_filter: MinFilter,
-    pub wrap_s: WrappingMode,
-    pub wrap_t: WrappingMode,
+    pub wrap_u: WrappingMode,
+    pub wrap_v: WrappingMode,
     pub name: Option<String>,
 }
 
@@ -123,8 +123,8 @@ impl From<gltf::Texture<'_>> for Texture {
             image: ImageId(tex.source().index()),
             mag_filter: sampler.mag_filter().unwrap_or(MagFilter::Linear),
             min_filter: sampler.min_filter().unwrap_or(MinFilter::Linear),
-            wrap_s: sampler.wrap_s(),
-            wrap_t: sampler.wrap_t(),
+            wrap_u: sampler.wrap_s(),
+            wrap_v: sampler.wrap_t(),
             name: tex.name().map(str::to_string),
         }
     }

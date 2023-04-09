@@ -124,12 +124,6 @@ impl_format!(SRgb<[u8; 4]>, 1, vk::Format::R8G8B8A8_SRGB);
 impl_format!(egui::Pos2, 1, vk::Format::R32G32_SFLOAT);
 #[cfg(feature = "egui")]
 impl_format!(egui::Color32, 1, vk::Format::R8G8B8A8_UNORM);
-#[cfg(feature = "cgmath")]
-impl_format!(cgmath::Vector2<f32>, 1, vk::Format::R32G32_SFLOAT);
-#[cfg(feature = "cgmath")]
-impl_format!(cgmath::Vector3<f32>, 1, vk::Format::R32G32B32_SFLOAT);
-#[cfg(feature = "cgmath")]
-impl_format!(cgmath::Vector4<f32>, 1, vk::Format::R32G32B32A32_SFLOAT);
 
 pub trait IndexInput: Copy {
     const VK_INDEX_TYPE: vk::IndexType;
@@ -216,8 +210,8 @@ impl_vertex!(tuple: A 0, B 1, C 2, D 3, E 4, F 5);
 
 #[cfg(feature = "egui")]
 impl_vertex!(struct egui::epaint::Vertex: pos, uv, color);
-#[cfg(feature = "easy-gltf")]
-impl_vertex!(struct easy_gltf::model::Vertex: position, normal, tex_coords);
+
+impl_vertex!(struct gltf_import::Vertex: position, normal, texcoord);
 
 trait LensFormat {
     #[inline(always)]

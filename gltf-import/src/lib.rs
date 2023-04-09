@@ -10,3 +10,5 @@ pub use material::*;
 pub use mesh::*;
 pub use scene::*;
 pub use types::*;
+
+pub use gltf::texture::{MagFilter, MinFilter, WrappingMode};

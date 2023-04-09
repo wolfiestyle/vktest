@@ -10,16 +10,14 @@ use std::marker::PhantomData;
 use std::slice;
 use std::sync::Arc;
 
+#[derive(Debug)]
 pub struct MeshRenderer<V, I> {
     device: Arc<VulkanDevice>,
     desc_layout: vk::DescriptorSetLayout,
     shader: Shader,
     pipeline: Pipeline,
     vertex_buffer: VkBuffer,
-    index_buffer: Option<VkBuffer>,
-    elem_count: u32,
-    base_color: [f32; 4],
-    texture: Option<Texture>,
+    index_buffer: VkBuffer,
     cmd_buffers: CmdBufferRing,
     uniforms: UploadBuffer,
     pub model: Affine3A,
@@ -27,10 +25,9 @@ pub struct MeshRenderer<V, I> {
 }
 
 impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
-    pub fn new(
-        engine: &VulkanEngine, vertices: &[V], indices: Option<&[I]>, base_color: [f32; 4], texture: Option<Texture>,
-    ) -> VulkanResult<Self> {
+    pub fn new(engine: &VulkanEngine, vertices: &[V], indices: &[I]) -> VulkanResult<Self> {
         let device = engine.device.clone();
+
         let shader = Shader::new(
             &device,
             include_spirv!("src/shaders/texture.vert.glsl", vert, glsl),
@@ -60,10 +57,7 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
             .build(engine)?;
 
         let vertex_buffer = device.create_buffer_from_data(vertices, vk::BufferUsageFlags::VERTEX_BUFFER, "Vertex buffer")?;
-        let index_buffer = indices
-            .map(|idx| device.create_buffer_from_data(idx, vk::BufferUsageFlags::INDEX_BUFFER, "Index buffer"))
-            .transpose()?;
-        let elem_count = indices.map(|idx| idx.len() as u32).unwrap_or_else(|| vertices.len() as u32);
+        let index_buffer = device.create_buffer_from_data(indices, vk::BufferUsageFlags::INDEX_BUFFER, "Index buffer")?;
 
         let cmd_buffers = CmdBufferRing::new(&device)?;
 
@@ -81,9 +75,6 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
             pipeline,
             vertex_buffer,
             index_buffer,
-            elem_count,
-            base_color,
-            texture,
             cmd_buffers,
             uniforms,
             model: Affine3A::IDENTITY,
@@ -91,7 +82,7 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
         })
     }
 
-    pub fn render(&mut self, engine: &VulkanEngine) -> VulkanResult<DrawPayload> {
+    pub fn render(&mut self, engine: &VulkanEngine, submeshes: &[MeshRenderSlice]) -> VulkanResult<DrawPayload> {
         let cmd_buffer = self.cmd_buffers.get_current_buffer(engine)?;
         engine.begin_secondary_draw_commands(cmd_buffer, vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)?;
 
@@ -99,7 +90,6 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
         self.uniforms.map(engine)?.write_object(&ubo);
 
         let buffer_info = self.uniforms.descriptor(engine);
-        let image_info = self.texture.as_ref().unwrap_or(&engine.default_texture).descriptor();
         unsafe {
             // object
             self.device
@@ -113,28 +103,33 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
                 vk::PipelineBindPoint::GRAPHICS,
                 self.pipeline.layout,
                 0,
-                &[
-                    vk::WriteDescriptorSet::builder()
-                        .dst_binding(0)
-                        .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                        .buffer_info(slice::from_ref(&buffer_info))
-                        .build(),
-                    vk::WriteDescriptorSet::builder()
-                        .dst_binding(1)
-                        .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                        .image_info(slice::from_ref(&image_info))
-                        .build(),
-                ],
+                &[vk::WriteDescriptorSet::builder()
+                    .dst_binding(0)
+                    .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                    .buffer_info(slice::from_ref(&buffer_info))
+                    .build()],
             );
             self.device
                 .cmd_bind_vertex_buffers(cmd_buffer, 0, slice::from_ref(&*self.vertex_buffer), &[0]);
-            if let Some(index_buffer) = &self.index_buffer {
+            self.device
+                .cmd_bind_index_buffer(cmd_buffer, self.index_buffer.handle, 0, I::VK_INDEX_TYPE);
+            for submesh in submeshes {
+                let image_info = submesh.texture.unwrap_or_else(|| engine.default_texture.descriptor());
+                self.device.pushdesc_fn.cmd_push_descriptor_set(
+                    cmd_buffer,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    self.pipeline.layout,
+                    0,
+                    &[vk::WriteDescriptorSet::builder()
+                        .dst_binding(1)
+                        .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                        .image_info(slice::from_ref(&image_info))
+                        .build()],
+                );
                 self.device
-                    .cmd_bind_index_buffer(cmd_buffer, index_buffer.handle, 0, I::VK_INDEX_TYPE);
-                self.device.cmd_draw_indexed(cmd_buffer, self.elem_count, 1, 0, 0, 0);
-            } else {
-                self.device.cmd_draw(cmd_buffer, self.elem_count, 1, 0, 0);
+                    .cmd_draw_indexed(cmd_buffer, submesh.index_count, 1, submesh.index_offset, 0, 0);
             }
+
             self.device.debug(|d| d.cmd_end_label(cmd_buffer));
         }
 
@@ -144,9 +139,9 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
     fn calc_uniforms(&self, engine: &VulkanEngine) -> ObjectUniforms {
         ObjectUniforms {
             mvp: engine.view_proj * self.model,
-            light_dir: engine.sunlight.extend(self.base_color[0]),
-            light_color: Vec3::ONE.extend(self.base_color[1]),
-            ambient: Vec3::splat(0.1).extend(self.base_color[2]),
+            light_dir: engine.sunlight.extend(1.0),
+            light_color: Vec3::ONE.extend(1.0),
+            ambient: Vec3::splat(0.1).extend(1.0),
         }
     }
 
@@ -168,7 +163,6 @@ impl<V, I> Drop for MeshRenderer<V, I> {
             self.device.device_wait_idle().unwrap();
             self.vertex_buffer.cleanup(&self.device);
             self.index_buffer.cleanup(&self.device);
-            self.texture.cleanup(&self.device);
             self.pipeline.cleanup(&self.device);
             self.shader.cleanup(&self.device);
             self.desc_layout.cleanup(&self.device);
@@ -176,6 +170,14 @@ impl<V, I> Drop for MeshRenderer<V, I> {
             self.uniforms.cleanup(&self.device);
         }
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct MeshRenderSlice {
+    pub index_offset: u32,
+    pub index_count: u32,
+    pub base_color: [f32; 4],
+    pub texture: Option<vk::DescriptorImageInfo>,
 }
 
 #[repr(C)]
@@ -205,7 +207,13 @@ impl SkyboxRenderer {
             include_spirv!("src/shaders/skybox.vert.glsl", vert, glsl),
             include_spirv!("src/shaders/skybox.frag.glsl", frag, glsl),
         )?;
-        let sampler = engine.get_sampler(vk::Filter::LINEAR, vk::Filter::LINEAR, vk::SamplerAddressMode::REPEAT, false)?;
+        let sampler = engine.get_sampler(
+            vk::Filter::LINEAR,
+            vk::Filter::LINEAR,
+            vk::SamplerAddressMode::REPEAT,
+            vk::SamplerAddressMode::REPEAT,
+            false,
+        )?;
         let desc_layout = vk::DescriptorSetLayoutCreateInfo::builder()
             .flags(vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR)
             .bindings(&[vk::DescriptorSetLayoutBinding::builder()

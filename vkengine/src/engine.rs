@@ -85,7 +85,13 @@ impl VulkanEngine {
             sunlight: Vec3::Y,
         };
 
-        let sampler = this.get_sampler(vk::Filter::NEAREST, vk::Filter::NEAREST, vk::SamplerAddressMode::REPEAT, false)?;
+        let sampler = this.get_sampler(
+            vk::Filter::NEAREST,
+            vk::Filter::NEAREST,
+            vk::SamplerAddressMode::REPEAT,
+            vk::SamplerAddressMode::REPEAT,
+            false,
+        )?;
         this.default_texture.sampler = sampler;
 
         Ok(this)
@@ -150,13 +156,15 @@ impl VulkanEngine {
     }
 
     pub fn get_sampler(
-        &self, mag_filter: vk::Filter, min_filter: vk::Filter, addr_mode: vk::SamplerAddressMode, aniso_enabled: bool,
+        &self, mag_filter: vk::Filter, min_filter: vk::Filter, wrap_u: vk::SamplerAddressMode, wrap_v: vk::SamplerAddressMode,
+        aniso_enabled: bool,
     ) -> VulkanResult<vk::Sampler> {
         use std::collections::hash_map::Entry;
         let key = SamplerOptions {
             mag_filter,
             min_filter,
-            addr_mode,
+            wrap_u,
+            wrap_v,
             aniso_enabled,
         };
         match self.samplers.lock().unwrap().entry(key) {
@@ -165,9 +173,9 @@ impl VulkanEngine {
                 let sampler = vk::SamplerCreateInfo::builder()
                     .mag_filter(mag_filter)
                     .min_filter(min_filter)
-                    .address_mode_u(addr_mode)
-                    .address_mode_v(addr_mode)
-                    .address_mode_w(addr_mode)
+                    .address_mode_u(wrap_u)
+                    .address_mode_v(wrap_v)
+                    .address_mode_w(vk::SamplerAddressMode::REPEAT)
                     .anisotropy_enable(aniso_enabled)
                     .max_anisotropy(self.device.dev_info.max_aniso)
                     .border_color(vk::BorderColor::INT_OPAQUE_BLACK)
@@ -184,14 +192,36 @@ impl VulkanEngine {
         }
     }
 
-    pub fn create_texture(&self, width: u32, height: u32, data: &[u8]) -> VulkanResult<Texture> {
-        let sampler = self.get_sampler(vk::Filter::LINEAR, vk::Filter::LINEAR, vk::SamplerAddressMode::REPEAT, true)?;
+    pub fn create_texture(&self, tex_data: &gltf_import::Texture, gltf: &gltf_import::Gltf) -> VulkanResult<Texture> {
+        use gltf_import::{MagFilter, MinFilter, WrappingMode};
+
+        let gltf_import::ImageData::Decoded(image) = &gltf[tex_data.image].data else { return Err(VkError::EngineError("missing texture image")) };
+
+        let mag = match tex_data.mag_filter {
+            MagFilter::Nearest => vk::Filter::NEAREST,
+            MagFilter::Linear => vk::Filter::LINEAR,
+        };
+        let min = match tex_data.min_filter {
+            MinFilter::Nearest | MinFilter::NearestMipmapNearest | MinFilter::NearestMipmapLinear => vk::Filter::NEAREST,
+            MinFilter::Linear | MinFilter::LinearMipmapNearest | MinFilter::LinearMipmapLinear => vk::Filter::LINEAR,
+        };
+        let wrap_u = match tex_data.wrap_u {
+            WrappingMode::Repeat => vk::SamplerAddressMode::REPEAT,
+            WrappingMode::ClampToEdge => vk::SamplerAddressMode::CLAMP_TO_EDGE,
+            WrappingMode::MirroredRepeat => vk::SamplerAddressMode::MIRRORED_REPEAT,
+        };
+        let wrap_v = match tex_data.wrap_v {
+            WrappingMode::Repeat => vk::SamplerAddressMode::REPEAT,
+            WrappingMode::ClampToEdge => vk::SamplerAddressMode::CLAMP_TO_EDGE,
+            WrappingMode::MirroredRepeat => vk::SamplerAddressMode::MIRRORED_REPEAT,
+        };
+        let sampler = self.get_sampler(mag, min, wrap_u, wrap_v, true)?;
         Texture::new(
             &self.device,
-            width,
-            height,
+            image.width(),
+            image.height(),
             vk::Format::R8G8B8A8_SRGB,
-            ImageData::Single(data),
+            ImageData::Single(image.to_rgba8().as_raw()),
             sampler,
             true,
         )
@@ -910,7 +940,7 @@ impl Texture {
         device.update_image_from_data(&self.image, x as _, y as _, width, height, 0, ImageData::Single(data))
     }
 
-    pub(crate) fn descriptor(&self) -> vk::DescriptorImageInfo {
+    pub fn descriptor(&self) -> vk::DescriptorImageInfo {
         vk::DescriptorImageInfo {
             image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
             image_view: self.imgview,
@@ -930,7 +960,8 @@ impl Cleanup<VulkanDevice> for Texture {
 struct SamplerOptions {
     mag_filter: vk::Filter,
     min_filter: vk::Filter,
-    addr_mode: vk::SamplerAddressMode,
+    wrap_u: vk::SamplerAddressMode,
+    wrap_v: vk::SamplerAddressMode,
     aniso_enabled: bool,
 }
 

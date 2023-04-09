@@ -19,6 +19,3 @@ debug = true
 [profile.release-lto]
 inherits = "release"
 lto = true
-
-[patch.crates-io]
-easy-gltf = { git = "https://github.com/wolfiestyle/easy-gltf.git" }

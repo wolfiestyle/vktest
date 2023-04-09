@@ -3,7 +3,6 @@ use crate::material::MaterialId;
 use gltf::mesh::util::{ReadColors, ReadTexCoords};
 use gltf::mesh::Mode;
 use gltf::Semantic;
-use std::ops::Range;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct VertexAttribs {
@@ -112,7 +111,8 @@ impl VertexStorage for Vec<Vertex> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Submesh {
-    pub index_range: Range<usize>,
+    pub index_offset: u32,
+    pub index_count: u32,
     pub mode: Mode,
     pub material: Option<MaterialId>,
 }
@@ -153,10 +153,10 @@ impl<V: VertexStorage> MeshData<V> {
         self.vert_offset = vert_offset;
         let idx_offset = self.indices.len();
         if let Some(idx_count) = index_count {
-            let idx_end = idx_offset + idx_count;
-            self.indices.resize_with(idx_end, Default::default);
+            self.indices.resize_with(idx_offset + idx_count, Default::default);
             self.submeshes.push(Submesh {
-                index_range: idx_offset..idx_end,
+                index_offset: idx_offset as u32,
+                index_count: idx_count as u32,
                 mode,
                 material,
             });
@@ -165,7 +165,8 @@ impl<V: VertexStorage> MeshData<V> {
             let last = first + vert_count as u32;
             self.indices.extend(first..last);
             self.submeshes.push(Submesh {
-                index_range: idx_offset..idx_offset + vert_count,
+                index_offset: idx_offset as u32,
+                index_count: vert_count as u32,
                 mode,
                 material,
             });

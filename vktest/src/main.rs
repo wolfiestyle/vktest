@@ -1,9 +1,10 @@
-use easy_gltf::model::Mode;
+use gltf_import::{Gltf, Vertex};
+use std::mem::ManuallyDrop;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use structopt::StructOpt;
 use vkengine::gui::{egui, UiRenderer};
-use vkengine::{CameraController, CubeData, MeshRenderer, SkyboxRenderer, VkError, VulkanEngine, VulkanResult};
+use vkengine::{CameraController, CubeData, MeshRenderSlice, MeshRenderer, SkyboxRenderer, VkError, VulkanEngine, VulkanResult};
 use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
@@ -17,19 +18,23 @@ struct Arguments {
     skybox_dir: Option<PathBuf>,
 }
 
+#[derive(Debug)]
+pub struct MeshNode {
+    pub renderer: MeshRenderer<Vertex, u32>,
+    pub slices: Vec<MeshRenderSlice>,
+}
+
 fn main() -> VulkanResult<()> {
     let args = Arguments::from_args();
 
-    let gltf_scenes = easy_gltf::load(args.model.unwrap_or_else(|| "data/model.glb".into())).unwrap();
-    for scene in &gltf_scenes {
-        for model in &scene.models {
-            println!(
-                "loaded model: vertices={} indices={:?}, mode={:?}",
-                model.vertices().len(),
-                model.indices().map(Vec::len),
-                model.mode()
-            );
-        }
+    let gltf = Gltf::from_file(args.model.unwrap_or_else(|| "data/model.glb".into())).unwrap();
+    for mesh in &gltf.meshes {
+        println!(
+            "loaded model: vertices={} indices={}, submeshes={}",
+            mesh.vertices.len(),
+            mesh.indices.len(),
+            mesh.submeshes.len()
+        );
     }
 
     let skybox_dir = args.skybox_dir.unwrap_or_else(|| "data/skybox".into());
@@ -57,33 +62,46 @@ fn main() -> VulkanResult<()> {
 
     let mut vk_app = VulkanEngine::new(&window, "vulkan test", Default::default())?;
 
-    let mut scenes = gltf_scenes
+    let mut textures = ManuallyDrop::new(
+        gltf.textures
+            .iter()
+            .map(|tex| vk_app.create_texture(tex, &gltf))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap(),
+    );
+
+    let mut scenes = gltf
+        .scenes
         .iter()
         .map(|scene| {
             scene
-                .models
-                .iter()
-                .map(|model| {
-                    //FIXME: possible duplicate texture creation
-                    let color_tex = model
-                        .material()
-                        .pbr
-                        .base_color_texture
-                        .as_ref()
-                        .map(|image| vk_app.create_texture(image.width(), image.height(), image.as_raw()).unwrap());
-                    let indices = model.indices().map(|vec| vec.as_slice());
-                    let color = model.material().pbr.base_color_factor.into();
-                    MeshRenderer::new(&vk_app, model.vertices(), indices, color, color_tex)
+                .nodes(&gltf)
+                .filter_map(|node| node.mesh.map(|mesh_id| (&gltf[mesh_id], node)))
+                .map(|(mesh, node)| {
+                    let mut renderer = MeshRenderer::new(&vk_app, &mesh.vertices, &mesh.indices).unwrap();
+                    renderer.model = node.transform;
+                    let slices: Vec<_> = mesh
+                        .submeshes
+                        .iter()
+                        .map(|submesh| {
+                            let material = submesh.material.map(|mat| &gltf[mat]);
+                            let base_color = material.map(|mat| mat.base_color).unwrap_or([1.0; 4]);
+                            let texture = material.and_then(|mat| mat.color_tex).map(|tex| textures[tex.id].descriptor());
+                            MeshRenderSlice {
+                                index_offset: submesh.index_offset,
+                                index_count: submesh.index_count,
+                                base_color,
+                                texture,
+                            }
+                        })
+                        .collect();
+                    MeshNode { renderer, slices }
                 })
-                .collect::<Result<Vec<_>, _>>()
+                .collect::<Vec<_>>()
         })
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap();
-    //FIXME: disabling meshes not made of triangles. implement other modes or properly skip them
-    let mut mesh_enabled: Vec<Vec<_>> = gltf_scenes
-        .iter()
-        .map(|scene| scene.models.iter().map(|model| model.mode() == Mode::Triangles).collect())
-        .collect();
+        .collect::<Vec<_>>();
+
+    let mut mesh_enabled: Vec<Vec<_>> = scenes.iter().map(|meshes| vec![true; meshes.len()]).collect();
     let mut cur_scene = 0;
 
     vk_app.camera.position = [2.0, 2.0, -2.0].into();
@@ -222,9 +240,10 @@ fn main() -> VulkanResult<()> {
 
                 for scene in &mut scenes {
                     for mesh in scene {
-                        mesh.rebuild_pipeline(&vk_app).unwrap();
+                        mesh.renderer.rebuild_pipeline(&vk_app).unwrap();
                     }
                 }
+
                 skybox.rebuild_pipeline(&vk_app).unwrap();
                 gui.rebuild_pipeline(&vk_app).unwrap();
             }
@@ -239,11 +258,12 @@ fn main() -> VulkanResult<()> {
             let mut skybox_cmds = VkError::UnfinishedJob.into();
             let mut gui_cmds = VkError::UnfinishedJob.into();
             thread_pool.scoped(|scope| {
-                let draw_chunks = draw_buffer.chunks_mut(1);
-                for (i, (obj, draw_ret)) in objects.iter_mut().zip(draw_chunks).enumerate() {
+                let mesh_chunks = objects.chunks_mut(1);
+                let ret_chunks = draw_buffer.chunks_mut(1);
+                for (i, (obj, draw_ret)) in mesh_chunks.zip(ret_chunks).enumerate() {
                     if mesh_enabled[cur_scene][i] {
                         scope.execute(|| {
-                            draw_ret[0] = obj.render(&vk_app);
+                            draw_ret[0] = obj[0].renderer.render(&vk_app, &obj[0].slices);
                         });
                     }
                 }
@@ -251,7 +271,7 @@ fn main() -> VulkanResult<()> {
                 scope.execute(|| gui_cmds = gui.draw(&vk_app));
             });
 
-            let draw_cmds = draw_buffer.drain(..).chain([skybox_cmds, gui_cmds]).map(|res| res.unwrap());
+            let draw_cmds = draw_buffer.drain(..).chain([skybox_cmds, gui_cmds]).filter_map(|res| res.ok());
 
             vk_app.submit_draw_commands(draw_cmds).unwrap();
 
@@ -266,6 +286,10 @@ fn main() -> VulkanResult<()> {
                 prev_frame_count = frame_count;
             }
         }
+        Event::LoopDestroyed => unsafe {
+            vk_app.device().device_wait_idle().unwrap();
+            vk_app.device().dispose_of(ManuallyDrop::take(&mut textures));
+        },
         _ => (),
     });
 }
