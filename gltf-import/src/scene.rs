@@ -8,6 +8,7 @@ use std::collections::VecDeque;
 pub struct Node {
     pub id: NodeId,
     pub transform: Affine3A,
+    pub local_transform: Affine3A,
     pub mesh: Option<MeshId>,
     pub camera: Option<CameraId>,
     pub children: Vec<NodeId>,
@@ -28,6 +29,7 @@ impl From<gltf::Node<'_>> for Node {
         Self {
             id: NodeId(node.index()),
             transform,
+            local_transform: transform,
             mesh: node.mesh().map(|m| MeshId(m.index())),
             camera: node.camera().map(|c| CameraId(c.index())),
             children: node.children().map(|n| NodeId(n.index())).collect(),
