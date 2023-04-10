@@ -51,7 +51,7 @@ impl<V: VertexStorage> GltfData<V> {
         let scenes = gltf.document.scenes().map(From::from).collect();
         let cameras = gltf.document.cameras().map(From::from).collect();
 
-        Ok(Self {
+        let mut this = Self {
             document: gltf.document,
             buffers,
             images,
@@ -61,7 +61,23 @@ impl<V: VertexStorage> GltfData<V> {
             nodes,
             scenes,
             cameras,
-        })
+        };
+
+        this.set_node_parents();
+
+        Ok(this)
+    }
+
+    fn set_node_parents(&mut self) {
+        let mut parents = vec![None; self.nodes.len()];
+        for node in &self.nodes {
+            for child_id in &node.children {
+                parents[child_id.0] = Some(node.id);
+            }
+        }
+        for (node, parent) in self.nodes.iter_mut().zip(parents) {
+            node.parent = parent;
+        }
     }
 }
 

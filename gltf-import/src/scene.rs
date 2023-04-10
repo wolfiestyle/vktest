@@ -6,10 +6,12 @@ use std::collections::VecDeque;
 
 #[derive(Debug, Clone)]
 pub struct Node {
+    pub id: NodeId,
     pub transform: Affine3A,
     pub mesh: Option<MeshId>,
     pub camera: Option<CameraId>,
     pub children: Vec<NodeId>,
+    pub parent: Option<NodeId>,
     pub name: Option<String>,
 }
 
@@ -24,10 +26,12 @@ impl From<gltf::Node<'_>> for Node {
             } => Affine3A::from_scale_rotation_translation(scale.into(), Quat::from_array(rotation), translation.into()),
         };
         Self {
+            id: NodeId(node.index()),
             transform,
             mesh: node.mesh().map(|m| MeshId(m.index())),
             camera: node.camera().map(|c| CameraId(c.index())),
             children: node.children().map(|n| NodeId(n.index())).collect(),
+            parent: None,
             name: node.name().map(str::to_string),
         }
     }
@@ -47,13 +51,6 @@ impl Scene {
         NodeTreeIter {
             nodes: &gltf.nodes,
             queue: VecDeque::from(self.root_nodes.clone()),
-        }
-    }
-
-    pub fn nodes_with_parent<'a, V>(&self, gltf: &'a GltfData<V>) -> NodeParentTreeIter<'a> {
-        NodeParentTreeIter {
-            nodes: &gltf.nodes,
-            queue: self.root_nodes.iter().map(|&node| (node, None)).collect(),
         }
     }
 }
@@ -81,25 +78,6 @@ impl<'a> Iterator for NodeTreeIter<'a> {
             let curr_node = &self.nodes[curr_id.0];
             self.queue.extend(curr_node.children.iter());
             curr_node
-        })
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct NodeParentTreeIter<'a> {
-    nodes: &'a [Node],
-    queue: VecDeque<(NodeId, Option<NodeId>)>,
-}
-
-impl<'a> Iterator for NodeParentTreeIter<'a> {
-    type Item = (&'a Node, Option<&'a Node>);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.queue.pop_front().map(|(curr_id, parent_id)| {
-            let curr_node = &self.nodes[curr_id.0];
-            let parent_node = parent_id.map(|id| &self.nodes[id.0]);
-            self.queue.extend(curr_node.children.iter().map(|&id| (id, Some(curr_id))));
-            (curr_node, parent_node)
         })
     }
 }
