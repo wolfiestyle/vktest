@@ -89,7 +89,8 @@ impl<V: VertexStorage> GltfData<V> {
                     let node = &mut self.nodes[i];
                     node.transform = parent_transform * node.local_transform;
                 } else {
-                    eprintln!("Node {i} has parent {parent_id} after itself, skipping transform update"); //FIXME
+                    //FIXME
+                    eprintln!("Node {i} has parent {parent_id} after itself, skipping transform update");
                 }
             }
         }
