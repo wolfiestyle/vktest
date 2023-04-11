@@ -865,6 +865,14 @@ impl<P> MemoryObject<vk::Buffer, P> {
             range: self.size(),
         }
     }
+
+    pub fn descriptor_slice(&self, offset: u64, range: u64) -> vk::DescriptorBufferInfo {
+        vk::DescriptorBufferInfo {
+            buffer: self.handle,
+            offset,
+            range,
+        }
+    }
 }
 
 pub struct MappedMemory<'a> {
@@ -885,8 +893,9 @@ impl MappedMemory<'_> {
     }
 
     #[inline]
-    pub fn write_object<T: bytemuck::Pod>(&mut self, object: &T) {
-        self.write_bytes(bytemuck::bytes_of(object), 0)
+    pub fn write_object<T: bytemuck::Pod>(&mut self, object: &T, offset: usize) {
+        let byte_offset = offset * size_of::<T>();
+        self.write_bytes(bytemuck::bytes_of(object), byte_offset)
     }
 }
 

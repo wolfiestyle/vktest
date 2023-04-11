@@ -78,8 +78,6 @@ fn main() -> VulkanResult<()> {
                 .nodes(&gltf)
                 .filter_map(|node| node.mesh.map(|mesh_id| (&gltf[mesh_id], node)))
                 .map(|(mesh, node)| {
-                    let mut renderer = MeshRenderer::new(&vk_app, &mesh.vertices, &mesh.indices).unwrap();
-                    renderer.model = node.transform;
                     let slices: Vec<_> = mesh
                         .submeshes
                         .iter()
@@ -95,6 +93,8 @@ fn main() -> VulkanResult<()> {
                             }
                         })
                         .collect();
+                    let mut renderer = MeshRenderer::new(&vk_app, &mesh.vertices, &mesh.indices, &slices).unwrap();
+                    renderer.model = node.transform;
                     MeshNode { renderer, slices }
                 })
                 .collect::<Vec<_>>()

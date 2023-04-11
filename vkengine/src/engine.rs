@@ -790,6 +790,10 @@ impl UploadBuffer {
     pub fn descriptor(&self, engine: &VulkanEngine) -> vk::DescriptorBufferInfo {
         self.get_current_buffer(engine).descriptor()
     }
+
+    pub fn descriptor_slice(&self, offset: u64, range: u64, engine: &VulkanEngine) -> vk::DescriptorBufferInfo {
+        self.get_current_buffer(engine).descriptor_slice(offset, range)
+    }
 }
 
 impl std::ops::Index<u64> for UploadBuffer {
