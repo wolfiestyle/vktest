@@ -165,9 +165,10 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
     }
 
     fn calc_uniforms(&self, engine: &VulkanEngine) -> ObjectUniforms {
+        let (_, rot, _) = self.model.to_scale_rotation_translation();
         ObjectUniforms {
             mvp: engine.view_proj * self.model,
-            light_dir: engine.sunlight.extend(1.0),
+            light_dir: (rot.conjugate() * engine.sunlight).extend(1.0),
             light_color: Vec3::ONE.extend(1.0),
             ambient: Vec3::splat(0.1).extend(1.0),
         }
