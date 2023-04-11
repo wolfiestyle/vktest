@@ -14,7 +14,7 @@ layout(location = 0) out vec3 fragNormal;
 layout(location = 1) out vec2 fragTexCoord;
 
 void main() {
-    gl_Position = mvp * vec4(inPosition * vec3(1.0, 1.0, -1.0), 1.0);
+    gl_Position = mvp * vec4(inPosition, 1.0);
     fragNormal = inNormal;
     fragTexCoord = inTexCoord;
 }
