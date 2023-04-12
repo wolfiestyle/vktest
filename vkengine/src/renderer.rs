@@ -35,8 +35,8 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
 
         let shader = Shader::new(
             &device,
-            include_spirv!("src/shaders/texture.vert.glsl", vert, glsl),
-            include_spirv!("src/shaders/texture.frag.glsl", frag, glsl),
+            include_spirv!("src/shaders/phong.vert.glsl", vert, glsl),
+            include_spirv!("src/shaders/phong.frag.glsl", frag, glsl),
         )?;
         let desc_layout = vk::DescriptorSetLayoutCreateInfo::builder()
             .flags(vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR)
