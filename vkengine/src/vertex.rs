@@ -3,36 +3,7 @@ use memoffset::{offset_of, offset_of_tuple};
 
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub struct UNorm<T>(T);
-
-impl<T> From<T> for UNorm<T> {
-    #[inline]
-    fn from(value: T) -> Self {
-        Self(value)
-    }
-}
-
-#[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub struct SNorm<T>(T);
-
-impl<T> From<T> for SNorm<T> {
-    #[inline]
-    fn from(value: T) -> Self {
-        Self(value)
-    }
-}
-
-#[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub struct SRgb<T>(T);
-
-impl<T> From<T> for SRgb<T> {
-    #[inline]
-    fn from(value: T) -> Self {
-        Self(value)
-    }
-}
+pub struct Norm<T>(pub T);
 
 pub trait TypeFormat: Copy {
     const VK_FORMAT: vk::Format;
@@ -90,35 +61,29 @@ impl_format!([i32; 2], 1, vk::Format::R32G32_SINT);
 impl_format!([i32; 3], 1, vk::Format::R32G32B32_SINT);
 impl_format!([i32; 4], 1, vk::Format::R32G32B32A32_SINT);
 
-impl_format!(UNorm<u8>, 1, vk::Format::R8_UNORM);
-impl_format!(UNorm<[u8; 1]>, 1, vk::Format::R8_UNORM);
-impl_format!(UNorm<[u8; 2]>, 1, vk::Format::R8G8_UNORM);
-impl_format!(UNorm<[u8; 3]>, 1, vk::Format::R8G8B8_UNORM);
-impl_format!(UNorm<[u8; 4]>, 1, vk::Format::R8G8B8A8_UNORM);
+impl_format!(Norm<u8>, 1, vk::Format::R8_UNORM);
+impl_format!(Norm<[u8; 1]>, 1, vk::Format::R8_UNORM);
+impl_format!(Norm<[u8; 2]>, 1, vk::Format::R8G8_UNORM);
+impl_format!(Norm<[u8; 3]>, 1, vk::Format::R8G8B8_UNORM);
+impl_format!(Norm<[u8; 4]>, 1, vk::Format::R8G8B8A8_UNORM);
 
-impl_format!(UNorm<u16>, 1, vk::Format::R16_UNORM);
-impl_format!(UNorm<[u16; 1]>, 1, vk::Format::R16_UNORM);
-impl_format!(UNorm<[u16; 2]>, 1, vk::Format::R16G16_UNORM);
-impl_format!(UNorm<[u16; 3]>, 1, vk::Format::R16G16B16_UNORM);
-impl_format!(UNorm<[u16; 4]>, 1, vk::Format::R16G16B16A16_UNORM);
+impl_format!(Norm<u16>, 1, vk::Format::R16_UNORM);
+impl_format!(Norm<[u16; 1]>, 1, vk::Format::R16_UNORM);
+impl_format!(Norm<[u16; 2]>, 1, vk::Format::R16G16_UNORM);
+impl_format!(Norm<[u16; 3]>, 1, vk::Format::R16G16B16_UNORM);
+impl_format!(Norm<[u16; 4]>, 1, vk::Format::R16G16B16A16_UNORM);
 
-impl_format!(SNorm<i8>, 1, vk::Format::R8_SNORM);
-impl_format!(SNorm<[i8; 1]>, 1, vk::Format::R8_SNORM);
-impl_format!(SNorm<[i8; 2]>, 1, vk::Format::R8G8_SNORM);
-impl_format!(SNorm<[i8; 3]>, 1, vk::Format::R8G8B8_SNORM);
-impl_format!(SNorm<[i8; 4]>, 1, vk::Format::R8G8B8A8_SNORM);
+impl_format!(Norm<i8>, 1, vk::Format::R8_SNORM);
+impl_format!(Norm<[i8; 1]>, 1, vk::Format::R8_SNORM);
+impl_format!(Norm<[i8; 2]>, 1, vk::Format::R8G8_SNORM);
+impl_format!(Norm<[i8; 3]>, 1, vk::Format::R8G8B8_SNORM);
+impl_format!(Norm<[i8; 4]>, 1, vk::Format::R8G8B8A8_SNORM);
 
-impl_format!(SNorm<i16>, 1, vk::Format::R16_SNORM);
-impl_format!(SNorm<[i16; 1]>, 1, vk::Format::R16_SNORM);
-impl_format!(SNorm<[i16; 2]>, 1, vk::Format::R16G16_SNORM);
-impl_format!(SNorm<[i16; 3]>, 1, vk::Format::R16G16B16_SNORM);
-impl_format!(SNorm<[i16; 4]>, 1, vk::Format::R16G16B16A16_SNORM);
-
-impl_format!(SRgb<u8>, 1, vk::Format::R8_SRGB);
-impl_format!(SRgb<[u8; 1]>, 1, vk::Format::R8_SRGB);
-impl_format!(SRgb<[u8; 2]>, 1, vk::Format::R8G8_SRGB);
-impl_format!(SRgb<[u8; 3]>, 1, vk::Format::R8G8B8_SRGB);
-impl_format!(SRgb<[u8; 4]>, 1, vk::Format::R8G8B8A8_SRGB);
+impl_format!(Norm<i16>, 1, vk::Format::R16_SNORM);
+impl_format!(Norm<[i16; 1]>, 1, vk::Format::R16_SNORM);
+impl_format!(Norm<[i16; 2]>, 1, vk::Format::R16G16_SNORM);
+impl_format!(Norm<[i16; 3]>, 1, vk::Format::R16G16B16_SNORM);
+impl_format!(Norm<[i16; 4]>, 1, vk::Format::R16G16B16A16_SNORM);
 
 #[cfg(feature = "egui")]
 impl_format!(egui::Pos2, 1, vk::Format::R32G32_SFLOAT);
