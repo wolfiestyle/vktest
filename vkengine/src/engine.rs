@@ -1,4 +1,5 @@
 use crate::camera::Camera;
+use crate::create::CreateFromInfo;
 use crate::device::{ImageData, ImageParams, MappedMemory, VkBuffer, VkImage, VulkanDevice};
 use crate::instance::DeviceSelection;
 use crate::swapchain::Swapchain;

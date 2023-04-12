@@ -183,9 +183,3 @@ impl_object_type!(vk::DescriptorPool, vk::ObjectType::DESCRIPTOR_POOL);
 impl_object_type!(vk::DescriptorSet, vk::ObjectType::DESCRIPTOR_SET);
 impl_object_type!(vk::Framebuffer, vk::ObjectType::FRAMEBUFFER);
 impl_object_type!(vk::CommandPool, vk::ObjectType::COMMAND_POOL);
-
-pub trait CreateFromInfo {
-    type Output;
-
-    fn create(&self, device: &ash::Device) -> VulkanResult<Self::Output>;
-}

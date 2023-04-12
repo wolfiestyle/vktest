@@ -1,3 +1,4 @@
+use crate::create::CreateFromInfo;
 use crate::device::{ImageParams, VkImage, VulkanDevice};
 use crate::types::*;
 use ash::vk;

@@ -1,6 +1,7 @@
+use crate::create::CreateFromInfo;
 use crate::device::{ImageData, VulkanDevice};
 use crate::engine::{CmdBufferRing, DrawPayload, Pipeline, PipelineMode, Shader, Texture, UploadBuffer, VulkanEngine};
-use crate::types::{Cleanup, CreateFromInfo, VulkanResult};
+use crate::types::{Cleanup, VulkanResult};
 use ash::vk;
 use egui::epaint::{Primitive, Vertex};
 use egui::{ClippedPrimitive, Context, FullOutput, PlatformOutput, TextureId, TexturesDelta};
