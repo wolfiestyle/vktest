@@ -19,6 +19,7 @@ pub struct VulkanDevice {
     pub graphics_queue: vk::Queue,
     pub present_queue: vk::Queue,
     transfer_pool: vk::CommandPool,
+    transfer_fence: vk::Fence,
     pub swapchain_fn: khr::Swapchain,
     pub dynrender_fn: khr::DynamicRendering,
     pub pushdesc_fn: khr::PushDescriptor,
@@ -41,6 +42,12 @@ impl VulkanDevice {
         let dynrender_fn = khr::DynamicRendering::new(&instance, &device);
         let pushdesc_fn = khr::PushDescriptor::new(&instance, &device);
 
+        let transfer_pool = vk::CommandPoolCreateInfo::builder()
+            .flags(vk::CommandPoolCreateFlags::TRANSIENT)
+            .queue_family_index(dev_info.graphics_idx)
+            .create(&device)?;
+        let transfer_fence = vk::FenceCreateInfo::builder().create(&device)?;
+
         let allocator = Allocator::new(&AllocatorCreateDesc {
             instance: (*instance).clone(),
             device: device.clone(),
@@ -49,26 +56,20 @@ impl VulkanDevice {
             buffer_device_address: false,
         })?;
 
-        let family = dev_info.graphics_idx;
-
-        let mut this = Self {
+        let this = Self {
             instance,
             surface,
             dev_info,
             device,
             graphics_queue,
             present_queue,
-            transfer_pool: vk::CommandPool::null(),
+            transfer_pool,
+            transfer_fence,
             swapchain_fn,
             dynrender_fn,
             pushdesc_fn,
             allocator: ManuallyDrop::new(allocator.into()),
         };
-
-        this.transfer_pool = vk::CommandPoolCreateInfo::builder()
-            .flags(vk::CommandPoolCreateFlags::TRANSIENT)
-            .queue_family_index(family)
-            .create(&this)?;
 
         Ok(this)
     }
@@ -100,11 +101,14 @@ impl VulkanDevice {
                 .end_command_buffer(cmd_buffer)
                 .describe_err("Failed to end recording command buffer")?;
             self.device
-                .queue_submit(self.graphics_queue, slice::from_ref(&submit_info), vk::Fence::null())
+                .queue_submit(self.graphics_queue, slice::from_ref(&submit_info), self.transfer_fence)
                 .describe_err("Failed to submit queue")?;
             self.device
-                .queue_wait_idle(self.graphics_queue)
-                .describe_err("Failed to wait queue idle")?;
+                .wait_for_fences(slice::from_ref(&self.transfer_fence), true, u64::MAX)
+                .describe_err("Failed to wait fence")?;
+            self.device
+                .reset_fences(slice::from_ref(&self.transfer_fence))
+                .describe_err("Failed to reset fence")?;
             self.device.free_command_buffers(self.transfer_pool, slice::from_ref(&cmd_buffer));
         }
         Ok(())
@@ -642,6 +646,7 @@ impl Drop for VulkanDevice {
         unsafe {
             ManuallyDrop::drop(&mut self.allocator);
             self.device.destroy_command_pool(self.transfer_pool, None);
+            self.device.destroy_fence(self.transfer_fence, None);
             self.instance.surface_utils.destroy_surface(self.surface, None);
             self.device.destroy_device(None);
         }
@@ -657,6 +662,7 @@ impl std::fmt::Debug for VulkanDevice {
             .field("graphics_queue", &self.graphics_queue)
             .field("present_queue", &self.present_queue)
             .field("transfer_pool", &self.transfer_pool)
+            .field("transfer_fence", &self.transfer_fence)
             .finish_non_exhaustive()
     }
 }
