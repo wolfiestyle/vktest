@@ -81,7 +81,7 @@ impl VulkanEngine {
             gpu_time: 0,
             camera,
             view_proj: Mat4::IDENTITY,
-            sunlight: Vec3::Y,
+            sunlight: Vec3::NEG_Y,
         };
 
         let sampler = this.get_sampler(

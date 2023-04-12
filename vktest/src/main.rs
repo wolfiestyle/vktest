@@ -90,6 +90,8 @@ fn main() -> VulkanResult<()> {
                                 index_count: submesh.index_count,
                                 base_color,
                                 texture,
+                                specular: 0.5,
+                                shininess: 64.0,
                             }
                         })
                         .collect();

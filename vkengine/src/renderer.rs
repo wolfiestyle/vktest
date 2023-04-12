@@ -88,7 +88,8 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
         let material_data: Vec<_> = submeshes
             .iter()
             .map(|subm| MaterialData {
-                base_color: subm.base_color,
+                base_color: subm.base_color.into(),
+                specular: Vec4::new(subm.specular, subm.shininess, 0.0, 0.0),
             })
             .collect();
         let material_buffer =
@@ -185,9 +186,10 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
         let (_, rot, _) = self.model.to_scale_rotation_translation();
         ObjectUniforms {
             mvp: engine.view_proj * self.model,
-            light_dir: (rot.conjugate() * engine.sunlight).extend(1.0),
-            light_color: Vec3::ONE.extend(1.0),
-            ambient: Vec3::splat(0.1).extend(1.0),
+            model: self.model.into(),
+            light_dir: (rot.conjugate() * engine.sunlight).extend(0.1),
+            light_color: Vec3::ONE.extend(0.1),
+            view_pos: engine.camera.position.extend(0.1),
         }
     }
 
@@ -226,21 +228,25 @@ pub struct MeshRenderSlice {
     pub index_count: u32,
     pub base_color: [f32; 4],
     pub texture: Option<vk::DescriptorImageInfo>,
+    pub specular: f32,
+    pub shininess: f32,
 }
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default, Pod, Zeroable)]
 struct ObjectUniforms {
     mvp: Mat4,
+    model: Mat4,
     light_dir: Vec4,
     light_color: Vec4,
-    ambient: Vec4,
+    view_pos: Vec4,
 }
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default, Pod, Zeroable)]
 struct MaterialData {
-    base_color: [f32; 4],
+    base_color: Vec4,
+    specular: Vec4,
 }
 
 pub struct SkyboxRenderer {
