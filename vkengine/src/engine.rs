@@ -26,6 +26,7 @@ pub struct VulkanEngine {
     current_frame: u64,
     samplers: Mutex<HashMap<SamplerOptions, vk::Sampler>>,
     pub(crate) default_texture: Texture,
+    pub(crate) default_normalmap: Texture,
     pub(crate) pipeline_cache: vk::PipelineCache,
     prev_frame_time: Instant,
     last_frame_time: Instant,
@@ -60,6 +61,15 @@ impl VulkanEngine {
             vk::Sampler::null(),
             false,
         )?;
+        let default_normalmap = Texture::new(
+            &device,
+            1,
+            1,
+            vk::Format::R8G8B8A8_UNORM,
+            ImageData::Single(&[128, 128, 255, 0]),
+            vk::Sampler::null(),
+            false,
+        )?;
 
         let pipeline_cache = vk::PipelineCacheCreateInfo::builder().create(&device)?; //TODO: save/load cache data
 
@@ -75,6 +85,7 @@ impl VulkanEngine {
             frame_state,
             current_frame: 0,
             default_texture,
+            default_normalmap,
             samplers: Default::default(),
             pipeline_cache,
             prev_frame_time: now,
@@ -94,6 +105,7 @@ impl VulkanEngine {
             false,
         )?;
         this.default_texture.sampler = sampler;
+        this.default_normalmap.sampler = sampler;
 
         Ok(this)
     }
@@ -472,6 +484,7 @@ impl Drop for VulkanEngine {
             self.swapchain.cleanup(&self.device);
             self.samplers.lock().unwrap().cleanup(&self.device);
             self.default_texture.cleanup(&self.device);
+            self.default_normalmap.cleanup(&self.device);
             self.device.destroy_pipeline_cache(self.pipeline_cache, None);
         }
     }

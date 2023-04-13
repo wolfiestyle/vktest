@@ -86,6 +86,7 @@ fn main() -> VulkanResult<()> {
                             let color_tex = material.color_tex.map(|tex| textures[tex.id].descriptor());
                             let metal_rough_tex = material.metallic_roughness_tex.map(|tex| textures[tex.id].descriptor());
                             let emiss_tex = material.emissive_tex.map(|tex| textures[tex.id].descriptor());
+                            let normal_tex = material.normal_tex.map(|tex| textures[tex.id].descriptor());
                             MeshRenderSlice {
                                 index_offset: submesh.index_offset,
                                 index_count: submesh.index_count,
@@ -93,9 +94,11 @@ fn main() -> VulkanResult<()> {
                                 metallic: material.metallic,
                                 roughness: material.roughness,
                                 emissive: material.emissive,
+                                normal_scale: material.normal_scale,
                                 color_tex,
                                 metal_rough_tex,
                                 emiss_tex,
+                                normal_tex,
                             }
                         })
                         .collect();
