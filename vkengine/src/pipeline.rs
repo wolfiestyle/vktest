@@ -57,7 +57,7 @@ impl Pipeline {
             .polygon_mode(vk::PolygonMode::FILL)
             .line_width(1.0)
             .cull_mode(params.mode.cull_mode())
-            .front_face(vk::FrontFace::CLOCKWISE);
+            .front_face(vk::FrontFace::COUNTER_CLOCKWISE);
 
         let multisample_ci = vk::PipelineMultisampleStateCreateInfo::builder()
             .rasterization_samples(engine.swapchain.samples)

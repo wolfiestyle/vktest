@@ -15,8 +15,8 @@ impl Camera {
     pub fn look_at(&mut self, center: impl Into<Vec3>) {
         let dir = center.into() - self.position;
         if let Some(dir) = dir.try_normalize() {
-            let pitch = (-dir.y).asin();
-            let yaw = dir.x.atan2(dir.z);
+            let pitch = (dir.y).asin();
+            let yaw = (-dir.x).atan2(-dir.z);
             self.rotation = Quat::from_euler(EulerRot::YXZ, yaw, pitch, 0.0);
         }
     }
@@ -42,15 +42,11 @@ impl Camera {
     }
 
     pub(crate) fn get_view_transform(&self) -> Affine3A {
-        let tf = Affine3A::from_quat(self.rotation.conjugate()) * Affine3A::from_translation(-self.position);
-        let flip = Affine3A::from_rotation_x(std::f32::consts::PI);
-        flip * tf
+        Affine3A::from_quat(self.rotation.conjugate()) * Affine3A::from_translation(-self.position)
     }
 
     pub(crate) fn get_view_rotation(&self) -> Affine3A {
-        let rot = Affine3A::from_quat(self.rotation.conjugate());
-        let flip = Affine3A::from_rotation_x(std::f32::consts::PI);
-        flip * rot
+        Affine3A::from_quat(self.rotation.conjugate())
     }
 
     pub(crate) fn get_projection(&self, aspect: f32) -> Mat4 {
@@ -130,10 +126,10 @@ impl CameraController {
         match event {
             WindowEvent::KeyboardInput { input: KeyboardInput { state, virtual_keycode: Some(keycode), .. }, .. } => match (state, keycode) {
                 (Pressed, Key::W) => {
-                    self.forward_speed = self.speed;
+                    self.forward_speed = -self.speed;
                 }
                 (Pressed, Key::S) => {
-                    self.forward_speed = -self.speed;
+                    self.forward_speed = self.speed;
                 }
                 (Released, Key::W | Key::S) => {
                     self.forward_speed = 0.0;
@@ -175,8 +171,8 @@ impl CameraController {
     pub fn update_from_device_event(&mut self, event: &DeviceEvent) {
         match event {
             &DeviceEvent::MouseMotion { delta: (dx, dy) } if self.mouse_look => {
-                let yaw = self.yaw + dx as f32 * self.sensitivity;
-                let pitch = self.pitch + dy as f32 * self.sensitivity;
+                let yaw = self.yaw - dx as f32 * self.sensitivity;
+                let pitch = self.pitch - dy as f32 * self.sensitivity;
                 self.yaw = yaw % 360.0;
                 self.pitch = pitch.clamp(-89.0, 89.0);
             }

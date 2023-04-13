@@ -200,6 +200,19 @@ impl Swapchain {
     }
 
     #[inline]
+    pub fn viewport_inv(&self) -> vk::Viewport {
+        let height = self.extent.height as f32;
+        vk::Viewport {
+            x: 0.0,
+            y: height,
+            width: self.extent.width as f32,
+            height: -height,
+            min_depth: 0.0,
+            max_depth: 1.0,
+        }
+    }
+
+    #[inline]
     pub fn extent_rect(&self) -> vk::Rect2D {
         vk::Rect2D {
             offset: Default::default(),

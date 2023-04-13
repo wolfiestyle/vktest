@@ -95,8 +95,7 @@ fn main() -> VulkanResult<()> {
                             }
                         })
                         .collect();
-                    let mut renderer = MeshRenderer::new(&vk_app, &mesh.vertices, &mesh.indices, &slices).unwrap();
-                    renderer.model = node.transform;
+                    let renderer = MeshRenderer::new(&vk_app, &mesh.vertices, &mesh.indices, &slices, node.transform).unwrap();
                     MeshNode { renderer, slices }
                 })
                 .collect::<Vec<_>>()
@@ -106,7 +105,7 @@ fn main() -> VulkanResult<()> {
     let mut mesh_enabled: Vec<Vec<_>> = scenes.iter().map(|meshes| vec![true; meshes.len()]).collect();
     let mut cur_scene = 0;
 
-    vk_app.camera.position = [2.0, 2.0, -2.0].into();
+    vk_app.camera.position = [2.0, 2.0, 2.0].into();
     vk_app.camera.look_at([0.0; 3]);
     let mut controller = CameraController::new(&vk_app.camera);
 
