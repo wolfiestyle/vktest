@@ -65,6 +65,7 @@ impl<V: VertexStorage> GltfData<V> {
 
         this.set_node_parents();
         this.update_transforms();
+        this.set_srgb_images();
 
         Ok(this)
     }
@@ -93,6 +94,19 @@ impl<V: VertexStorage> GltfData<V> {
                     eprintln!("Node {i} has parent {parent_id} after itself, skipping transform update");
                 }
             }
+        }
+    }
+
+    fn set_srgb_images(&mut self) {
+        let image_ids: Vec<_> = self
+            .materials
+            .iter()
+            .flat_map(|mat| [mat.color_tex, mat.emissive_tex])
+            .flatten()
+            .map(|texi| self[texi].image)
+            .collect();
+        for id in image_ids {
+            self.images[id.0].srgb = true;
         }
     }
 }
@@ -195,6 +209,7 @@ impl BufferData {
 pub struct Image {
     pub data: ImageData,
     pub mime_type: Option<String>,
+    pub srgb: bool,
     pub name: Option<String>,
 }
 
@@ -208,8 +223,9 @@ impl Image {
                         let (data, mime_type) = ImageData::load(&image_src, buffers, base_path);
                         Image {
                             data,
-                            name: image_src.name().map(str::to_string),
                             mime_type,
+                            srgb: false,
+                            name: image_src.name().map(str::to_string),
                         }
                     })
                 })

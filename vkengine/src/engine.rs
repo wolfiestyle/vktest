@@ -196,7 +196,8 @@ impl VulkanEngine {
     pub fn create_texture(&self, tex_data: &gltf_import::Texture, gltf: &gltf_import::Gltf) -> VulkanResult<Texture> {
         use gltf_import::{MagFilter, MinFilter, WrappingMode};
 
-        let gltf_import::ImageData::Decoded(image) = &gltf[tex_data.image].data else { return Err(VkError::EngineError("missing texture image")) };
+        let image_info = &gltf[tex_data.image];
+        let gltf_import::ImageData::Decoded(image) = &image_info.data else { return Err(VkError::EngineError("missing texture image")) };
 
         let mag = match tex_data.mag_filter {
             MagFilter::Nearest => vk::Filter::NEAREST,
@@ -217,11 +218,17 @@ impl VulkanEngine {
             WrappingMode::MirroredRepeat => vk::SamplerAddressMode::MIRRORED_REPEAT,
         };
         let sampler = self.get_sampler(mag, min, wrap_u, wrap_v, true)?;
+
+        let format = if image_info.srgb {
+            vk::Format::R8G8B8A8_SRGB
+        } else {
+            vk::Format::R8G8B8A8_UNORM
+        };
         Texture::new(
             &self.device,
             image.width(),
             image.height(),
-            vk::Format::R8G8B8A8_SRGB,
+            format,
             ImageData::Single(image.to_rgba8().as_raw()),
             sampler,
             true,
