@@ -20,6 +20,26 @@ pub struct Material {
     pub name: Option<String>,
 }
 
+impl Material {
+    pub const DEFAULT: Self = Self {
+        base_color: [1.0; 4],
+        metallic: 1.0,
+        roughness: 1.0,
+        emissive: [0.0; 3],
+        normal_scale: 1.0,
+        occlusion_strength: 1.0,
+        color_tex: None,
+        metallic_roughness_tex: None,
+        normal_tex: None,
+        occlusion_tex: None,
+        emissive_tex: None,
+        alpha_mode: AlphaMode::Opaque,
+        alpha_cutoff: 0.5,
+        double_sided: false,
+        name: None,
+    };
+}
+
 impl From<gltf::Material<'_>> for Material {
     fn from(material: gltf::Material) -> Self {
         let pbr = material.pbr_metallic_roughness();
@@ -46,24 +66,9 @@ impl From<gltf::Material<'_>> for Material {
 }
 
 impl Default for Material {
+    #[inline]
     fn default() -> Self {
-        Self {
-            base_color: [1.0; 4],
-            metallic: 1.0,
-            roughness: 1.0,
-            emissive: [0.0; 3],
-            normal_scale: 1.0,
-            occlusion_strength: 1.0,
-            color_tex: None,
-            metallic_roughness_tex: None,
-            normal_tex: None,
-            occlusion_tex: None,
-            emissive_tex: None,
-            alpha_mode: AlphaMode::Opaque,
-            alpha_cutoff: 0.5,
-            double_sided: false,
-            name: None,
-        }
+        Self::DEFAULT
     }
 }
 

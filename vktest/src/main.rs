@@ -1,4 +1,4 @@
-use gltf_import::{Gltf, Vertex};
+use gltf_import::{Gltf, Material, Vertex};
 use std::mem::ManuallyDrop;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -82,16 +82,17 @@ fn main() -> VulkanResult<()> {
                         .submeshes
                         .iter()
                         .map(|submesh| {
-                            let material = submesh.material.map(|mat| &gltf[mat]);
-                            let base_color = material.map(|mat| mat.base_color).unwrap_or([1.0; 4]);
-                            let texture = material.and_then(|mat| mat.color_tex).map(|tex| textures[tex.id].descriptor());
+                            let material = submesh.material.map(|mat| &gltf[mat]).unwrap_or(&Material::DEFAULT);
+                            let color_tex = material.color_tex.map(|tex| textures[tex.id].descriptor());
+                            let metal_rough_tex = material.metallic_roughness_tex.map(|tex| textures[tex.id].descriptor());
                             MeshRenderSlice {
                                 index_offset: submesh.index_offset,
                                 index_count: submesh.index_count,
-                                base_color,
-                                texture,
-                                specular: 0.5,
-                                shininess: 64.0,
+                                base_color: material.base_color,
+                                metallic: material.metallic,
+                                roughness: material.roughness,
+                                color_tex,
+                                metal_rough_tex,
                             }
                         })
                         .collect();

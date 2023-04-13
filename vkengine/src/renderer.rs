@@ -61,6 +61,12 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
                     .descriptor_count(1)
                     .stage_flags(vk::ShaderStageFlags::FRAGMENT)
                     .build(),
+                vk::DescriptorSetLayoutBinding::builder()
+                    .binding(3)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                    .build(),
             ])
             .create(&device)?;
         let push_constants = vk::PushConstantRange {
@@ -91,7 +97,7 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
             .iter()
             .map(|subm| MaterialData {
                 base_color: subm.base_color.into(),
-                specular: Vec4::new(subm.specular, subm.shininess, 0.0, 0.0),
+                base_pbr: Vec4::new(1.0, subm.roughness, subm.metallic, 1.0),
             })
             .collect();
         let material_buffer =
@@ -154,17 +160,25 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
                 .cmd_bind_index_buffer(cmd_buffer, self.index_buffer.handle, 0, I::VK_INDEX_TYPE);
 
             for (i, submesh) in submeshes.iter().enumerate() {
-                let image_info = submesh.texture.unwrap_or_else(|| engine.default_texture.descriptor());
+                let coltex_info = submesh.color_tex.unwrap_or_else(|| engine.default_texture.descriptor());
+                let metrough_info = submesh.metal_rough_tex.unwrap_or_else(|| engine.default_texture.descriptor());
                 self.device.pushdesc_fn.cmd_push_descriptor_set(
                     cmd_buffer,
                     vk::PipelineBindPoint::GRAPHICS,
                     self.pipeline.layout,
                     0,
-                    &[vk::WriteDescriptorSet::builder()
-                        .dst_binding(2)
-                        .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                        .image_info(slice::from_ref(&image_info))
-                        .build()],
+                    &[
+                        vk::WriteDescriptorSet::builder()
+                            .dst_binding(2)
+                            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                            .image_info(slice::from_ref(&coltex_info))
+                            .build(),
+                        vk::WriteDescriptorSet::builder()
+                            .dst_binding(3)
+                            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                            .image_info(slice::from_ref(&metrough_info))
+                            .build(),
+                    ],
                 );
                 let mat_id = i as u32;
                 self.device.cmd_push_constants(
@@ -229,9 +243,10 @@ pub struct MeshRenderSlice {
     pub index_offset: u32,
     pub index_count: u32,
     pub base_color: [f32; 4],
-    pub texture: Option<vk::DescriptorImageInfo>,
-    pub specular: f32,
-    pub shininess: f32,
+    pub metallic: f32,
+    pub roughness: f32,
+    pub color_tex: Option<vk::DescriptorImageInfo>,
+    pub metal_rough_tex: Option<vk::DescriptorImageInfo>,
 }
 
 #[repr(C)]
@@ -248,7 +263,7 @@ struct ObjectUniforms {
 #[derive(Debug, Clone, Copy, Default, Pod, Zeroable)]
 struct MaterialData {
     base_color: Vec4,
-    specular: Vec4,
+    base_pbr: Vec4,
 }
 
 pub struct SkyboxRenderer {
