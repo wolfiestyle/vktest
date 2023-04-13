@@ -31,6 +31,7 @@ pub struct VulkanEngine {
     last_frame_time: Instant,
     gpu_time: u64,
     pub camera: Camera,
+    pub projection: Mat4,
     pub view_proj: Mat4,
     pub sunlight: Vec3,
 }
@@ -80,6 +81,7 @@ impl VulkanEngine {
             last_frame_time: now,
             gpu_time: 0,
             camera,
+            projection: Mat4::IDENTITY,
             view_proj: Mat4::IDENTITY,
             sunlight: Vec3::NEG_Y,
         };
@@ -351,8 +353,8 @@ impl VulkanEngine {
 
     pub fn update(&mut self) {
         let view = self.camera.get_view_transform();
-        let proj = self.camera.get_projection(self.swapchain.aspect());
-        self.view_proj = proj * view;
+        self.projection = self.camera.get_projection(self.swapchain.aspect());
+        self.view_proj = self.projection * view;
     }
 
     pub fn submit_draw_commands(&mut self, draw_commands: impl IntoIterator<Item = DrawPayload>) -> VulkanResult<bool> {

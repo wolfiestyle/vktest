@@ -325,7 +325,7 @@ impl SkyboxRenderer {
         engine.begin_secondary_draw_commands(cmd_buffer, vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)?;
 
         let image_info = self.texture.descriptor();
-        let viewproj_inv = engine.view_proj.inverse();
+        let viewproj_inv = (engine.projection * engine.camera.get_view_rotation()).inverse();
         unsafe {
             // background
             self.device

@@ -47,6 +47,12 @@ impl Camera {
         flip * tf
     }
 
+    pub(crate) fn get_view_rotation(&self) -> Affine3A {
+        let rot = Affine3A::from_quat(self.rotation.conjugate());
+        let flip = Affine3A::from_rotation_x(std::f32::consts::PI);
+        flip * rot
+    }
+
     pub(crate) fn get_projection(&self, aspect: f32) -> Mat4 {
         Mat4::perspective_rh(self.fov.to_radians(), aspect, self.near, self.far)
     }
