@@ -67,6 +67,12 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
                     .descriptor_count(1)
                     .stage_flags(vk::ShaderStageFlags::FRAGMENT)
                     .build(),
+                vk::DescriptorSetLayoutBinding::builder()
+                    .binding(4)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                    .build(),
             ])
             .create(&device)?;
         let push_constants = vk::PushConstantRange {
@@ -98,6 +104,7 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
             .map(|subm| MaterialData {
                 base_color: subm.base_color.into(),
                 base_pbr: Vec4::new(1.0, subm.roughness, subm.metallic, 1.0),
+                emiss_color: Vec3::from_array(subm.emissive).extend(0.0),
             })
             .collect();
         let material_buffer =
@@ -162,6 +169,7 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
             for (i, submesh) in submeshes.iter().enumerate() {
                 let coltex_info = submesh.color_tex.unwrap_or_else(|| engine.default_texture.descriptor());
                 let metrough_info = submesh.metal_rough_tex.unwrap_or_else(|| engine.default_texture.descriptor());
+                let emiss_info = submesh.emiss_tex.unwrap_or_else(|| engine.default_texture.descriptor());
                 self.device.pushdesc_fn.cmd_push_descriptor_set(
                     cmd_buffer,
                     vk::PipelineBindPoint::GRAPHICS,
@@ -177,6 +185,11 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
                             .dst_binding(3)
                             .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                             .image_info(slice::from_ref(&metrough_info))
+                            .build(),
+                        vk::WriteDescriptorSet::builder()
+                            .dst_binding(4)
+                            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                            .image_info(slice::from_ref(&emiss_info))
                             .build(),
                     ],
                 );
@@ -245,8 +258,10 @@ pub struct MeshRenderSlice {
     pub base_color: [f32; 4],
     pub metallic: f32,
     pub roughness: f32,
+    pub emissive: [f32; 3],
     pub color_tex: Option<vk::DescriptorImageInfo>,
     pub metal_rough_tex: Option<vk::DescriptorImageInfo>,
+    pub emiss_tex: Option<vk::DescriptorImageInfo>,
 }
 
 #[repr(C)]
@@ -264,6 +279,7 @@ struct ObjectUniforms {
 struct MaterialData {
     base_color: Vec4,
     base_pbr: Vec4,
+    emiss_color: Vec4,
 }
 
 pub struct SkyboxRenderer {

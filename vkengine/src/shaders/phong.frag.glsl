@@ -10,6 +10,7 @@ layout(binding = 0) uniform ObjectUniforms {
 struct MaterialData {
     vec4 base_color;
     vec4 base_pbr;
+    vec4 emissive;
 };
 layout(std140, binding = 1) readonly buffer MaterialBuffer {
     MaterialData materials[];
@@ -17,6 +18,7 @@ layout(std140, binding = 1) readonly buffer MaterialBuffer {
 
 layout(binding = 2) uniform sampler2D texColor;
 layout(binding = 3) uniform sampler2D texMetalRough;
+layout(binding = 4) uniform sampler2D texEmissive;
 
 layout(push_constant) uniform PushConstants {
     uint mat_id;
@@ -52,6 +54,7 @@ void main() {
     vec4 pbr = materials[mat_id].base_pbr * texture(texMetalRough, fragTexCoord);
     vec3 light_val = ambient + directional_light(light_dir.xyz, normal, view_dir, 1.0 - pbr.g) * light_color.rgb;
     vec3 base_color = materials[mat_id].base_color.rgb * texture(texColor, fragTexCoord).rgb * fragColor;
-    vec3 color = base_color * light_val;
+    vec3 emissive = texture(texEmissive, fragTexCoord).rgb * materials[mat_id].emissive.rgb;
+    vec3 color = base_color * light_val + emissive;
     outColor = vec4(color, 1.0);
 }
