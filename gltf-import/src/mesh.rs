@@ -1,5 +1,6 @@
 use crate::import::BufferData;
 use crate::material::MaterialId;
+use bevy_mikktspace::{generate_tangents, Geometry};
 use gltf::mesh::util::{ReadColors, ReadTexCoords};
 use gltf::mesh::Mode;
 use gltf::Semantic;
@@ -15,6 +16,12 @@ pub struct VertexAttribs {
 
 pub trait VertexStorage: Default {
     fn count(&self) -> usize;
+
+    fn get_position(&self, index: usize) -> [f32; 3];
+
+    fn get_normal(&self, index: usize) -> [f32; 3];
+
+    fn get_texcoord(&self, index: usize, set: u32) -> [f32; 2];
 
     fn set_count(&mut self, new_size: usize);
 
@@ -62,6 +69,22 @@ impl Default for Vertex {
 impl VertexStorage for Vec<Vertex> {
     fn count(&self) -> usize {
         self.len()
+    }
+
+    fn get_position(&self, index: usize) -> [f32; 3] {
+        self[index].position
+    }
+
+    fn get_normal(&self, index: usize) -> [f32; 3] {
+        self[index].normal
+    }
+
+    fn get_texcoord(&self, index: usize, set: u32) -> [f32; 2] {
+        if set == 0 {
+            self[index].texcoord
+        } else {
+            [0.0; 2]
+        }
     }
 
     fn set_count(&mut self, new_count: usize) {
@@ -117,11 +140,18 @@ pub struct Submesh {
     pub material: Option<MaterialId>,
 }
 
+impl Submesh {
+    pub fn range(&self) -> std::ops::Range<usize> {
+        let first = self.index_offset as usize;
+        let last = first + self.index_count as usize;
+        first..last
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct MeshData<V> {
     pub vertices: V,
     pub indices: Vec<u32>,
-    pub attribs: VertexAttribs,
     pub submeshes: Vec<Submesh>,
     pub name: Option<String>,
     pub(crate) vert_offset: usize,
@@ -145,9 +175,7 @@ impl<V: VertexStorage> MeshData<V> {
             .collect()
     }
 
-    pub(crate) fn begin_primitives(
-        &mut self, vert_count: usize, index_count: Option<usize>, attribs: VertexAttribs, mode: Mode, material: Option<MaterialId>,
-    ) {
+    fn begin_primitives(&mut self, vert_count: usize, index_count: Option<usize>, mode: Mode, material: Option<MaterialId>) {
         let vert_offset = self.vertices.count();
         self.vertices.set_count(vert_offset + vert_count);
         self.vert_offset = vert_offset;
@@ -172,7 +200,32 @@ impl<V: VertexStorage> MeshData<V> {
             });
         }
         self.idx_offset = idx_offset;
-        self.attribs = attribs; //FIXME: this could change between submeshes
+    }
+
+    fn end_primitives(&mut self, attribs: VertexAttribs) {
+        if attribs.tangent {
+            return;
+        }
+        if let Some(subm) = self.submeshes.last() {
+            if !attribs.normal {
+                eprintln!("Mesh has missing normals, can't generate tangents");
+                return;
+            }
+            if attribs.texcoord == 0 {
+                eprintln!("Mesh has missing texcoords, can't generate tangents");
+                return;
+            }
+            if subm.mode != Mode::Triangles {
+                eprintln!("Tangent generation is only supported for triangles (got {:?})", subm.mode);
+                return;
+            }
+            let mut wrapper = GeomWrapper {
+                vertices: &mut self.vertices,
+                indices: &self.indices[subm.range()],
+            };
+            eprintln!("Generating tangents for {} faces", wrapper.num_faces());
+            generate_tangents(&mut wrapper);
+        }
     }
 
     fn read_primitive(&mut self, buffers: &[BufferData], prim: &gltf::mesh::Primitive) {
@@ -190,7 +243,7 @@ impl<V: VertexStorage> MeshData<V> {
             vert_count = vert_count.max(accessor.count());
         }
         let idx_count = prim.indices().map(|acc| acc.count());
-        self.begin_primitives(vert_count, idx_count, attribs, prim.mode(), prim.material().index().map(MaterialId));
+        self.begin_primitives(vert_count, idx_count, prim.mode(), prim.material().index().map(MaterialId));
 
         let reader = prim.reader(|buffer| buffers.get(buffer.index()).map(|buf| buf.data.as_slice()));
         if let Some(iter) = reader.read_positions() {
@@ -271,8 +324,40 @@ impl<V: VertexStorage> MeshData<V> {
                 self.indices[i] = index + base;
             }
         }
+        self.end_primitives(attribs);
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MeshId(pub usize);
+
+struct GeomWrapper<'a, V> {
+    vertices: &'a mut V,
+    indices: &'a [u32],
+}
+
+impl<V: VertexStorage> Geometry for GeomWrapper<'_, V> {
+    fn num_faces(&self) -> usize {
+        self.indices.len() / 3
+    }
+
+    fn num_vertices_of_face(&self, _face: usize) -> usize {
+        3
+    }
+
+    fn position(&self, face: usize, vert: usize) -> [f32; 3] {
+        self.vertices.get_position(self.indices[face * 3 + vert] as usize)
+    }
+
+    fn normal(&self, face: usize, vert: usize) -> [f32; 3] {
+        self.vertices.get_normal(self.indices[face * 3 + vert] as usize)
+    }
+
+    fn tex_coord(&self, face: usize, vert: usize) -> [f32; 2] {
+        self.vertices.get_texcoord(self.indices[face * 3 + vert] as usize, 0)
+    }
+
+    fn set_tangent_encoded(&mut self, tangent: [f32; 4], face: usize, vert: usize) {
+        self.vertices.write_tangent(self.indices[face * 3 + vert] as usize, tangent);
+    }
+}
