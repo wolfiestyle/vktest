@@ -69,18 +69,22 @@ impl Default for Vertex {
 }
 
 impl VertexStorage for Vec<Vertex> {
+    #[inline]
     fn count(&self) -> usize {
         self.len()
     }
 
+    #[inline]
     fn get_position(&self, index: usize) -> [f32; 3] {
         self[index].position
     }
 
+    #[inline]
     fn get_normal(&self, index: usize) -> [f32; 3] {
         self[index].normal
     }
 
+    #[inline]
     fn get_texcoord(&self, index: usize, set: u32) -> [f32; 2] {
         if set == 0 {
             self[index].texcoord
@@ -89,46 +93,56 @@ impl VertexStorage for Vec<Vertex> {
         }
     }
 
+    #[inline]
     fn set_count(&mut self, new_count: usize) {
         self.resize_with(new_count, Default::default)
     }
 
+    #[inline]
     fn write_position(&mut self, index: usize, value: [f32; 3]) {
         self[index].position = value;
     }
 
+    #[inline]
     fn write_normal(&mut self, index: usize, value: [f32; 3]) {
         self[index].normal = value;
     }
 
+    #[inline]
     fn write_tangent(&mut self, index: usize, value: [f32; 4]) {
         self[index].tangent = value;
     }
 
+    #[inline]
     fn write_texcoord_f32(&mut self, index: usize, set: u32, value: [f32; 2]) {
         if set == 0 {
             self[index].texcoord = value;
         }
     }
 
+    #[inline]
     fn write_texcoord_u8(&mut self, index: usize, set: u32, value: [u8; 2]) {
         self.write_texcoord_f32(index, set, value.map(|n| n as f32 / 255.0))
     }
 
+    #[inline]
     fn write_texcoord_u16(&mut self, index: usize, set: u32, value: [u16; 2]) {
         self.write_texcoord_f32(index, set, value.map(|n| n as f32 / 65535.0))
     }
 
+    #[inline]
     fn write_color_f32(&mut self, index: usize, set: u32, value: [f32; 4]) {
         if set == 0 {
             self[index].color = value;
         }
     }
 
+    #[inline]
     fn write_color_u8(&mut self, index: usize, set: u32, value: [u8; 4]) {
         self.write_color_f32(index, set, value.map(|n| n as f32 / 255.0))
     }
 
+    #[inline]
     fn write_color_u16(&mut self, index: usize, set: u32, value: [u16; 4]) {
         self.write_color_f32(index, set, value.map(|n| n as f32 / 65535.0))
     }
