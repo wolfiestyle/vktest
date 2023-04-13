@@ -90,6 +90,7 @@ fn main() -> VulkanResult<()> {
                             MeshRenderSlice {
                                 index_offset: submesh.index_offset,
                                 index_count: submesh.index_count,
+                                vertex_offset: submesh.vertex_offset,
                                 base_color: material.base_color,
                                 metallic: material.metallic,
                                 roughness: material.roughness,

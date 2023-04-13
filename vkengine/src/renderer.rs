@@ -213,8 +213,14 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
                     0,
                     bytemuck::bytes_of(&mat_id),
                 );
-                self.device
-                    .cmd_draw_indexed(cmd_buffer, submesh.index_count, 1, submesh.index_offset, 0, 0);
+                self.device.cmd_draw_indexed(
+                    cmd_buffer,
+                    submesh.index_count,
+                    1,
+                    submesh.index_offset,
+                    submesh.vertex_offset as _,
+                    0,
+                );
             }
 
             self.device.debug(|d| d.cmd_end_label(cmd_buffer));
@@ -266,6 +272,7 @@ impl<V, I> Drop for MeshRenderer<V, I> {
 pub struct MeshRenderSlice {
     pub index_offset: u32,
     pub index_count: u32,
+    pub vertex_offset: u32,
     pub base_color: [f32; 4],
     pub metallic: f32,
     pub roughness: f32,

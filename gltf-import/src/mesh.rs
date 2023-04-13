@@ -1,9 +1,11 @@
 use crate::import::BufferData;
 use crate::material::MaterialId;
 use bevy_mikktspace::{generate_tangents, Geometry};
+use glam::Vec3A;
 use gltf::mesh::util::{ReadColors, ReadTexCoords};
 use gltf::mesh::Mode;
 use gltf::Semantic;
+use std::ops::Range;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct VertexAttribs {
@@ -136,14 +138,22 @@ impl VertexStorage for Vec<Vertex> {
 pub struct Submesh {
     pub index_offset: u32,
     pub index_count: u32,
+    pub vertex_offset: u32,
+    pub vertex_count: u32,
     pub mode: Mode,
     pub material: Option<MaterialId>,
 }
 
 impl Submesh {
-    pub fn range(&self) -> std::ops::Range<usize> {
+    pub fn index_range(&self) -> Range<usize> {
         let first = self.index_offset as usize;
         let last = first + self.index_count as usize;
+        first..last
+    }
+
+    pub fn vertex_range(&self) -> Range<usize> {
+        let first = self.vertex_offset as usize;
+        let last = first + self.vertex_count as usize;
         first..last
     }
 }
@@ -185,16 +195,18 @@ impl<V: VertexStorage> MeshData<V> {
             self.submeshes.push(Submesh {
                 index_offset: idx_offset as u32,
                 index_count: idx_count as u32,
+                vertex_offset: vert_offset as u32,
+                vertex_count: vert_count as u32,
                 mode,
                 material,
             });
         } else {
-            let first = vert_offset as u32;
-            let last = first + vert_count as u32;
-            self.indices.extend(first..last);
+            self.indices.extend(0..vert_count as u32);
             self.submeshes.push(Submesh {
                 index_offset: idx_offset as u32,
                 index_count: vert_count as u32,
+                vertex_offset: vert_offset as u32,
+                vertex_count: vert_count as u32,
                 mode,
                 material,
             });
@@ -203,28 +215,29 @@ impl<V: VertexStorage> MeshData<V> {
     }
 
     fn end_primitives(&mut self, attribs: VertexAttribs) {
-        if attribs.tangent {
-            return;
-        }
         if let Some(subm) = self.submeshes.last() {
-            if !attribs.normal {
-                eprintln!("Mesh has missing normals, can't generate tangents");
-                return;
-            }
-            if attribs.texcoord == 0 {
-                eprintln!("Mesh has missing texcoords, can't generate tangents");
-                return;
-            }
             if subm.mode != Mode::Triangles {
-                eprintln!("Tangent generation is only supported for triangles (got {:?})", subm.mode);
+                eprintln!("normal/tangent generation is only supported for triangles (got {:?})", subm.mode);
                 return;
             }
             let mut wrapper = GeomWrapper {
                 vertices: &mut self.vertices,
-                indices: &self.indices[subm.range()],
+                indices: &self.indices[subm.index_range()],
+                vert_offset: subm.vertex_offset as usize,
+                vert_count: subm.vertex_count as usize,
             };
-            eprintln!("Generating tangents for {} faces", wrapper.num_faces());
-            generate_tangents(&mut wrapper);
+            if !attribs.normal {
+                eprintln!("Generating normals for {} faces", wrapper.num_faces());
+                wrapper.generate_normals();
+            }
+            if !attribs.tangent {
+                if attribs.texcoord == 0 {
+                    eprintln!("Mesh has missing texcoords, can't generate tangents");
+                    return;
+                }
+                eprintln!("Generating tangents for {} faces", wrapper.num_faces());
+                generate_tangents(&mut wrapper);
+            }
         }
     }
 
@@ -319,9 +332,8 @@ impl<V: VertexStorage> MeshData<V> {
             }
         }
         if let Some(iter) = reader.read_indices() {
-            let base = self.vert_offset as u32;
             for (index, i) in iter.into_u32().zip(self.idx_offset..) {
-                self.indices[i] = index + base;
+                self.indices[i] = index;
             }
         }
         self.end_primitives(attribs);
@@ -334,6 +346,8 @@ pub struct MeshId(pub usize);
 struct GeomWrapper<'a, V> {
     vertices: &'a mut V,
     indices: &'a [u32],
+    vert_offset: usize,
+    vert_count: usize,
 }
 
 impl<V: VertexStorage> Geometry for GeomWrapper<'_, V> {
@@ -359,5 +373,27 @@ impl<V: VertexStorage> Geometry for GeomWrapper<'_, V> {
 
     fn set_tangent_encoded(&mut self, tangent: [f32; 4], face: usize, vert: usize) {
         self.vertices.write_tangent(self.indices[face * 3 + vert] as usize, tangent);
+    }
+}
+
+impl<V: VertexStorage> GeomWrapper<'_, V> {
+    fn generate_normals(&mut self) {
+        let mut normals = vec![Vec3A::ZERO; self.vert_count];
+        for i in (0..self.indices.len()).step_by(3) {
+            let ia = self.indices[i] as usize;
+            let ib = self.indices[i + 1] as usize;
+            let ic = self.indices[i + 2] as usize;
+            let posa = Vec3A::from_array(self.vertices.get_position(ia + self.vert_offset));
+            let posb = Vec3A::from_array(self.vertices.get_position(ib + self.vert_offset));
+            let posc = Vec3A::from_array(self.vertices.get_position(ic + self.vert_offset));
+            let normal = (posb - posa).cross(posc - posa);
+            normals[ia] += normal;
+            normals[ib] += normal;
+            normals[ic] += normal;
+        }
+        for (i, normal) in normals.iter().enumerate() {
+            self.vertices
+                .write_normal(i + self.vert_offset, normal.normalize_or_zero().to_array());
+        }
     }
 }
