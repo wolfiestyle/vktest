@@ -37,8 +37,8 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
 
         let shader = Shader::new(
             &device,
-            include_spirv!("src/shaders/phong.vert.glsl", vert, glsl),
-            include_spirv!("src/shaders/phong.frag.glsl", frag, glsl),
+            include_spirv!("src/shaders/pbr.vert.glsl", vert, glsl),
+            include_spirv!("src/shaders/pbr.frag.glsl", frag, glsl),
         )?;
         let desc_layout = vk::DescriptorSetLayoutCreateInfo::builder()
             .flags(vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR)
@@ -75,6 +75,12 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
                     .build(),
                 vk::DescriptorSetLayoutBinding::builder()
                     .binding(5)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                    .build(),
+                vk::DescriptorSetLayoutBinding::builder()
+                    .binding(6)
                     .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                     .descriptor_count(1)
                     .stage_flags(vk::ShaderStageFlags::FRAGMENT)
@@ -175,8 +181,9 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
             for (i, submesh) in submeshes.iter().enumerate() {
                 let coltex_info = submesh.color_tex.unwrap_or_else(|| engine.default_texture.descriptor());
                 let metrough_info = submesh.metal_rough_tex.unwrap_or_else(|| engine.default_texture.descriptor());
-                let emiss_info = submesh.emiss_tex.unwrap_or_else(|| engine.default_texture.descriptor());
                 let normal_info = submesh.normal_tex.unwrap_or_else(|| engine.default_normalmap.descriptor());
+                let emiss_info = submesh.emiss_tex.unwrap_or_else(|| engine.default_texture.descriptor());
+                let occl_info = submesh.occlusion_tex.unwrap_or_else(|| engine.default_texture.descriptor());
                 self.device.pushdesc_fn.cmd_push_descriptor_set(
                     cmd_buffer,
                     vk::PipelineBindPoint::GRAPHICS,
@@ -196,12 +203,17 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
                         vk::WriteDescriptorSet::builder()
                             .dst_binding(4)
                             .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                            .image_info(slice::from_ref(&emiss_info))
+                            .image_info(slice::from_ref(&normal_info))
                             .build(),
                         vk::WriteDescriptorSet::builder()
                             .dst_binding(5)
                             .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                            .image_info(slice::from_ref(&normal_info))
+                            .image_info(slice::from_ref(&emiss_info))
+                            .build(),
+                        vk::WriteDescriptorSet::builder()
+                            .dst_binding(6)
+                            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                            .image_info(slice::from_ref(&occl_info))
                             .build(),
                     ],
                 );
@@ -230,12 +242,13 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
     }
 
     fn calc_uniforms(&self, engine: &VulkanEngine) -> ObjectUniforms {
+        let ambient = Vec3::splat(0.03);
         ObjectUniforms {
             mvp: engine.view_proj * self.model,
             model: self.model.into(),
-            light_dir: engine.sunlight.extend(0.1),
-            light_color: Vec3::ONE.extend(0.1),
-            view_pos: engine.camera.position.extend(0.1),
+            light_dir: engine.sunlight.extend(ambient.x),
+            light_color: Vec3::splat(2.0).extend(ambient.y),
+            view_pos: engine.camera.position.extend(ambient.z),
         }
     }
 
@@ -282,6 +295,7 @@ pub struct MeshRenderSlice {
     pub metal_rough_tex: Option<vk::DescriptorImageInfo>,
     pub emiss_tex: Option<vk::DescriptorImageInfo>,
     pub normal_tex: Option<vk::DescriptorImageInfo>,
+    pub occlusion_tex: Option<vk::DescriptorImageInfo>,
 }
 
 #[repr(C)]
