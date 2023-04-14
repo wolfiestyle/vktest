@@ -89,7 +89,8 @@ void main() {
     vec3 albedo = texture(texColor, frag.TexCoord).rgb * materials[mat_id].base_color.rgb * frag.Color;
     vec2 metalrough = texture(texMetalRough, frag.TexCoord).bg * materials[mat_id].base_pbr.bg;
     vec3 normal_map = texture(texNormal, frag.TexCoord).rgb * 2.0 - 1.0;
-    vec3 normal = normalize(frag.TBN * normal_map) * materials[mat_id].emissive.a;
+    vec3 normal_scale = vec3(vec2(materials[mat_id].emissive.a), 1.0);
+    vec3 normal = normalize(frag.TBN * normal_map * normal_scale);
     float occlusion = (texture(texOcclusion, frag.TexCoord).r - 1.0) * materials[mat_id].base_pbr.r + 1.0;
     vec3 ambient = light_color.a * occlusion * albedo;
     vec3 direct = direct_light(light, light_color.rgb, normal, albedo, metalrough);
