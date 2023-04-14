@@ -90,7 +90,7 @@ void main() {
     vec2 metalrough = texture(texMetalRough, frag.TexCoord).bg * materials[mat_id].base_pbr.bg;
     vec3 normal_map = texture(texNormal, frag.TexCoord).rgb * 2.0 - 1.0;
     vec3 normal = normalize(frag.TBN * normal_map) * materials[mat_id].emissive.a;
-    vec3 ambient = vec3(0.03) * texture(texOcclusion, frag.TexCoord).r * albedo;
+    vec3 ambient = vec3(light_color.a) * texture(texOcclusion, frag.TexCoord).r * albedo;
     vec3 direct = direct_light(light_dir.xyz, light_color.rgb, normal, albedo, metalrough);
     vec3 emissive = texture(texEmissive, frag.TexCoord).rgb * materials[mat_id].emissive.rgb;
     vec3 color = ambient + direct + emissive;

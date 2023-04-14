@@ -242,13 +242,13 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
     }
 
     fn calc_uniforms(&self, engine: &VulkanEngine) -> ObjectUniforms {
-        let ambient = Vec3::splat(0.03);
+        let ambient = 0.1;
         ObjectUniforms {
             mvp: engine.view_proj * self.model,
             model: self.model.into(),
-            light_dir: engine.sunlight.extend(ambient.x),
-            light_color: Vec3::splat(2.0).extend(ambient.y),
-            view_pos: engine.camera.position.extend(ambient.z),
+            light_dir: engine.sunlight.extend(0.0),
+            light_color: Vec3::splat(3.0).extend(ambient),
+            view_pos: engine.camera.position.extend(1.0),
         }
     }
 
