@@ -136,6 +136,8 @@ fn main() -> VulkanResult<()> {
     let mut fullscreen = false;
     let mut msaa_samples = vk_app.get_msaa_samples();
     let mut vsync = vk_app.is_vsync_on();
+    let mut light = -vk_app.light;
+    let mut light_directional = true;
 
     event_loop.run(move |event, _, control_flow| match event {
         Event::WindowEvent { event, .. } => {
@@ -196,7 +198,7 @@ fn main() -> VulkanResult<()> {
                                     }
                                 }
                             });
-                        ui.toggle_value(&mut vsync, "VSync");
+                        ui.checkbox(&mut vsync, "VSync");
                         ui.add_space(10.0);
                         egui::ComboBox::from_label("Scene")
                             .selected_text(format!("Scene {cur_scene}"))
@@ -220,20 +222,16 @@ fn main() -> VulkanResult<()> {
                             ui.add(egui::Slider::new(&mut vk_app.camera.fov, 10.0..=120.0));
                         });
                         ui.add_space(10.0);
-                        ui.label("Sunlight:");
+                        ui.label("Light:");
                         ui.horizontal(|ui| {
                             ui.label("X");
-                            ui.add(egui::DragValue::new(&mut vk_app.sunlight.x).speed(0.1));
+                            ui.add(egui::DragValue::new(&mut light.x).speed(0.1));
                             ui.label("Y");
-                            ui.add(egui::DragValue::new(&mut vk_app.sunlight.y).speed(0.1));
+                            ui.add(egui::DragValue::new(&mut light.y).speed(0.1));
                             ui.label("Z");
-                            ui.add(egui::DragValue::new(&mut vk_app.sunlight.z).speed(0.1));
+                            ui.add(egui::DragValue::new(&mut light.z).speed(0.1));
                         });
-                        if ui.button("Normalize").clicked() {
-                            if let Some(v) = vk_app.sunlight.try_normalize() {
-                                vk_app.sunlight = v;
-                            }
-                        }
+                        ui.checkbox(&mut light_directional, "Directional");
                         ui.add_space(10.0);
                         ui.collapsing(format!("{} Meshes", mesh_enabled[cur_scene].len()), |ui| {
                             for (i, enable) in mesh_enabled[cur_scene].iter_mut().enumerate() {
@@ -264,6 +262,14 @@ fn main() -> VulkanResult<()> {
             if vsync != vk_app.is_vsync_on() {
                 vk_app.set_vsync(vsync).unwrap();
             }
+
+            if light_directional {
+                light.w = 0.0;
+                vk_app.light = -light;
+            } else {
+                light.w = 1.0;
+                vk_app.light = light;
+            };
 
             window.request_redraw();
         }

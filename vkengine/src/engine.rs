@@ -5,7 +5,7 @@ use crate::instance::DeviceSelection;
 use crate::swapchain::Swapchain;
 use crate::types::*;
 use ash::vk;
-use glam::{Mat4, UVec2, Vec3};
+use glam::{Mat4, UVec2, Vec4};
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use std::collections::HashMap;
 use std::slice;
@@ -36,7 +36,7 @@ pub struct VulkanEngine {
     pub camera: Camera,
     pub projection: Mat4,
     pub view_proj: Mat4,
-    pub sunlight: Vec3,
+    pub light: Vec4,
 }
 
 impl VulkanEngine {
@@ -98,7 +98,7 @@ impl VulkanEngine {
             camera,
             projection: Mat4::IDENTITY,
             view_proj: Mat4::IDENTITY,
-            sunlight: Vec3::NEG_Y,
+            light: Vec4::Y,
         };
 
         let sampler = this.get_sampler(

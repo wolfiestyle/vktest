@@ -2,7 +2,7 @@
 layout(binding = 0) uniform ObjectUniforms {
     mat4 mvp;
     mat4 model;
-    vec4 light_dir;
+    vec4 light;
     vec4 light_color;
     vec4 view_pos;
 };
@@ -62,13 +62,13 @@ vec3 fresnel_schlick(float cosTheta, vec3 F0) {
     return F0 + (1.0 - F0) * pow(1.0 - cosTheta, 5.0);
 }
 
-vec3 direct_light(vec3 light_dir, vec3 light_color, vec3 N, vec3 albedo, vec2 metalrough) {
+vec3 direct_light(vec4 light, vec3 light_color, vec3 N, vec3 albedo, vec2 metalrough) {
     vec3 V = normalize(view_pos.xyz - frag.Pos);
-    vec3 L = normalize(-light_dir); // light_pos - frag.Pos
+    vec3 dir = light.xyz - frag.Pos * light.w;
+    vec3 L = normalize(dir);
     vec3 H = normalize(V + L);
-    //float distance = length(light_pos - frag.Pos);
-    //float attenuation = 1.0 / (distance * distance);
-    vec3 radiance = light_color; // * attenuation
+    float attenuation = mix(1.0, dot(dir, dir), light.w);
+    vec3 radiance = light_color / attenuation;
 
     vec3 F0 = mix(Fdielectric, albedo, metalrough.r);
     float NdotH = max(dot(N, H), 0.0);
@@ -91,7 +91,7 @@ void main() {
     vec3 normal_map = texture(texNormal, frag.TexCoord).rgb * 2.0 - 1.0;
     vec3 normal = normalize(frag.TBN * normal_map) * materials[mat_id].emissive.a;
     vec3 ambient = vec3(light_color.a) * texture(texOcclusion, frag.TexCoord).r * albedo;
-    vec3 direct = direct_light(light_dir.xyz, light_color.rgb, normal, albedo, metalrough);
+    vec3 direct = direct_light(light, light_color.rgb, normal, albedo, metalrough);
     vec3 emissive = texture(texEmissive, frag.TexCoord).rgb * materials[mat_id].emissive.rgb;
     vec3 color = ambient + direct + emissive;
     outColor = vec4(color, 1.0);

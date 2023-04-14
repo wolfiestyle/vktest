@@ -246,7 +246,7 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
         ObjectUniforms {
             mvp: engine.view_proj * self.model,
             model: self.model.into(),
-            light_dir: engine.sunlight.extend(0.0),
+            light: engine.light,
             light_color: Vec3::splat(3.0).extend(ambient),
             view_pos: engine.camera.position.extend(1.0),
         }
@@ -303,7 +303,7 @@ pub struct MeshRenderSlice {
 struct ObjectUniforms {
     mvp: Mat4,
     model: Mat4,
-    light_dir: Vec4,
+    light: Vec4,
     light_color: Vec4,
     view_pos: Vec4,
 }

@@ -2,7 +2,7 @@
 layout(binding = 0) uniform ObjectUniforms {
     mat4 mvp;
     mat4 model;
-    vec4 light_dir;
+    vec4 light;
     vec4 light_color;
     vec4 view_pos;
 };
