@@ -387,7 +387,12 @@ impl SurfaceInfo {
             .expect("Empty surface formats")
     }
 
-    pub fn find_present_mode(&self, wanted: vk::PresentModeKHR) -> vk::PresentModeKHR {
+    pub fn find_present_mode(&self, vsync: bool) -> vk::PresentModeKHR {
+        let wanted = if vsync {
+            vk::PresentModeKHR::FIFO_RELAXED
+        } else {
+            vk::PresentModeKHR::IMMEDIATE
+        };
         self.present_modes
             .iter()
             .cloned()

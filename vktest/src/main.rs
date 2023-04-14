@@ -135,6 +135,7 @@ fn main() -> VulkanResult<()> {
 
     let mut fullscreen = false;
     let mut msaa_samples = vk_app.get_msaa_samples();
+    let mut vsync = vk_app.is_vsync_on();
 
     event_loop.run(move |event, _, control_flow| match event {
         Event::WindowEvent { event, .. } => {
@@ -195,6 +196,7 @@ fn main() -> VulkanResult<()> {
                                     }
                                 }
                             });
+                        ui.toggle_value(&mut vsync, "VSync");
                         ui.add_space(10.0);
                         egui::ComboBox::from_label("Scene")
                             .selected_text(format!("Scene {cur_scene}"))
@@ -257,6 +259,10 @@ fn main() -> VulkanResult<()> {
 
                 skybox.rebuild_pipeline(&vk_app).unwrap();
                 gui.rebuild_pipeline(&vk_app).unwrap();
+            }
+
+            if vsync != vk_app.is_vsync_on() {
+                vk_app.set_vsync(vsync).unwrap();
             }
 
             window.request_redraw();

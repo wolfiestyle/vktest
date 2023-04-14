@@ -18,6 +18,7 @@ pub struct Swapchain {
     pub depth_image: Option<VkImage>,
     pub depth_imgview: Option<vk::ImageView>,
     pub depth_format: vk::Format,
+    pub vsync: bool,
 }
 
 impl Swapchain {
@@ -30,16 +31,16 @@ impl Swapchain {
     };
 
     pub fn new(
-        device: &VulkanDevice, win_size: UVec2, image_count: u32, depth_format: vk::Format, samples: vk::SampleCountFlags,
+        device: &VulkanDevice, win_size: UVec2, image_count: u32, depth_format: vk::Format, samples: vk::SampleCountFlags, vsync: bool,
     ) -> VulkanResult<Self> {
-        let mut swapchain = Swapchain::create(device, win_size.x, win_size.y, image_count, vk::SwapchainKHR::null())?;
+        let mut swapchain = Swapchain::create(device, win_size.x, win_size.y, image_count, vsync, vk::SwapchainKHR::null())?;
         swapchain.create_msaa_attachment(device, samples)?;
         swapchain.create_depth_attachment(device, depth_format)?;
         Ok(swapchain)
     }
 
     pub fn recreate(&mut self, device: &VulkanDevice, win_size: UVec2) -> VulkanResult<()> {
-        let mut swapchain = Swapchain::create(device, win_size.x, win_size.y, self.images.len() as _, self.handle)?;
+        let mut swapchain = Swapchain::create(device, win_size.x, win_size.y, self.images.len() as _, self.vsync, self.handle)?;
         swapchain.create_msaa_attachment(device, self.samples)?;
         swapchain.create_depth_attachment(device, self.depth_format)?;
         let old_swapchain = std::mem::replace(self, swapchain);
@@ -48,10 +49,13 @@ impl Swapchain {
         Ok(())
     }
 
-    fn create(device: &VulkanDevice, width: u32, height: u32, image_count: u32, old_swapchain: vk::SwapchainKHR) -> VulkanResult<Self> {
+    fn create(
+        device: &VulkanDevice, width: u32, height: u32, image_count: u32, vsync: bool, old_swapchain: vk::SwapchainKHR,
+    ) -> VulkanResult<Self> {
         let surface_info = device.instance.query_surface_info(device.dev_info.phys_dev, device.surface)?;
         let surface_format = surface_info.find_surface_format();
-        let present_mode = surface_info.find_present_mode(vk::PresentModeKHR::IMMEDIATE);
+        let present_mode = surface_info.find_present_mode(vsync);
+        eprintln!("present mode: {present_mode:?}");
         let extent = surface_info.calc_extent(width, height);
         let img_count = surface_info.calc_image_count(image_count);
         let img_sharing_mode = if device.dev_info.unique_families.len() > 1 {
@@ -114,6 +118,7 @@ impl Swapchain {
             depth_image: None,
             depth_imgview: None,
             depth_format: vk::Format::UNDEFINED,
+            vsync,
         })
     }
 

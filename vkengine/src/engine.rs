@@ -46,7 +46,7 @@ impl VulkanEngine {
         let depth_format = device.find_depth_format(false)?;
         let msaa_samples = device.dev_info.get_max_samples();
         let window_size = window.window_size().into();
-        let swapchain = Swapchain::new(&device, window_size, SWAPCHAIN_IMAGE_COUNT, depth_format, msaa_samples)?;
+        let swapchain = Swapchain::new(&device, window_size, SWAPCHAIN_IMAGE_COUNT, depth_format, msaa_samples, true)?;
         eprintln!("color_format: {:?}, depth_format: {depth_format:?}", swapchain.format);
 
         let main_cmd_buffers = CmdBufferRing::new_with_level(&device, vk::CommandBufferLevel::PRIMARY)?;
@@ -144,6 +144,19 @@ impl VulkanEngine {
         }
         if samples != self.swapchain.samples {
             self.swapchain.samples = samples;
+            self.swapchain.recreate(&self.device, self.window_size)?;
+        }
+        Ok(())
+    }
+
+    #[inline]
+    pub fn is_vsync_on(&self) -> bool {
+        self.swapchain.vsync
+    }
+
+    pub fn set_vsync(&mut self, vsync: bool) -> VulkanResult<()> {
+        if vsync != self.swapchain.vsync {
+            self.swapchain.vsync = vsync;
             self.swapchain.recreate(&self.device, self.window_size)?;
         }
         Ok(())
