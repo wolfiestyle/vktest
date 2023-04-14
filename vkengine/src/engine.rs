@@ -30,6 +30,8 @@ pub struct VulkanEngine {
     pub(crate) pipeline_cache: vk::PipelineCache,
     prev_frame_time: Instant,
     last_frame_time: Instant,
+    cpu_time_start: Instant,
+    cpu_time: Duration,
     gpu_time: u64,
     pub camera: Camera,
     pub projection: Mat4,
@@ -90,6 +92,8 @@ impl VulkanEngine {
             pipeline_cache,
             prev_frame_time: now,
             last_frame_time: now,
+            cpu_time_start: now,
+            cpu_time: Default::default(),
             gpu_time: 0,
             camera,
             projection: Mat4::IDENTITY,
@@ -175,6 +179,11 @@ impl VulkanEngine {
     #[inline]
     pub fn get_current_frame(&self) -> u64 {
         self.current_frame
+    }
+
+    #[inline]
+    pub fn get_cpu_time(&self) -> Duration {
+        self.cpu_time
     }
 
     pub fn get_gpu_time(&self) -> Duration {
@@ -269,8 +278,6 @@ impl VulkanEngine {
                 .begin_command_buffer(cmd_buffer, &begin_info)
                 .describe_err("Failed to begin recording command buffer")?;
             self.device.cmd_reset_query_pool(cmd_buffer, frame.time_query, 0, 2);
-            self.device
-                .cmd_write_timestamp(cmd_buffer, vk::PipelineStageFlags::TOP_OF_PIPE, frame.time_query, 0);
         }
 
         let color_attach = if let Some(msaa_imgview) = self.swapchain.msaa_imgview {
@@ -336,11 +343,15 @@ impl VulkanEngine {
             );
         }
         unsafe {
+            self.device
+                .cmd_write_timestamp(cmd_buffer, vk::PipelineStageFlags::BOTTOM_OF_PIPE, frame.time_query, 0);
             self.device.dynrender_fn.cmd_begin_rendering(cmd_buffer, &render_info);
             for cmdbuf in draw_cmds {
                 self.device.cmd_execute_commands(cmd_buffer, slice::from_ref(&cmdbuf.cmd_buffer));
             }
             self.device.dynrender_fn.cmd_end_rendering(cmd_buffer);
+            self.device
+                .cmd_write_timestamp(cmd_buffer, vk::PipelineStageFlags::BOTTOM_OF_PIPE, frame.time_query, 1);
             self.device.transition_image_layout(
                 cmd_buffer,
                 self.swapchain.images[image_idx],
@@ -348,8 +359,6 @@ impl VulkanEngine {
                 vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
                 vk::ImageLayout::PRESENT_SRC_KHR,
             );
-            self.device
-                .cmd_write_timestamp(cmd_buffer, vk::PipelineStageFlags::BOTTOM_OF_PIPE, frame.time_query, 1);
             self.device
                 .end_command_buffer(cmd_buffer)
                 .describe_err("Failed to end recording command buffer")?;
@@ -384,6 +393,7 @@ impl VulkanEngine {
     }
 
     pub fn update(&mut self) {
+        self.cpu_time_start = Instant::now();
         let view = self.camera.get_view_transform();
         self.projection = self.camera.get_projection(self.swapchain.aspect());
         self.view_proj = self.projection * view;
@@ -396,6 +406,8 @@ impl VulkanEngine {
         let render_finish_sem = frame.render_finished_sem;
         let in_flight_sem = frame.in_flight_sem;
         let command_buffer = self.main_cmd_buffers[self.current_frame];
+        // we have to sample time here so presentation doesn't get in the way
+        self.cpu_time = Instant::now() - self.cpu_time_start;
 
         // the swapchain image id is available before it's actually ready to use
         let image_idx = unsafe {
