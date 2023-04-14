@@ -115,7 +115,7 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
             .iter()
             .map(|subm| MaterialData {
                 base_color: subm.base_color.into(),
-                base_pbr: Vec4::new(1.0, subm.roughness, subm.metallic, 1.0),
+                base_pbr: Vec4::new(subm.occlusion_str, subm.roughness, subm.metallic, 1.0),
                 emiss_color: Vec3::from_array(subm.emissive).extend(subm.normal_scale),
             })
             .collect();
@@ -291,6 +291,7 @@ pub struct MeshRenderSlice {
     pub roughness: f32,
     pub emissive: [f32; 3],
     pub normal_scale: f32,
+    pub occlusion_str: f32,
     pub color_tex: Option<vk::DescriptorImageInfo>,
     pub metal_rough_tex: Option<vk::DescriptorImageInfo>,
     pub emiss_tex: Option<vk::DescriptorImageInfo>,

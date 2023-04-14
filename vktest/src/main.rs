@@ -97,6 +97,7 @@ fn main() -> VulkanResult<()> {
                                 roughness: material.roughness,
                                 emissive: material.emissive,
                                 normal_scale: material.normal_scale,
+                                occlusion_str: material.occlusion_strength,
                                 color_tex,
                                 metal_rough_tex,
                                 normal_tex,
