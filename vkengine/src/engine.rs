@@ -28,6 +28,7 @@ pub struct VulkanEngine {
     pub(crate) default_texture: Texture,
     pub(crate) default_normalmap: Texture,
     pub(crate) pipeline_cache: vk::PipelineCache,
+    pub image_desc_layout: vk::DescriptorSetLayout,
     prev_frame_time: Instant,
     last_frame_time: Instant,
     cpu_time_start: Instant,
@@ -75,6 +76,41 @@ impl VulkanEngine {
 
         let pipeline_cache = vk::PipelineCacheCreateInfo::builder().create(&device)?; //TODO: save/load cache data
 
+        let image_desc_layout = vk::DescriptorSetLayoutCreateInfo::builder()
+            .bindings(&[
+                vk::DescriptorSetLayoutBinding::builder()
+                    .binding(0)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                    .build(),
+                vk::DescriptorSetLayoutBinding::builder()
+                    .binding(1)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                    .build(),
+                vk::DescriptorSetLayoutBinding::builder()
+                    .binding(2)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                    .build(),
+                vk::DescriptorSetLayoutBinding::builder()
+                    .binding(3)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                    .build(),
+                vk::DescriptorSetLayoutBinding::builder()
+                    .binding(4)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                    .build(),
+            ])
+            .create(&device)?;
+
         let camera = Camera::default();
         let now = Instant::now();
 
@@ -90,6 +126,7 @@ impl VulkanEngine {
             default_normalmap,
             samplers: Default::default(),
             pipeline_cache,
+            image_desc_layout,
             prev_frame_time: now,
             last_frame_time: now,
             cpu_time_start: now,
@@ -269,9 +306,7 @@ impl VulkanEngine {
         )
     }
 
-    pub fn create_resources_for_model(
-        &self, gltf: &gltf_import::Gltf, image_desc_layout: vk::DescriptorSetLayout,
-    ) -> VulkanResult<ModelResources> {
+    pub fn create_resources_for_model(&self, gltf: &gltf_import::Gltf) -> VulkanResult<ModelResources> {
         let textures = gltf
             .textures
             .iter()
@@ -289,7 +324,7 @@ impl VulkanEngine {
             .create(&self.device)?;
         let material_desc = vk::DescriptorSetAllocateInfo::builder()
             .descriptor_pool(desc_pool)
-            .set_layouts(&vec![image_desc_layout; count as usize])
+            .set_layouts(&vec![self.image_desc_layout; count as usize])
             .create(&self.device)?;
 
         let default_material = material_desc[0];
@@ -627,6 +662,7 @@ impl Drop for VulkanEngine {
             self.default_texture.cleanup(&self.device);
             self.default_normalmap.cleanup(&self.device);
             self.device.destroy_pipeline_cache(self.pipeline_cache, None);
+            self.image_desc_layout.cleanup(&self.device);
         }
     }
 }

@@ -62,6 +62,8 @@ fn main() -> VulkanResult<()> {
 
     let mut vk_app = VulkanEngine::new(&window, "vulkan test", Default::default())?;
 
+    let mut resources = ManuallyDrop::new(vk_app.create_resources_for_model(&gltf).unwrap());
+
     let mut scenes = gltf
         .scenes
         .iter()
@@ -76,7 +78,7 @@ fn main() -> VulkanResult<()> {
                         .map(|submesh| {
                             let material = submesh.material.map(|mat| &gltf[mat]).unwrap_or(&Material::DEFAULT);
                             let desc_id = submesh.material.map(|mat| mat.0 + 1).unwrap_or_default();
-                            MeshRenderData::from_gltf(submesh, material, desc_id)
+                            MeshRenderData::from_gltf(submesh, material, resources.material_desc[desc_id])
                         })
                         .collect();
                     let renderer = MeshRenderer::new(&vk_app, &mesh.vertices, &mesh.indices, node.transform).unwrap();
@@ -85,12 +87,6 @@ fn main() -> VulkanResult<()> {
                 .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
-
-    let mut resources = ManuallyDrop::new(
-        vk_app
-            .create_resources_for_model(&gltf, scenes[0][0].renderer.image_desc_layout) //FIXME: move layout out
-            .unwrap(),
-    );
 
     let mut mesh_enabled: Vec<Vec<_>> = scenes.iter().map(|meshes| vec![true; meshes.len()]).collect();
     let mut cur_scene = 0;
@@ -266,7 +262,7 @@ fn main() -> VulkanResult<()> {
                 for (i, (obj, draw_ret)) in mesh_chunks.zip(ret_chunks).enumerate() {
                     if mesh_enabled[cur_scene][i] {
                         scope.execute(|| {
-                            draw_ret[0] = obj[0].renderer.render(&vk_app, &obj[0].slices, &resources.material_desc);
+                            draw_ret[0] = obj[0].renderer.render(&vk_app, &obj[0].slices);
                         });
                     }
                 }
