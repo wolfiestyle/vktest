@@ -7,29 +7,24 @@ layout(binding = 0) uniform ObjectUniforms {
     vec4 view_pos;
 };
 
-struct MaterialData {
-    vec4 base_color;
-    vec4 base_pbr;
-    vec4 emissive;
-};
-layout(std140, binding = 1) readonly buffer MaterialBuffer {
-    MaterialData materials[];
-};
-
-layout(binding = 2) uniform sampler2D texColor;
-layout(binding = 3) uniform sampler2D texMetalRough;
-layout(binding = 4) uniform sampler2D texNormal;
-layout(binding = 5) uniform sampler2D texEmissive;
-layout(binding = 6) uniform sampler2D texOcclusion;
+layout(binding = 1) uniform sampler2D texColor;
+layout(binding = 2) uniform sampler2D texMetalRough;
+layout(binding = 3) uniform sampler2D texNormal;
+layout(binding = 4) uniform sampler2D texEmissive;
+layout(binding = 5) uniform sampler2D texOcclusion;
 
 layout(push_constant) uniform PushConstants {
-    uint mat_id;
-};
+    vec4 base_color;
+    vec3 base_pbr;
+    float normal_scale;
+    vec3 emissive;
+    float unused0;
+} material;
 
 layout(location = 0) in FragIn {
     vec3 Pos;
     vec2 TexCoord;
-    vec3 Color;
+    vec4 Color;
     mat3 TBN;
 } frag;
 
@@ -86,15 +81,14 @@ vec3 direct_light(vec4 light, vec3 light_color, vec3 N, vec3 albedo, vec2 metalr
 }
 
 void main() {
-    vec3 albedo = texture(texColor, frag.TexCoord).rgb * materials[mat_id].base_color.rgb * frag.Color;
-    vec2 metalrough = texture(texMetalRough, frag.TexCoord).bg * materials[mat_id].base_pbr.bg;
+    vec4 albedo = texture(texColor, frag.TexCoord) * material.base_color * frag.Color;
+    vec2 metalrough = texture(texMetalRough, frag.TexCoord).bg * material.base_pbr.bg;
     vec3 normal_map = texture(texNormal, frag.TexCoord).rgb * 2.0 - 1.0;
-    vec3 normal_scale = vec3(vec2(materials[mat_id].emissive.a), 1.0);
-    vec3 normal = normalize(frag.TBN * normal_map * normal_scale);
-    float occlusion = (texture(texOcclusion, frag.TexCoord).r - 1.0) * materials[mat_id].base_pbr.r + 1.0;
-    vec3 ambient = light_color.a * occlusion * albedo;
-    vec3 direct = direct_light(light, light_color.rgb, normal, albedo, metalrough);
-    vec3 emissive = texture(texEmissive, frag.TexCoord).rgb * materials[mat_id].emissive.rgb;
+    vec3 emissive = texture(texEmissive, frag.TexCoord).rgb * material.emissive;
+    float occlusion = (texture(texOcclusion, frag.TexCoord).r - 1.0) * material.base_pbr.r + 1.0;
+    vec3 normal = normalize(frag.TBN * normal_map * vec3(vec2(material.normal_scale), 1.0));
+    vec3 ambient = light_color.a * occlusion * albedo.rgb;
+    vec3 direct = direct_light(light, light_color.rgb, normal, albedo.rgb, metalrough);
     vec3 color = ambient + direct + emissive;
     outColor = vec4(color, 1.0);
 }

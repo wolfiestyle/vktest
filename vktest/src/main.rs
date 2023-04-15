@@ -106,7 +106,7 @@ fn main() -> VulkanResult<()> {
                             }
                         })
                         .collect();
-                    let renderer = MeshRenderer::new(&vk_app, &mesh.vertices, &mesh.indices, &slices, node.transform).unwrap();
+                    let renderer = MeshRenderer::new(&vk_app, &mesh.vertices, &mesh.indices, node.transform).unwrap();
                     MeshNode { renderer, slices }
                 })
                 .collect::<Vec<_>>()

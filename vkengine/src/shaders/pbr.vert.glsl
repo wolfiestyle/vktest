@@ -16,7 +16,7 @@ layout(location = 4) in vec4 inColor;
 layout(location = 0) out FragOut {
     vec3 Pos;
     vec2 TexCoord;
-    vec3 Color;
+    vec4 Color;
     mat3 TBN;
 } frag;
 
@@ -24,7 +24,7 @@ void main() {
     gl_Position = mvp * vec4(inPosition, 1.0);
     frag.Pos = (model * vec4(inPosition, 1.0)).xyz;
     frag.TexCoord = inTexCoord;
-    frag.Color = inColor.rgb;
+    frag.Color = inColor;
     vec3 bitangent = cross(inNormal, inTangent.xyz) * inTangent.w;
     vec3 t = normalize((model * vec4(inTangent.xyz, 0.0)).xyz);
     vec3 b = normalize((model * vec4(bitangent, 0.0)).xyz);

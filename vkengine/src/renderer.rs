@@ -24,15 +24,12 @@ pub struct MeshRenderer<V, I> {
     index_buffer: VkBuffer,
     cmd_buffers: CmdBufferRing,
     obj_uniforms: UploadBuffer,
-    material_buffer: VkBuffer,
     pub model: Affine3A,
     _p: PhantomData<(V, I)>,
 }
 
 impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
-    pub fn new(
-        engine: &VulkanEngine, vertices: &[V], indices: &[I], submeshes: &[MeshRenderSlice], transform: Affine3A,
-    ) -> VulkanResult<Self> {
+    pub fn new(engine: &VulkanEngine, vertices: &[V], indices: &[I], transform: Affine3A) -> VulkanResult<Self> {
         let device = engine.device.clone();
 
         let shader = Shader::new(
@@ -51,7 +48,7 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
                     .build(),
                 vk::DescriptorSetLayoutBinding::builder()
                     .binding(1)
-                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                     .descriptor_count(1)
                     .stage_flags(vk::ShaderStageFlags::FRAGMENT)
                     .build(),
@@ -79,18 +76,12 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
                     .descriptor_count(1)
                     .stage_flags(vk::ShaderStageFlags::FRAGMENT)
                     .build(),
-                vk::DescriptorSetLayoutBinding::builder()
-                    .binding(6)
-                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                    .descriptor_count(1)
-                    .stage_flags(vk::ShaderStageFlags::FRAGMENT)
-                    .build(),
             ])
             .create(&device)?;
         let push_constants = vk::PushConstantRange {
             stage_flags: vk::ShaderStageFlags::FRAGMENT,
             offset: 0,
-            size: size_of::<u32>() as _,
+            size: size_of::<MaterialData>() as _,
         };
         let pipeline = Pipeline::builder(&shader)
             .vertex_input::<V>()
@@ -106,21 +97,10 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
 
         let obj_uniforms = UploadBuffer::new(
             &device,
-            std::mem::size_of::<ObjectUniforms>() as _,
+            size_of::<ObjectUniforms>() as _,
             vk::BufferUsageFlags::UNIFORM_BUFFER,
             "MeshRenderer object uniforms",
         )?;
-
-        let material_data: Vec<_> = submeshes
-            .iter()
-            .map(|subm| MaterialData {
-                base_color: subm.base_color.into(),
-                base_pbr: Vec4::new(subm.occlusion_str, subm.roughness, subm.metallic, 1.0),
-                emiss_color: Vec3::from_array(subm.emissive).extend(subm.normal_scale),
-            })
-            .collect();
-        let material_buffer =
-            device.create_buffer_from_data(&material_data, vk::BufferUsageFlags::STORAGE_BUFFER, "MeshRenderer material data")?;
 
         Ok(Self {
             device,
@@ -132,7 +112,6 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
             index_buffer,
             cmd_buffers,
             obj_uniforms,
-            material_buffer,
             model: transform,
             _p: PhantomData,
         })
@@ -154,31 +133,30 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
             self.device.cmd_set_viewport(cmd_buffer, 0, &[engine.swapchain.viewport_inv()]);
             self.device.cmd_set_scissor(cmd_buffer, 0, &[engine.swapchain.extent_rect()]);
             let obj_buffer_info = self.obj_uniforms.descriptor(engine);
-            let mat_buffer_info = self.material_buffer.descriptor();
             self.device.pushdesc_fn.cmd_push_descriptor_set(
                 cmd_buffer,
                 vk::PipelineBindPoint::GRAPHICS,
                 self.pipeline.layout,
                 0,
-                &[
-                    vk::WriteDescriptorSet::builder()
-                        .dst_binding(0)
-                        .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                        .buffer_info(slice::from_ref(&obj_buffer_info))
-                        .build(),
-                    vk::WriteDescriptorSet::builder()
-                        .dst_binding(1)
-                        .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                        .buffer_info(slice::from_ref(&mat_buffer_info))
-                        .build(),
-                ],
+                &[vk::WriteDescriptorSet::builder()
+                    .dst_binding(0)
+                    .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                    .buffer_info(slice::from_ref(&obj_buffer_info))
+                    .build()],
             );
             self.device
                 .cmd_bind_vertex_buffers(cmd_buffer, 0, slice::from_ref(&*self.vertex_buffer), &[0]);
             self.device
                 .cmd_bind_index_buffer(cmd_buffer, self.index_buffer.handle, 0, I::VK_INDEX_TYPE);
 
-            for (i, submesh) in submeshes.iter().enumerate() {
+            for submesh in submeshes {
+                let material_data = MaterialData {
+                    base_color: submesh.base_color.into(),
+                    base_pbr: Vec3::new(submesh.occlusion_str, submesh.roughness, submesh.metallic),
+                    normal_scale: submesh.normal_scale,
+                    emissive: submesh.emissive.into(),
+                    unused0: 0.0,
+                };
                 let coltex_info = submesh.color_tex.unwrap_or_else(|| engine.default_texture.descriptor());
                 let metrough_info = submesh.metal_rough_tex.unwrap_or_else(|| engine.default_texture.descriptor());
                 let normal_info = submesh.normal_tex.unwrap_or_else(|| engine.default_normalmap.descriptor());
@@ -191,39 +169,38 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
                     0,
                     &[
                         vk::WriteDescriptorSet::builder()
-                            .dst_binding(2)
+                            .dst_binding(1)
                             .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                             .image_info(slice::from_ref(&coltex_info))
                             .build(),
                         vk::WriteDescriptorSet::builder()
-                            .dst_binding(3)
+                            .dst_binding(2)
                             .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                             .image_info(slice::from_ref(&metrough_info))
                             .build(),
                         vk::WriteDescriptorSet::builder()
-                            .dst_binding(4)
+                            .dst_binding(3)
                             .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                             .image_info(slice::from_ref(&normal_info))
                             .build(),
                         vk::WriteDescriptorSet::builder()
-                            .dst_binding(5)
+                            .dst_binding(4)
                             .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                             .image_info(slice::from_ref(&emiss_info))
                             .build(),
                         vk::WriteDescriptorSet::builder()
-                            .dst_binding(6)
+                            .dst_binding(5)
                             .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                             .image_info(slice::from_ref(&occl_info))
                             .build(),
                     ],
                 );
-                let mat_id = i as u32;
                 self.device.cmd_push_constants(
                     cmd_buffer,
                     self.pipeline.layout,
                     vk::ShaderStageFlags::FRAGMENT,
                     0,
-                    bytemuck::bytes_of(&mat_id),
+                    bytemuck::bytes_of(&material_data),
                 );
                 self.device.cmd_draw_indexed(
                     cmd_buffer,
@@ -276,7 +253,6 @@ impl<V, I> Drop for MeshRenderer<V, I> {
             self.desc_layout.cleanup(&self.device);
             self.cmd_buffers.cleanup(&self.device);
             self.obj_uniforms.cleanup(&self.device);
-            self.material_buffer.cleanup(&self.device);
         }
     }
 }
@@ -313,8 +289,10 @@ struct ObjectUniforms {
 #[derive(Debug, Clone, Copy, Default, Pod, Zeroable)]
 struct MaterialData {
     base_color: Vec4,
-    base_pbr: Vec4,
-    emiss_color: Vec4,
+    base_pbr: Vec3,
+    normal_scale: f32,
+    emissive: Vec3,
+    unused0: f32,
 }
 
 pub struct SkyboxRenderer {
@@ -355,7 +333,7 @@ impl SkyboxRenderer {
         let push_constants = vk::PushConstantRange::builder()
             .stage_flags(vk::ShaderStageFlags::VERTEX)
             .offset(0)
-            .size(std::mem::size_of::<Mat4>() as _)
+            .size(size_of::<Mat4>() as _)
             .build();
         let pipeline = Pipeline::builder(&shader)
             .descriptor_layout(desc_layout)
