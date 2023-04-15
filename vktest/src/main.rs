@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use structopt::StructOpt;
 use vkengine::gui::{egui, UiRenderer};
-use vkengine::{CameraController, CubeData, MeshRenderSlice, MeshRenderer, SkyboxRenderer, VkError, VulkanEngine, VulkanResult};
+use vkengine::{CameraController, CubeData, MeshRenderData, MeshRenderer, SkyboxRenderer, VkError, VulkanEngine, VulkanResult};
 use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
@@ -21,7 +21,7 @@ struct Arguments {
 #[derive(Debug)]
 pub struct MeshNode {
     pub renderer: MeshRenderer<Vertex, u32>,
-    pub slices: Vec<MeshRenderSlice>,
+    pub slices: Vec<MeshRenderData>,
 }
 
 fn main() -> VulkanResult<()> {
@@ -83,27 +83,7 @@ fn main() -> VulkanResult<()> {
                         .iter()
                         .map(|submesh| {
                             let material = submesh.material.map(|mat| &gltf[mat]).unwrap_or(&Material::DEFAULT);
-                            let color_tex = material.color_tex.map(|tex| textures[tex.id].descriptor());
-                            let metal_rough_tex = material.metallic_roughness_tex.map(|tex| textures[tex.id].descriptor());
-                            let normal_tex = material.normal_tex.map(|tex| textures[tex.id].descriptor());
-                            let emiss_tex = material.emissive_tex.map(|tex| textures[tex.id].descriptor());
-                            let occlusion_tex = material.occlusion_tex.map(|tex| textures[tex.id].descriptor());
-                            MeshRenderSlice {
-                                index_offset: submesh.index_offset,
-                                index_count: submesh.index_count,
-                                vertex_offset: submesh.vertex_offset,
-                                base_color: material.base_color,
-                                metallic: material.metallic,
-                                roughness: material.roughness,
-                                emissive: material.emissive,
-                                normal_scale: material.normal_scale,
-                                occlusion_str: material.occlusion_strength,
-                                color_tex,
-                                metal_rough_tex,
-                                normal_tex,
-                                emiss_tex,
-                                occlusion_tex,
-                            }
+                            MeshRenderData::from_gltf(submesh, material, &textures, &vk_app)
                         })
                         .collect();
                     let renderer = MeshRenderer::new(&vk_app, &mesh.vertices, &mesh.indices, node.transform).unwrap();

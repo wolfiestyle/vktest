@@ -117,7 +117,7 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
         })
     }
 
-    pub fn render(&mut self, engine: &VulkanEngine, submeshes: &[MeshRenderSlice]) -> VulkanResult<DrawPayload> {
+    pub fn render(&mut self, engine: &VulkanEngine, submeshes: &[MeshRenderData]) -> VulkanResult<DrawPayload> {
         let cmd_buffer = self.cmd_buffers.get_current_buffer(engine)?;
         engine.begin_secondary_draw_commands(cmd_buffer, vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)?;
 
@@ -150,18 +150,6 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
                 .cmd_bind_index_buffer(cmd_buffer, self.index_buffer.handle, 0, I::VK_INDEX_TYPE);
 
             for submesh in submeshes {
-                let material_data = MaterialData {
-                    base_color: submesh.base_color.into(),
-                    base_pbr: Vec3::new(submesh.occlusion_str, submesh.roughness, submesh.metallic),
-                    normal_scale: submesh.normal_scale,
-                    emissive: submesh.emissive.into(),
-                    unused0: 0.0,
-                };
-                let coltex_info = submesh.color_tex.unwrap_or_else(|| engine.default_texture.descriptor());
-                let metrough_info = submesh.metal_rough_tex.unwrap_or_else(|| engine.default_texture.descriptor());
-                let normal_info = submesh.normal_tex.unwrap_or_else(|| engine.default_normalmap.descriptor());
-                let emiss_info = submesh.emiss_tex.unwrap_or_else(|| engine.default_texture.descriptor());
-                let occl_info = submesh.occlusion_tex.unwrap_or_else(|| engine.default_texture.descriptor());
                 self.device.pushdesc_fn.cmd_push_descriptor_set(
                     cmd_buffer,
                     vk::PipelineBindPoint::GRAPHICS,
@@ -171,27 +159,27 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
                         vk::WriteDescriptorSet::builder()
                             .dst_binding(1)
                             .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                            .image_info(slice::from_ref(&coltex_info))
+                            .image_info(slice::from_ref(&submesh.color_tex))
                             .build(),
                         vk::WriteDescriptorSet::builder()
                             .dst_binding(2)
                             .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                            .image_info(slice::from_ref(&metrough_info))
+                            .image_info(slice::from_ref(&submesh.metal_rough_tex))
                             .build(),
                         vk::WriteDescriptorSet::builder()
                             .dst_binding(3)
                             .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                            .image_info(slice::from_ref(&normal_info))
+                            .image_info(slice::from_ref(&submesh.normal_tex))
                             .build(),
                         vk::WriteDescriptorSet::builder()
                             .dst_binding(4)
                             .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                            .image_info(slice::from_ref(&emiss_info))
+                            .image_info(slice::from_ref(&submesh.emiss_tex))
                             .build(),
                         vk::WriteDescriptorSet::builder()
                             .dst_binding(5)
                             .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                            .image_info(slice::from_ref(&occl_info))
+                            .image_info(slice::from_ref(&submesh.occlusion_tex))
                             .build(),
                     ],
                 );
@@ -200,7 +188,7 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
                     self.pipeline.layout,
                     vk::ShaderStageFlags::FRAGMENT,
                     0,
-                    bytemuck::bytes_of(&material_data),
+                    bytemuck::bytes_of(&submesh.material_data),
                 );
                 self.device.cmd_draw_indexed(
                     cmd_buffer,
@@ -258,21 +246,59 @@ impl<V, I> Drop for MeshRenderer<V, I> {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct MeshRenderSlice {
+pub struct MeshRenderData {
     pub index_offset: u32,
     pub index_count: u32,
     pub vertex_offset: u32,
-    pub base_color: [f32; 4],
-    pub metallic: f32,
-    pub roughness: f32,
-    pub emissive: [f32; 3],
-    pub normal_scale: f32,
-    pub occlusion_str: f32,
-    pub color_tex: Option<vk::DescriptorImageInfo>,
-    pub metal_rough_tex: Option<vk::DescriptorImageInfo>,
-    pub emiss_tex: Option<vk::DescriptorImageInfo>,
-    pub normal_tex: Option<vk::DescriptorImageInfo>,
-    pub occlusion_tex: Option<vk::DescriptorImageInfo>,
+    pub material_data: MaterialData,
+    pub color_tex: vk::DescriptorImageInfo,
+    pub metal_rough_tex: vk::DescriptorImageInfo,
+    pub emiss_tex: vk::DescriptorImageInfo,
+    pub normal_tex: vk::DescriptorImageInfo,
+    pub occlusion_tex: vk::DescriptorImageInfo,
+}
+
+impl MeshRenderData {
+    pub fn from_gltf(
+        submesh: &gltf_import::Submesh, material: &gltf_import::Material, textures: &[Texture], engine: &VulkanEngine,
+    ) -> Self {
+        let color_tex = material
+            .color_tex
+            .map(|tex| &textures[tex.id])
+            .unwrap_or(&engine.default_texture)
+            .descriptor();
+        let metal_rough_tex = material
+            .metallic_roughness_tex
+            .map(|tex| &textures[tex.id])
+            .unwrap_or(&engine.default_texture)
+            .descriptor();
+        let normal_tex = material
+            .normal_tex
+            .map(|tex| &textures[tex.id])
+            .unwrap_or(&engine.default_normalmap)
+            .descriptor();
+        let emiss_tex = material
+            .emissive_tex
+            .map(|tex| &textures[tex.id])
+            .unwrap_or(&engine.default_texture)
+            .descriptor();
+        let occlusion_tex = material
+            .occlusion_tex
+            .map(|tex| &textures[tex.id])
+            .unwrap_or(&engine.default_texture)
+            .descriptor();
+        Self {
+            index_offset: submesh.index_offset,
+            index_count: submesh.index_count,
+            vertex_offset: submesh.vertex_offset,
+            material_data: MaterialData::from_gltf(material),
+            color_tex,
+            metal_rough_tex,
+            normal_tex,
+            emiss_tex,
+            occlusion_tex,
+        }
+    }
 }
 
 #[repr(C)]
@@ -287,12 +313,24 @@ struct ObjectUniforms {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default, Pod, Zeroable)]
-struct MaterialData {
-    base_color: Vec4,
-    base_pbr: Vec3,
-    normal_scale: f32,
-    emissive: Vec3,
-    unused0: f32,
+pub struct MaterialData {
+    pub base_color: Vec4,
+    pub base_pbr: Vec3,
+    pub normal_scale: f32,
+    pub emissive: Vec3,
+    pub unused0: f32,
+}
+
+impl MaterialData {
+    pub fn from_gltf(material: &gltf_import::Material) -> Self {
+        Self {
+            base_color: material.base_color.into(),
+            base_pbr: Vec3::new(material.occlusion_strength, material.roughness, material.metallic),
+            normal_scale: material.normal_scale,
+            emissive: material.emissive.into(),
+            unused0: 0.0,
+        }
+    }
 }
 
 pub struct SkyboxRenderer {
