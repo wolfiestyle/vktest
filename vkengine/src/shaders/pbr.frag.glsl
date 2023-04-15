@@ -1,5 +1,5 @@
 #version 450
-layout(binding = 0) uniform ObjectUniforms {
+layout(set = 0, binding = 0) uniform ObjectUniforms {
     mat4 mvp;
     mat4 model;
     vec4 light;
@@ -7,11 +7,11 @@ layout(binding = 0) uniform ObjectUniforms {
     vec4 view_pos;
 };
 
-layout(binding = 1) uniform sampler2D texColor;
-layout(binding = 2) uniform sampler2D texMetalRough;
-layout(binding = 3) uniform sampler2D texNormal;
-layout(binding = 4) uniform sampler2D texEmissive;
-layout(binding = 5) uniform sampler2D texOcclusion;
+layout(set = 1, binding = 0) uniform sampler2D texColor;
+layout(set = 1, binding = 1) uniform sampler2D texMetalRough;
+layout(set = 1, binding = 2) uniform sampler2D texNormal;
+layout(set = 1, binding = 3) uniform sampler2D texEmissive;
+layout(set = 1, binding = 4) uniform sampler2D texOcclusion;
 
 layout(push_constant) uniform PushConstants {
     vec4 base_color;

@@ -16,7 +16,8 @@ use std::sync::Arc;
 #[derive(Debug)]
 pub struct MeshRenderer<V, I> {
     device: Arc<VulkanDevice>,
-    desc_layout: vk::DescriptorSetLayout,
+    push_desc_layout: vk::DescriptorSetLayout,
+    pub image_desc_layout: vk::DescriptorSetLayout,
     push_constants: vk::PushConstantRange,
     shader: Shader,
     pipeline: Pipeline,
@@ -37,14 +38,22 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
             include_spirv!("src/shaders/pbr.vert.glsl", vert, glsl),
             include_spirv!("src/shaders/pbr.frag.glsl", frag, glsl),
         )?;
-        let desc_layout = vk::DescriptorSetLayoutCreateInfo::builder()
+        let push_desc_layout = vk::DescriptorSetLayoutCreateInfo::builder()
             .flags(vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR)
+            .bindings(&[vk::DescriptorSetLayoutBinding::builder()
+                .binding(0)
+                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                .descriptor_count(1)
+                .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
+                .build()])
+            .create(&device)?;
+        let image_desc_layout = vk::DescriptorSetLayoutCreateInfo::builder()
             .bindings(&[
                 vk::DescriptorSetLayoutBinding::builder()
                     .binding(0)
-                    .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                     .descriptor_count(1)
-                    .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
+                    .stage_flags(vk::ShaderStageFlags::FRAGMENT)
                     .build(),
                 vk::DescriptorSetLayoutBinding::builder()
                     .binding(1)
@@ -70,12 +79,6 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
                     .descriptor_count(1)
                     .stage_flags(vk::ShaderStageFlags::FRAGMENT)
                     .build(),
-                vk::DescriptorSetLayoutBinding::builder()
-                    .binding(5)
-                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                    .descriptor_count(1)
-                    .stage_flags(vk::ShaderStageFlags::FRAGMENT)
-                    .build(),
             ])
             .create(&device)?;
         let push_constants = vk::PushConstantRange {
@@ -85,7 +88,7 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
         };
         let pipeline = Pipeline::builder(&shader)
             .vertex_input::<V>()
-            .descriptor_layout(desc_layout)
+            .descriptor_layouts(&[push_desc_layout, image_desc_layout])
             .push_constants(slice::from_ref(&push_constants))
             .render_to_swapchain(&engine.swapchain)
             .build(engine)?;
@@ -104,7 +107,8 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
 
         Ok(Self {
             device,
-            desc_layout,
+            push_desc_layout,
+            image_desc_layout,
             push_constants,
             shader,
             pipeline,
@@ -117,7 +121,9 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
         })
     }
 
-    pub fn render(&mut self, engine: &VulkanEngine, submeshes: &[MeshRenderData]) -> VulkanResult<DrawPayload> {
+    pub fn render(
+        &mut self, engine: &VulkanEngine, submeshes: &[MeshRenderData], descriptors: &[vk::DescriptorSet],
+    ) -> VulkanResult<DrawPayload> {
         let cmd_buffer = self.cmd_buffers.get_current_buffer(engine)?;
         engine.begin_secondary_draw_commands(cmd_buffer, vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)?;
 
@@ -150,38 +156,13 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
                 .cmd_bind_index_buffer(cmd_buffer, self.index_buffer.handle, 0, I::VK_INDEX_TYPE);
 
             for submesh in submeshes {
-                self.device.pushdesc_fn.cmd_push_descriptor_set(
+                self.device.cmd_bind_descriptor_sets(
                     cmd_buffer,
                     vk::PipelineBindPoint::GRAPHICS,
                     self.pipeline.layout,
-                    0,
-                    &[
-                        vk::WriteDescriptorSet::builder()
-                            .dst_binding(1)
-                            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                            .image_info(slice::from_ref(&submesh.color_tex))
-                            .build(),
-                        vk::WriteDescriptorSet::builder()
-                            .dst_binding(2)
-                            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                            .image_info(slice::from_ref(&submesh.metal_rough_tex))
-                            .build(),
-                        vk::WriteDescriptorSet::builder()
-                            .dst_binding(3)
-                            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                            .image_info(slice::from_ref(&submesh.normal_tex))
-                            .build(),
-                        vk::WriteDescriptorSet::builder()
-                            .dst_binding(4)
-                            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                            .image_info(slice::from_ref(&submesh.emiss_tex))
-                            .build(),
-                        vk::WriteDescriptorSet::builder()
-                            .dst_binding(5)
-                            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                            .image_info(slice::from_ref(&submesh.occlusion_tex))
-                            .build(),
-                    ],
+                    1,
+                    slice::from_ref(&descriptors[submesh.descriptor_idx]),
+                    &[],
                 );
                 self.device.cmd_push_constants(
                     cmd_buffer,
@@ -220,7 +201,7 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
     pub fn rebuild_pipeline(&mut self, engine: &VulkanEngine) -> VulkanResult<()> {
         let pipeline = Pipeline::builder(&self.shader)
             .vertex_input::<V>()
-            .descriptor_layout(self.desc_layout)
+            .descriptor_layouts(&[self.push_desc_layout, self.image_desc_layout])
             .push_constants(slice::from_ref(&self.push_constants))
             .render_to_swapchain(&engine.swapchain)
             .build(engine)?;
@@ -238,7 +219,8 @@ impl<V, I> Drop for MeshRenderer<V, I> {
             self.index_buffer.cleanup(&self.device);
             self.pipeline.cleanup(&self.device);
             self.shader.cleanup(&self.device);
-            self.desc_layout.cleanup(&self.device);
+            self.push_desc_layout.cleanup(&self.device);
+            self.image_desc_layout.cleanup(&self.device);
             self.cmd_buffers.cleanup(&self.device);
             self.obj_uniforms.cleanup(&self.device);
         }
@@ -250,53 +232,18 @@ pub struct MeshRenderData {
     pub index_offset: u32,
     pub index_count: u32,
     pub vertex_offset: u32,
+    pub descriptor_idx: usize,
     pub material_data: MaterialData,
-    pub color_tex: vk::DescriptorImageInfo,
-    pub metal_rough_tex: vk::DescriptorImageInfo,
-    pub emiss_tex: vk::DescriptorImageInfo,
-    pub normal_tex: vk::DescriptorImageInfo,
-    pub occlusion_tex: vk::DescriptorImageInfo,
 }
 
 impl MeshRenderData {
-    pub fn from_gltf(
-        submesh: &gltf_import::Submesh, material: &gltf_import::Material, textures: &[Texture], engine: &VulkanEngine,
-    ) -> Self {
-        let color_tex = material
-            .color_tex
-            .map(|tex| &textures[tex.id])
-            .unwrap_or(&engine.default_texture)
-            .descriptor();
-        let metal_rough_tex = material
-            .metallic_roughness_tex
-            .map(|tex| &textures[tex.id])
-            .unwrap_or(&engine.default_texture)
-            .descriptor();
-        let normal_tex = material
-            .normal_tex
-            .map(|tex| &textures[tex.id])
-            .unwrap_or(&engine.default_normalmap)
-            .descriptor();
-        let emiss_tex = material
-            .emissive_tex
-            .map(|tex| &textures[tex.id])
-            .unwrap_or(&engine.default_texture)
-            .descriptor();
-        let occlusion_tex = material
-            .occlusion_tex
-            .map(|tex| &textures[tex.id])
-            .unwrap_or(&engine.default_texture)
-            .descriptor();
+    pub fn from_gltf(submesh: &gltf_import::Submesh, material: &gltf_import::Material, descriptor_idx: usize) -> Self {
         Self {
             index_offset: submesh.index_offset,
             index_count: submesh.index_count,
             vertex_offset: submesh.vertex_offset,
+            descriptor_idx,
             material_data: MaterialData::from_gltf(material),
-            color_tex,
-            metal_rough_tex,
-            normal_tex,
-            emiss_tex,
-            occlusion_tex,
         }
     }
 }

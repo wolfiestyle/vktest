@@ -269,6 +269,122 @@ impl VulkanEngine {
         )
     }
 
+    pub fn create_resources_for_model(
+        &self, gltf: &gltf_import::Gltf, image_desc_layout: vk::DescriptorSetLayout,
+    ) -> VulkanResult<ModelResources> {
+        let textures = gltf
+            .textures
+            .iter()
+            .map(|tex| self.create_texture(tex, &gltf))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let count = gltf.materials.len() as u32 + 1;
+        let pool_sizes = [vk::DescriptorPoolSize {
+            ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+            descriptor_count: count * 5,
+        }];
+        let desc_pool = vk::DescriptorPoolCreateInfo::builder()
+            .max_sets(count)
+            .pool_sizes(&pool_sizes)
+            .create(&self.device)?;
+        let material_desc = vk::DescriptorSetAllocateInfo::builder()
+            .descriptor_pool(desc_pool)
+            .set_layouts(&vec![image_desc_layout; count as usize])
+            .create(&self.device)?;
+
+        let default_material = material_desc[0];
+        let deftex_info = self.default_texture.descriptor();
+        let defnorm_info = self.default_normalmap.descriptor();
+        let desc_writes = [
+            vk::WriteDescriptorSet::builder()
+                .dst_set(default_material)
+                .dst_binding(0)
+                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .image_info(slice::from_ref(&deftex_info))
+                .build(),
+            vk::WriteDescriptorSet::builder()
+                .dst_set(default_material)
+                .dst_binding(1)
+                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .image_info(slice::from_ref(&deftex_info))
+                .build(),
+            vk::WriteDescriptorSet::builder()
+                .dst_set(default_material)
+                .dst_binding(2)
+                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .image_info(slice::from_ref(&defnorm_info))
+                .build(),
+            vk::WriteDescriptorSet::builder()
+                .dst_set(default_material)
+                .dst_binding(3)
+                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .image_info(slice::from_ref(&deftex_info))
+                .build(),
+            vk::WriteDescriptorSet::builder()
+                .dst_set(default_material)
+                .dst_binding(4)
+                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .image_info(slice::from_ref(&deftex_info))
+                .build(),
+        ];
+        unsafe {
+            self.device.update_descriptor_sets(&desc_writes, &[]);
+        }
+
+        let tex_infos: Vec<_> = textures.iter().map(|tex| tex.descriptor()).collect();
+
+        for (material, &descriptor) in gltf.materials.iter().zip(material_desc.iter().skip(1)) {
+            let color_tex = material.color_tex.map(|tex| &tex_infos[tex.id]).unwrap_or(&deftex_info);
+            let metal_rough_tex = material
+                .metallic_roughness_tex
+                .map(|tex| &tex_infos[tex.id])
+                .unwrap_or(&deftex_info);
+            let normal_tex = material.normal_tex.map(|tex| &tex_infos[tex.id]).unwrap_or(&defnorm_info);
+            let emiss_tex = material.emissive_tex.map(|tex| &tex_infos[tex.id]).unwrap_or(&deftex_info);
+            let occlusion_tex = material.occlusion_tex.map(|tex| &tex_infos[tex.id]).unwrap_or(&deftex_info);
+            let desc_writes = [
+                vk::WriteDescriptorSet::builder()
+                    .dst_set(descriptor)
+                    .dst_binding(0)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .image_info(slice::from_ref(color_tex))
+                    .build(),
+                vk::WriteDescriptorSet::builder()
+                    .dst_set(descriptor)
+                    .dst_binding(1)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .image_info(slice::from_ref(metal_rough_tex))
+                    .build(),
+                vk::WriteDescriptorSet::builder()
+                    .dst_set(descriptor)
+                    .dst_binding(2)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .image_info(slice::from_ref(normal_tex))
+                    .build(),
+                vk::WriteDescriptorSet::builder()
+                    .dst_set(descriptor)
+                    .dst_binding(3)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .image_info(slice::from_ref(emiss_tex))
+                    .build(),
+                vk::WriteDescriptorSet::builder()
+                    .dst_set(descriptor)
+                    .dst_binding(4)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .image_info(slice::from_ref(occlusion_tex))
+                    .build(),
+            ];
+            unsafe {
+                self.device.update_descriptor_sets(&desc_writes, &[]);
+            }
+        }
+        Ok(ModelResources {
+            textures,
+            desc_pool,
+            material_desc,
+        })
+    }
+
     fn record_primary_command_buffer(
         &self, cmd_buffer: vk::CommandBuffer, draw_cmds: &[DrawPayload], image_idx: usize, frame: &FrameState,
     ) -> VulkanResult<()> {
@@ -796,5 +912,18 @@ impl Cleanup<VulkanDevice> for Shader {
     unsafe fn cleanup(&mut self, device: &VulkanDevice) {
         device.destroy_shader_module(self.vert, None);
         device.destroy_shader_module(self.frag, None);
+    }
+}
+
+pub struct ModelResources {
+    pub textures: Vec<Texture>,
+    pub desc_pool: vk::DescriptorPool,
+    pub material_desc: Vec<vk::DescriptorSet>,
+}
+
+impl Cleanup<VulkanDevice> for ModelResources {
+    unsafe fn cleanup(&mut self, device: &VulkanDevice) {
+        self.textures.cleanup(device);
+        device.destroy_descriptor_pool(self.desc_pool, None);
     }
 }

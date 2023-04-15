@@ -168,6 +168,11 @@ impl<'a> PipelineBuilder<'a> {
         self
     }
 
+    pub fn descriptor_layouts(mut self, set_layouts: &[vk::DescriptorSetLayout]) -> Self {
+        self.desc_layouts = set_layouts.to_vec();
+        self
+    }
+
     pub fn push_constants(mut self, push_constants: &'a [vk::PushConstantRange]) -> Self {
         self.push_constants = push_constants;
         self

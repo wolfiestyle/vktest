@@ -125,3 +125,27 @@ impl CreateFromInfo for vk::QueryPoolCreateInfo {
         unsafe { device.create_query_pool(self, None).describe_err("Failed to create query pool") }
     }
 }
+
+impl CreateFromInfo for vk::DescriptorPoolCreateInfo {
+    type Output = vk::DescriptorPool;
+
+    fn create(&self, device: &ash::Device) -> VulkanResult<Self::Output> {
+        unsafe {
+            device
+                .create_descriptor_pool(self, None)
+                .describe_err("Failed to create descriptor pool")
+        }
+    }
+}
+
+impl CreateFromInfo for vk::DescriptorSetAllocateInfo {
+    type Output = Vec<vk::DescriptorSet>;
+
+    fn create(&self, device: &ash::Device) -> VulkanResult<Self::Output> {
+        unsafe {
+            device
+                .allocate_descriptor_sets(self)
+                .describe_err("Failed to allocate descriptor sets")
+        }
+    }
+}

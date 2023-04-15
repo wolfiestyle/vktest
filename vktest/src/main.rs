@@ -62,14 +62,6 @@ fn main() -> VulkanResult<()> {
 
     let mut vk_app = VulkanEngine::new(&window, "vulkan test", Default::default())?;
 
-    let mut textures = ManuallyDrop::new(
-        gltf.textures
-            .iter()
-            .map(|tex| vk_app.create_texture(tex, &gltf))
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap(),
-    );
-
     let mut scenes = gltf
         .scenes
         .iter()
@@ -83,7 +75,8 @@ fn main() -> VulkanResult<()> {
                         .iter()
                         .map(|submesh| {
                             let material = submesh.material.map(|mat| &gltf[mat]).unwrap_or(&Material::DEFAULT);
-                            MeshRenderData::from_gltf(submesh, material, &textures, &vk_app)
+                            let desc_id = submesh.material.map(|mat| mat.0 + 1).unwrap_or_default();
+                            MeshRenderData::from_gltf(submesh, material, desc_id)
                         })
                         .collect();
                     let renderer = MeshRenderer::new(&vk_app, &mesh.vertices, &mesh.indices, node.transform).unwrap();
@@ -92,6 +85,12 @@ fn main() -> VulkanResult<()> {
                 .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
+
+    let mut resources = ManuallyDrop::new(
+        vk_app
+            .create_resources_for_model(&gltf, scenes[0][0].renderer.image_desc_layout) //FIXME: move layout out
+            .unwrap(),
+    );
 
     let mut mesh_enabled: Vec<Vec<_>> = scenes.iter().map(|meshes| vec![true; meshes.len()]).collect();
     let mut cur_scene = 0;
@@ -267,7 +266,7 @@ fn main() -> VulkanResult<()> {
                 for (i, (obj, draw_ret)) in mesh_chunks.zip(ret_chunks).enumerate() {
                     if mesh_enabled[cur_scene][i] {
                         scope.execute(|| {
-                            draw_ret[0] = obj[0].renderer.render(&vk_app, &obj[0].slices);
+                            draw_ret[0] = obj[0].renderer.render(&vk_app, &obj[0].slices, &resources.material_desc);
                         });
                     }
                 }
@@ -292,7 +291,7 @@ fn main() -> VulkanResult<()> {
         }
         Event::LoopDestroyed => unsafe {
             vk_app.device().device_wait_idle().unwrap();
-            vk_app.device().dispose_of(ManuallyDrop::take(&mut textures));
+            vk_app.device().dispose_of(ManuallyDrop::take(&mut resources));
         },
         _ => (),
     });
