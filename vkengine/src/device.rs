@@ -304,16 +304,17 @@ impl VulkanDevice {
     }
 
     pub(crate) fn image_reuse_barrier(&self, cmd_buffer: vk::CommandBuffer, image: vk::Image, format: vk::Format, layout: vk::ImageLayout) {
-        let src_access = vk::AccessFlags::empty();
-        let src_stage = vk::PipelineStageFlags::BOTTOM_OF_PIPE;
-
-        let (dst_access, dst_stage) = match layout {
+        let (src_access, dst_access, src_stage, dst_stage) = match layout {
             vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL => (
                 vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+                vk::AccessFlags::COLOR_ATTACHMENT_READ | vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
                 vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
             ),
             vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL => (
+                vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
                 vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
+                vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
                 vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS | vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
             ),
             _ => panic!("Unsupported image barrier"),
