@@ -47,7 +47,7 @@ impl VulkanEngine {
     {
         let device = VulkanDevice::new(window, app_name, device_selection)?;
         let depth_format = device.find_depth_format(false)?;
-        let msaa_samples = device.dev_info.get_max_samples();
+        let msaa_samples = vk::SampleCountFlags::TYPE_4;
         let window_size = window.window_size().into();
         let swapchain = Swapchain::new(&device, window_size, SWAPCHAIN_IMAGE_COUNT, depth_format, msaa_samples, true)?;
         eprintln!("color_format: {:?}, depth_format: {depth_format:?}", swapchain.format);
@@ -436,26 +436,16 @@ impl VulkanEngine {
                 .image_view(msaa_imgview)
                 .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
                 .load_op(vk::AttachmentLoadOp::DONT_CARE)
-                .store_op(vk::AttachmentStoreOp::STORE)
+                .store_op(vk::AttachmentStoreOp::DONT_CARE)
                 .resolve_mode(vk::ResolveModeFlags::AVERAGE)
                 .resolve_image_view(self.swapchain.image_views[image_idx])
                 .resolve_image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-                .clear_value(vk::ClearValue {
-                    color: vk::ClearColorValue {
-                        float32: [0.0, 0.0, 0.0, 1.0],
-                    },
-                })
         } else {
             vk::RenderingAttachmentInfo::builder()
                 .image_view(self.swapchain.image_views[image_idx])
                 .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
                 .load_op(vk::AttachmentLoadOp::DONT_CARE)
                 .store_op(vk::AttachmentStoreOp::STORE)
-                .clear_value(vk::ClearValue {
-                    color: vk::ClearColorValue {
-                        float32: [0.0, 0.0, 0.0, 1.0],
-                    },
-                })
         };
         let depth_attach = vk::RenderingAttachmentInfo::builder()
             .image_view(self.swapchain.depth_imgview.expect("missing depth image view"))
