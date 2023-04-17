@@ -20,8 +20,9 @@ struct Arguments {
 
 #[derive(Debug)]
 pub struct MeshNode {
-    pub renderer: MeshRenderer<Vertex, u32>,
-    pub slices: Vec<MeshRenderData>,
+    renderer: MeshRenderer<Vertex, u32>,
+    slices: Vec<MeshRenderData>,
+    name: String,
 }
 
 fn main() -> VulkanResult<()> {
@@ -82,7 +83,8 @@ fn main() -> VulkanResult<()> {
                         })
                         .collect();
                     let renderer = MeshRenderer::new(&vk_app, &mesh.vertices, &mesh.indices, node.transform).unwrap();
-                    MeshNode { renderer, slices }
+                    let name = mesh.name.clone().unwrap_or_else(|| format!("Node {}", node.id.0));
+                    MeshNode { renderer, slices, name }
                 })
                 .collect::<Vec<_>>()
         })
@@ -210,9 +212,11 @@ fn main() -> VulkanResult<()> {
                         ui.checkbox(&mut light_directional, "Directional");
                         ui.add_space(10.0);
                         ui.collapsing(format!("{} Meshes", mesh_enabled[cur_scene].len()), |ui| {
-                            for (i, enable) in mesh_enabled[cur_scene].iter_mut().enumerate() {
-                                ui.add(egui::Checkbox::new(enable, format!("Mesh {i}")));
-                            }
+                            egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+                                for (i, enable) in mesh_enabled[cur_scene].iter_mut().enumerate() {
+                                    ui.add(egui::Checkbox::new(enable, &scenes[cur_scene][i].name));
+                                }
+                            });
                         });
                         ui.add_space(10.0);
                         if ui.button("Exit").clicked() {
