@@ -80,7 +80,7 @@ impl VulkanDevice {
         vk::SemaphoreCreateInfo::builder().push_next(&mut sem_type_ci).create(&self.device)
     }
 
-    fn begin_one_time_commands(&self) -> VulkanResult<vk::CommandBuffer> {
+    pub(crate) fn begin_one_time_commands(&self) -> VulkanResult<vk::CommandBuffer> {
         let cmd_buffer = vk::CommandBufferAllocateInfo::builder()
             .command_pool(self.transfer_pool)
             .level(vk::CommandBufferLevel::PRIMARY)
@@ -95,7 +95,7 @@ impl VulkanDevice {
         Ok(cmd_buffer)
     }
 
-    fn end_one_time_commands(&self, cmd_buffer: vk::CommandBuffer) -> VulkanResult<()> {
+    pub(crate) fn end_one_time_commands(&self, cmd_buffer: vk::CommandBuffer) -> VulkanResult<()> {
         let submit_info = vk::SubmitInfo::builder().command_buffers(slice::from_ref(&cmd_buffer));
         unsafe {
             self.device

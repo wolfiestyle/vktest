@@ -886,6 +886,36 @@ impl Texture {
         Ok(Self { image, imgview, sampler })
     }
 
+    pub fn new_empty(
+        device: &VulkanDevice, params: ImageParams, flags: vk::ImageCreateFlags, layout: vk::ImageLayout, sampler: vk::Sampler,
+    ) -> VulkanResult<Self> {
+        let image = device.allocate_image(
+            params,
+            flags,
+            vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::TRANSFER_DST,
+            gpu_allocator::MemoryLocation::GpuOnly,
+            "Texture image",
+        )?;
+        if layout != vk::ImageLayout::UNDEFINED {
+            let cmd_buffer = device.begin_one_time_commands()?;
+            device.transition_image_layout(cmd_buffer, *image, params.subresource_range(), vk::ImageLayout::UNDEFINED, layout);
+            device.end_one_time_commands(cmd_buffer)?;
+        }
+
+        let view_type = if flags.contains(vk::ImageCreateFlags::CUBE_COMPATIBLE) {
+            vk::ImageViewType::CUBE
+        } else {
+            vk::ImageViewType::TYPE_2D
+        };
+        let imgview = vk::ImageViewCreateInfo::builder()
+            .image(*image)
+            .format(params.format)
+            .view_type(view_type)
+            .subresource_range(image.props.subresource_range())
+            .create(&device)?;
+        Ok(Self { image, imgview, sampler })
+    }
+
     pub fn update(&mut self, device: &VulkanDevice, x: u32, y: u32, width: u32, height: u32, data: &[u8]) -> VulkanResult<()> {
         let w = self.image.props.width;
         let h = self.image.props.height;
