@@ -859,9 +859,9 @@ impl Cleanup<VulkanDevice> for FrameState {
 
 #[derive(Debug)]
 pub struct Texture {
-    image: VkImage,
-    imgview: vk::ImageView,
-    sampler: vk::Sampler,
+    pub image: VkImage,
+    pub imgview: vk::ImageView,
+    pub sampler: vk::Sampler,
     layout: vk::ImageLayout,
 }
 

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use structopt::StructOpt;
 use vkengine::gui::{egui, UiRenderer};
-use vkengine::{CameraController, CubeData, MeshRenderData, MeshRenderer, SkyboxRenderer, VkError, VulkanEngine, VulkanResult};
+use vkengine::{Baker, CameraController, CubeData, MeshRenderData, MeshRenderer, SkyboxRenderer, VkError, VulkanEngine, VulkanResult};
 use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
@@ -101,6 +101,9 @@ fn main() -> VulkanResult<()> {
 
     let mut gui = UiRenderer::new(&event_loop, &vk_app)?;
     let mut show_gui = true;
+
+    let baker = Baker::new(&vk_app)?;
+    let irrmap = baker.generate_irradiance_map(&skybox.texture)?;
 
     let thread_pool = yastl::Pool::new(16);
     let mut draw_buffer = vec![];
@@ -266,7 +269,7 @@ fn main() -> VulkanResult<()> {
                 for (i, (obj, draw_ret)) in mesh_chunks.zip(ret_chunks).enumerate() {
                     if mesh_enabled[cur_scene][i] {
                         scope.execute(|| {
-                            draw_ret[0] = obj[0].renderer.render(&vk_app, &obj[0].slices);
+                            draw_ret[0] = obj[0].renderer.render(&vk_app, &obj[0].slices, &irrmap);
                         });
                     }
                 }

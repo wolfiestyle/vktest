@@ -1,3 +1,4 @@
+mod baker;
 mod camera;
 mod create;
 mod debug;
@@ -10,6 +11,7 @@ mod swapchain;
 mod types;
 mod vertex;
 
+pub use baker::Baker;
 pub use camera::{Camera, CameraController};
 pub use create::CreateFromInfo;
 pub use device::{CubeData, ImageData, VkBuffer, VkImage, VulkanDevice};

@@ -39,12 +39,20 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
         )?;
         let push_desc_layout = vk::DescriptorSetLayoutCreateInfo::builder()
             .flags(vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR)
-            .bindings(&[vk::DescriptorSetLayoutBinding::builder()
-                .binding(0)
-                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                .descriptor_count(1)
-                .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
-                .build()])
+            .bindings(&[
+                vk::DescriptorSetLayoutBinding::builder()
+                    .binding(0)
+                    .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
+                    .build(),
+                vk::DescriptorSetLayoutBinding::builder()
+                    .binding(1)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                    .build(),
+            ])
             .create(&device)?;
         let push_constants = vk::PushConstantRange {
             stage_flags: vk::ShaderStageFlags::FRAGMENT,
@@ -85,7 +93,7 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
         })
     }
 
-    pub fn render(&mut self, engine: &VulkanEngine, submeshes: &[MeshRenderData]) -> VulkanResult<DrawPayload> {
+    pub fn render(&mut self, engine: &VulkanEngine, submeshes: &[MeshRenderData], irrmap: &Texture) -> VulkanResult<DrawPayload> {
         let cmd_buffer = self.cmd_buffers.get_current_buffer(engine)?;
         engine.begin_secondary_draw_commands(cmd_buffer, vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)?;
 
@@ -101,16 +109,24 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
             self.device.cmd_set_viewport(cmd_buffer, 0, &[engine.swapchain.viewport_inv()]);
             self.device.cmd_set_scissor(cmd_buffer, 0, &[engine.swapchain.extent_rect()]);
             let obj_buffer_info = self.obj_uniforms.descriptor(engine);
+            let irrmap_info = irrmap.descriptor();
             self.device.pushdesc_fn.cmd_push_descriptor_set(
                 cmd_buffer,
                 vk::PipelineBindPoint::GRAPHICS,
                 self.pipeline.layout,
                 0,
-                &[vk::WriteDescriptorSet::builder()
-                    .dst_binding(0)
-                    .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                    .buffer_info(slice::from_ref(&obj_buffer_info))
-                    .build()],
+                &[
+                    vk::WriteDescriptorSet::builder()
+                        .dst_binding(0)
+                        .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                        .buffer_info(slice::from_ref(&obj_buffer_info))
+                        .build(),
+                    vk::WriteDescriptorSet::builder()
+                        .dst_binding(1)
+                        .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                        .image_info(slice::from_ref(&irrmap_info))
+                        .build(),
+                ],
             );
             self.device
                 .cmd_bind_vertex_buffers(cmd_buffer, 0, slice::from_ref(&*self.vertex_buffer), &[0]);
@@ -247,7 +263,7 @@ pub struct SkyboxRenderer {
     push_constants: vk::PushConstantRange,
     shader: Shader,
     pipeline: Pipeline,
-    texture: Texture,
+    pub texture: Texture,
     cmd_buffers: CmdBufferRing,
 }
 
@@ -262,8 +278,8 @@ impl SkyboxRenderer {
         let sampler = engine.get_sampler(
             vk::Filter::LINEAR,
             vk::Filter::LINEAR,
-            vk::SamplerAddressMode::REPEAT,
-            vk::SamplerAddressMode::REPEAT,
+            vk::SamplerAddressMode::CLAMP_TO_EDGE,
+            vk::SamplerAddressMode::CLAMP_TO_EDGE,
             false,
         )?;
         let desc_layout = vk::DescriptorSetLayoutCreateInfo::builder()
@@ -295,7 +311,7 @@ impl SkyboxRenderer {
             skybox_dims.1,
             vk::Format::R8G8B8A8_SRGB,
             ImageData::Cube(skybox_data),
-            vk::Sampler::null(),
+            sampler,
             false,
         )?;
 
