@@ -16,11 +16,18 @@ pub struct Pipeline {
 
 impl Pipeline {
     #[inline]
-    pub fn builder(shader: &Shader) -> PipelineBuilder {
-        PipelineBuilder::new(shader)
+    pub fn builder_graphics(shader: &Shader) -> GraphicsPipelineBuilder {
+        GraphicsPipelineBuilder::new(shader)
     }
 
-    fn create_pipeline(engine: &VulkanEngine, layout: vk::PipelineLayout, params: PipelineBuilder) -> VulkanResult<vk::Pipeline> {
+    #[inline]
+    pub fn builder_compute<'a>(shader: vk::ShaderModule) -> ComputePipelineBuilder<'a> {
+        ComputePipelineBuilder::new(shader)
+    }
+
+    fn create_graphics_pipeline(
+        engine: &VulkanEngine, layout: vk::PipelineLayout, params: GraphicsPipelineBuilder,
+    ) -> VulkanResult<vk::Pipeline> {
         let device = &engine.device;
         let entry_point = cstr!("main");
         let shader_stages_ci = [
@@ -111,6 +118,26 @@ impl Pipeline {
 
         Ok(pipeline[0])
     }
+
+    fn create_compute_pipeline(engine: &VulkanEngine, layout: vk::PipelineLayout, shader: vk::ShaderModule) -> VulkanResult<vk::Pipeline> {
+        let entry_point = cstr!("main");
+        let shader_stages_ci = vk::PipelineShaderStageCreateInfo::builder()
+            .stage(vk::ShaderStageFlags::COMPUTE)
+            .module(shader)
+            .name(entry_point)
+            .build();
+
+        let pipeline_ci = vk::ComputePipelineCreateInfo::builder().stage(shader_stages_ci).layout(layout);
+
+        let pipeline = unsafe {
+            engine
+                .device
+                .create_compute_pipelines(engine.pipeline_cache, slice::from_ref(&pipeline_ci), None)
+                .map_err(|(_, err)| VkError::VulkanMsg("Error creating compute pipeline", err))?
+        };
+
+        Ok(pipeline[0])
+    }
 }
 
 impl Cleanup<VulkanDevice> for Pipeline {
@@ -130,9 +157,9 @@ impl std::ops::Deref for Pipeline {
 }
 
 #[derive(Debug, Clone)]
-pub struct PipelineBuilder<'a> {
+pub struct GraphicsPipelineBuilder<'a> {
     pub shader: &'a Shader,
-    pub desc_layouts: Vec<vk::DescriptorSetLayout>,
+    pub desc_layouts: &'a [vk::DescriptorSetLayout],
     pub push_constants: &'a [vk::PushConstantRange],
     pub binding_desc: Vec<vk::VertexInputBindingDescription>,
     pub attrib_desc: Vec<vk::VertexInputAttributeDescription>,
@@ -142,11 +169,11 @@ pub struct PipelineBuilder<'a> {
     pub topology: vk::PrimitiveTopology,
 }
 
-impl<'a> PipelineBuilder<'a> {
+impl<'a> GraphicsPipelineBuilder<'a> {
     pub fn new(shader: &'a Shader) -> Self {
         Self {
             shader,
-            desc_layouts: vec![],
+            desc_layouts: &[],
             push_constants: &[],
             binding_desc: vec![],
             attrib_desc: vec![],
@@ -163,13 +190,13 @@ impl<'a> PipelineBuilder<'a> {
         self
     }
 
-    pub fn descriptor_layout(mut self, set_layout: vk::DescriptorSetLayout) -> Self {
-        self.desc_layouts = vec![set_layout];
+    pub fn descriptor_layout(mut self, set_layout: &'a vk::DescriptorSetLayout) -> Self {
+        self.desc_layouts = slice::from_ref(set_layout);
         self
     }
 
-    pub fn descriptor_layouts(mut self, set_layouts: &[vk::DescriptorSetLayout]) -> Self {
-        self.desc_layouts = set_layouts.to_vec();
+    pub fn descriptor_layouts(mut self, set_layouts: &'a [vk::DescriptorSetLayout]) -> Self {
+        self.desc_layouts = set_layouts;
         self
     }
 
@@ -199,7 +226,47 @@ impl<'a> PipelineBuilder<'a> {
             .set_layouts(&self.desc_layouts)
             .push_constant_ranges(self.push_constants)
             .create(&engine.device)?;
-        let handle = Pipeline::create_pipeline(engine, layout, self)?;
+        let handle = Pipeline::create_graphics_pipeline(engine, layout, self)?;
+        Ok(Pipeline { handle, layout })
+    }
+}
+
+pub struct ComputePipelineBuilder<'a> {
+    pub shader: vk::ShaderModule,
+    pub desc_layouts: &'a [vk::DescriptorSetLayout],
+    pub push_constants: &'a [vk::PushConstantRange],
+}
+
+impl<'a> ComputePipelineBuilder<'a> {
+    pub fn new(shader: vk::ShaderModule) -> Self {
+        Self {
+            shader,
+            desc_layouts: &[],
+            push_constants: &[],
+        }
+    }
+
+    pub fn descriptor_layout(mut self, set_layout: &'a vk::DescriptorSetLayout) -> Self {
+        self.desc_layouts = slice::from_ref(set_layout);
+        self
+    }
+
+    pub fn descriptor_layouts(mut self, set_layouts: &'a [vk::DescriptorSetLayout]) -> Self {
+        self.desc_layouts = set_layouts;
+        self
+    }
+
+    pub fn push_constants(mut self, push_constants: &'a [vk::PushConstantRange]) -> Self {
+        self.push_constants = push_constants;
+        self
+    }
+
+    pub fn build(self, engine: &VulkanEngine) -> VulkanResult<Pipeline> {
+        let layout = vk::PipelineLayoutCreateInfo::builder()
+            .set_layouts(&self.desc_layouts)
+            .push_constant_ranges(self.push_constants)
+            .create(&engine.device)?;
+        let handle = Pipeline::create_compute_pipeline(engine, layout, self.shader)?;
         Ok(Pipeline { handle, layout })
     }
 }

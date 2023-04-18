@@ -15,7 +15,7 @@ pub use create::CreateFromInfo;
 pub use device::{CubeData, ImageData, VkBuffer, VkImage, VulkanDevice};
 pub use engine::{CmdBufferRing, DrawPayload, Shader, Texture, UploadBuffer, VulkanEngine};
 pub use instance::{DeviceInfo, DeviceSelection, DeviceType};
-pub use pipeline::{Pipeline, PipelineBuilder, PipelineMode};
+pub use pipeline::{ComputePipelineBuilder, GraphicsPipelineBuilder, Pipeline, PipelineMode};
 pub use renderer::{MaterialData, MeshRenderData, MeshRenderer, SkyboxRenderer};
 pub use types::{Cleanup, VkError, VulkanResult};
 pub use vertex::{IndexInput, VertexInput};

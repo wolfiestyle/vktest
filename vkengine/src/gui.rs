@@ -72,9 +72,9 @@ impl UiRenderer {
             .offset(0)
             .size(size_of::<Mat4>() as _)
             .build();
-        let pipeline = Pipeline::builder(&shader)
+        let pipeline = Pipeline::builder_graphics(&shader)
             .vertex_input::<Vertex>()
-            .descriptor_layout(set_layout)
+            .descriptor_layout(&set_layout)
             .push_constants(slice::from_ref(&push_constants))
             .render_to_swapchain(&engine.swapchain)
             .mode(PipelineMode::Overlay)
@@ -286,9 +286,9 @@ impl UiRenderer {
     }
 
     pub fn rebuild_pipeline(&mut self, engine: &VulkanEngine) -> VulkanResult<()> {
-        let pipeline = Pipeline::builder(&self.shader)
+        let pipeline = Pipeline::builder_graphics(&self.shader)
             .vertex_input::<Vertex>()
-            .descriptor_layout(self.set_layout)
+            .descriptor_layout(&self.set_layout)
             .push_constants(slice::from_ref(&self.push_constants))
             .render_to_swapchain(&engine.swapchain)
             .mode(PipelineMode::Overlay)

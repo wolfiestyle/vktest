@@ -862,6 +862,7 @@ pub struct Texture {
     image: VkImage,
     imgview: vk::ImageView,
     sampler: vk::Sampler,
+    layout: vk::ImageLayout,
 }
 
 impl Texture {
@@ -883,7 +884,12 @@ impl Texture {
             .view_type(data.view_type())
             .subresource_range(image.props.subresource_range())
             .create(device)?;
-        Ok(Self { image, imgview, sampler })
+        Ok(Self {
+            image,
+            imgview,
+            sampler,
+            layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+        })
     }
 
     pub fn new_empty(
@@ -913,7 +919,12 @@ impl Texture {
             .view_type(view_type)
             .subresource_range(image.props.subresource_range())
             .create(&device)?;
-        Ok(Self { image, imgview, sampler })
+        Ok(Self {
+            image,
+            imgview,
+            sampler,
+            layout,
+        })
     }
 
     pub fn update(&mut self, device: &VulkanDevice, x: u32, y: u32, width: u32, height: u32, data: &[u8]) -> VulkanResult<()> {
@@ -925,9 +936,20 @@ impl Texture {
         device.update_image_from_data(&self.image, x as _, y as _, width, height, 0, ImageData::Single(data))
     }
 
+    pub fn transition_layout(&mut self, device: &VulkanDevice, cmd_buffer: vk::CommandBuffer, new_layout: vk::ImageLayout) {
+        device.transition_image_layout(
+            cmd_buffer,
+            *self.image,
+            self.image.props.subresource_range(),
+            self.layout,
+            new_layout,
+        );
+        self.layout = new_layout;
+    }
+
     pub fn descriptor(&self) -> vk::DescriptorImageInfo {
         vk::DescriptorImageInfo {
-            image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            image_layout: self.layout,
             image_view: self.imgview,
             sampler: self.sampler,
         }

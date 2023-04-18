@@ -263,6 +263,7 @@ impl VulkanDevice {
         fn layout_to_access_and_stage(layout: vk::ImageLayout, is_dst: bool) -> (vk::AccessFlags, vk::PipelineStageFlags) {
             match layout {
                 vk::ImageLayout::UNDEFINED if !is_dst => (vk::AccessFlags::empty(), vk::PipelineStageFlags::TOP_OF_PIPE),
+                vk::ImageLayout::TRANSFER_SRC_OPTIMAL => (vk::AccessFlags::TRANSFER_READ, vk::PipelineStageFlags::TRANSFER),
                 vk::ImageLayout::TRANSFER_DST_OPTIMAL => (vk::AccessFlags::TRANSFER_WRITE, vk::PipelineStageFlags::TRANSFER),
                 vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL => (vk::AccessFlags::SHADER_READ, vk::PipelineStageFlags::FRAGMENT_SHADER),
                 vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL => (
@@ -273,6 +274,7 @@ impl VulkanDevice {
                     vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
                     vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS | vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
                 ),
+                vk::ImageLayout::GENERAL => (vk::AccessFlags::SHADER_WRITE, vk::PipelineStageFlags::COMPUTE_SHADER),
                 vk::ImageLayout::PRESENT_SRC_KHR if is_dst => (vk::AccessFlags::empty(), vk::PipelineStageFlags::BOTTOM_OF_PIPE),
                 _ => panic!("Unsupported layout transition"),
             }

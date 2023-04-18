@@ -51,7 +51,7 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
             offset: 0,
             size: size_of::<MaterialData>() as _,
         };
-        let pipeline = Pipeline::builder(&shader)
+        let pipeline = Pipeline::builder_graphics(&shader)
             .vertex_input::<V>()
             .descriptor_layouts(&[push_desc_layout, engine.image_desc_layout])
             .push_constants(slice::from_ref(&push_constants))
@@ -161,7 +161,7 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
     }
 
     pub fn rebuild_pipeline(&mut self, engine: &VulkanEngine) -> VulkanResult<()> {
-        let pipeline = Pipeline::builder(&self.shader)
+        let pipeline = Pipeline::builder_graphics(&self.shader)
             .vertex_input::<V>()
             .descriptor_layouts(&[self.push_desc_layout, engine.image_desc_layout])
             .push_constants(slice::from_ref(&self.push_constants))
@@ -281,8 +281,8 @@ impl SkyboxRenderer {
             .offset(0)
             .size(size_of::<Mat4>() as _)
             .build();
-        let pipeline = Pipeline::builder(&shader)
-            .descriptor_layout(desc_layout)
+        let pipeline = Pipeline::builder_graphics(&shader)
+            .descriptor_layout(&desc_layout)
             .push_constants(slice::from_ref(&push_constants))
             .render_to_swapchain(&engine.swapchain)
             .mode(PipelineMode::Background)
@@ -352,8 +352,8 @@ impl SkyboxRenderer {
     }
 
     pub fn rebuild_pipeline(&mut self, engine: &VulkanEngine) -> VulkanResult<()> {
-        let pipeline = Pipeline::builder(&self.shader)
-            .descriptor_layout(self.desc_layout)
+        let pipeline = Pipeline::builder_graphics(&self.shader)
+            .descriptor_layout(&self.desc_layout)
             .push_constants(slice::from_ref(&self.push_constants))
             .render_to_swapchain(&engine.swapchain)
             .mode(PipelineMode::Background)

@@ -187,7 +187,7 @@ impl VulkanInstance {
             if que_family.queue_count == 0 {
                 continue;
             }
-            if que_family.queue_flags.contains(vk::QueueFlags::GRAPHICS) {
+            if que_family.queue_flags.contains(vk::QueueFlags::GRAPHICS | vk::QueueFlags::COMPUTE) {
                 graphics_idx = Some(idx);
             }
             let present_supp = unsafe {
