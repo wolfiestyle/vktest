@@ -878,12 +878,7 @@ impl Texture {
             ..Default::default()
         };
         let image = device.create_image_from_data(params, data, data.image_create_flags())?;
-        let imgview = vk::ImageViewCreateInfo::builder()
-            .image(*image)
-            .format(format)
-            .view_type(data.view_type())
-            .subresource_range(image.props.subresource_range())
-            .create(device)?;
+        let imgview = image.create_view(device, data.view_type())?;
         Ok(Self {
             image,
             imgview,
@@ -913,12 +908,7 @@ impl Texture {
         } else {
             vk::ImageViewType::TYPE_2D
         };
-        let imgview = vk::ImageViewCreateInfo::builder()
-            .image(*image)
-            .format(params.format)
-            .view_type(view_type)
-            .subresource_range(image.props.subresource_range())
-            .create(&device)?;
+        let imgview = image.create_view(device, view_type)?;
         Ok(Self {
             image,
             imgview,

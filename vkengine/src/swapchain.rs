@@ -139,12 +139,7 @@ impl Swapchain {
             MemoryLocation::GpuOnly,
             "MSAA image",
         )?;
-        let imgview = vk::ImageViewCreateInfo::builder()
-            .image(*image)
-            .format(self.format)
-            .view_type(vk::ImageViewType::TYPE_2D)
-            .subresource_range(image.props.subresource_range())
-            .create(device)?;
+        let imgview = image.create_view(device, vk::ImageViewType::TYPE_2D)?;
 
         device.debug(|d| {
             d.set_object_name(device, &*image, "MSAA color image");
@@ -174,12 +169,7 @@ impl Swapchain {
             "Depth image",
         )?;
 
-        let depth_imgview = vk::ImageViewCreateInfo::builder()
-            .image(*depth_image)
-            .format(depth_format)
-            .view_type(vk::ImageViewType::TYPE_2D)
-            .subresource_range(depth_image.props.subresource_range())
-            .create(device)?;
+        let depth_imgview = depth_image.create_view(device, vk::ImageViewType::TYPE_2D)?;
 
         device.debug(|d| {
             d.set_object_name(device, &*depth_image, "Depth image");

@@ -766,6 +766,24 @@ impl<P> MemoryObject<vk::Buffer, P> {
     }
 }
 
+impl MemoryObject<vk::Image, ImageParams> {
+    #[inline]
+    pub fn create_view(&self, device: &ash::Device, view_type: vk::ImageViewType) -> VulkanResult<vk::ImageView> {
+        self.create_view_subresource(device, view_type, self.props.subresource_range())
+    }
+
+    pub fn create_view_subresource(
+        &self, device: &ash::Device, view_type: vk::ImageViewType, subresource: vk::ImageSubresourceRange,
+    ) -> VulkanResult<vk::ImageView> {
+        vk::ImageViewCreateInfo::builder()
+            .image(self.handle)
+            .format(self.props.format)
+            .view_type(view_type)
+            .subresource_range(subresource)
+            .create(device)
+    }
+}
+
 pub struct MappedMemory<'a> {
     mapped: &'a mut [u8],
 }
