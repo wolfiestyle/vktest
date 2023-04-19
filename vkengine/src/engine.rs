@@ -264,7 +264,7 @@ impl VulkanEngine {
         }
     }
 
-    pub fn create_texture(&self, tex_data: &gltf_import::Texture, gltf: &gltf_import::Gltf) -> VulkanResult<Texture> {
+    pub fn create_gltf_texture(&self, tex_data: &gltf_import::Texture, gltf: &gltf_import::Gltf) -> VulkanResult<Texture> {
         use gltf_import::{MagFilter, MinFilter, WrappingMode};
 
         let image_info = &gltf[tex_data.image];
@@ -329,7 +329,7 @@ impl VulkanEngine {
         let textures = gltf
             .textures
             .iter()
-            .map(|tex| self.create_texture(tex, &gltf))
+            .map(|tex| self.create_gltf_texture(tex, &gltf))
             .collect::<Result<Vec<_>, _>>()?;
 
         let count = gltf.materials.len() as u32 + 1;
