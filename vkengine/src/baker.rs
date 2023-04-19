@@ -5,9 +5,7 @@ use crate::engine::{Texture, VulkanEngine};
 use crate::pipeline::Pipeline;
 use crate::types::*;
 use ash::vk;
-use bytemuck_derive::{Pod, Zeroable};
 use inline_spirv::include_spirv;
-use std::mem::size_of;
 use std::slice;
 use std::sync::Arc;
 
@@ -39,15 +37,7 @@ impl Baker {
                     .build(),
             ])
             .create(&device)?;
-        let push_constants = vk::PushConstantRange {
-            stage_flags: vk::ShaderStageFlags::COMPUTE,
-            offset: 0,
-            size: size_of::<IrrmapParams>() as u32,
-        };
-        let irrmap_pipeline = Pipeline::builder_compute(shader)
-            .descriptor_layout(&desc_layout)
-            .push_constants(slice::from_ref(&push_constants))
-            .build(engine)?;
+        let irrmap_pipeline = Pipeline::builder_compute(shader).descriptor_layout(&desc_layout).build(engine)?;
         unsafe {
             device.destroy_shader_module(shader, None);
         }
@@ -93,13 +83,6 @@ impl Baker {
                         .build(),
                 ],
             );
-            self.device.cmd_push_constants(
-                cmd_buffer,
-                self.irrmap_pipeline.layout,
-                vk::ShaderStageFlags::COMPUTE,
-                0,
-                bytemuck::bytes_of(&IRRMAP_PARAMS),
-            );
             self.device.cmd_dispatch(cmd_buffer, 1, 1, 6);
         }
         irrmap.transition_layout(&self.device, cmd_buffer, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
@@ -115,15 +98,3 @@ impl Drop for Baker {
         }
     }
 }
-
-#[repr(C)]
-#[derive(Debug, Clone, Copy, Default, Pod, Zeroable)]
-struct IrrmapParams {
-    delta_phi: f32,
-    delta_theta: f32,
-}
-
-const IRRMAP_PARAMS: IrrmapParams = IrrmapParams {
-    delta_phi: 2.0 * std::f32::consts::PI / 180.0,
-    delta_theta: std::f32::consts::FRAC_PI_2 / 64.0,
-};
