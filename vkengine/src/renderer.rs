@@ -1,5 +1,5 @@
 use crate::create::CreateFromInfo;
-use crate::device::{CubeData, ImageData, VkBuffer, VulkanDevice};
+use crate::device::{VkBuffer, VulkanDevice};
 use crate::engine::{CmdBufferRing, DrawPayload, Shader, Texture, UploadBuffer, VulkanEngine};
 use crate::pipeline::{Pipeline, PipelineMode};
 use crate::types::{Cleanup, VulkanResult};
@@ -263,12 +263,11 @@ pub struct SkyboxRenderer {
     push_constants: vk::PushConstantRange,
     shader: Shader,
     pipeline: Pipeline,
-    pub texture: Texture,
     cmd_buffers: CmdBufferRing,
 }
 
 impl SkyboxRenderer {
-    pub fn new(engine: &VulkanEngine, skybox_dims: (u32, u32), skybox_data: CubeData) -> VulkanResult<Self> {
+    pub fn new(engine: &VulkanEngine) -> VulkanResult<Self> {
         let device = engine.device.clone();
         let shader = Shader::new(
             &device,
@@ -305,16 +304,6 @@ impl SkyboxRenderer {
             .topology(vk::PrimitiveTopology::TRIANGLE_STRIP)
             .build(engine)?;
 
-        let texture = Texture::new(
-            &device,
-            skybox_dims.0,
-            skybox_dims.1,
-            vk::Format::R8G8B8A8_SRGB,
-            ImageData::Cube(skybox_data),
-            sampler,
-            false,
-        )?;
-
         let cmd_buffers = CmdBufferRing::new(&device)?;
 
         Ok(Self {
@@ -323,16 +312,15 @@ impl SkyboxRenderer {
             push_constants,
             shader,
             pipeline,
-            texture,
             cmd_buffers,
         })
     }
 
-    pub fn render(&mut self, engine: &VulkanEngine) -> VulkanResult<DrawPayload> {
+    pub fn render(&mut self, engine: &VulkanEngine, cubemap: &Texture) -> VulkanResult<DrawPayload> {
         let cmd_buffer = self.cmd_buffers.get_current_buffer(engine)?;
         engine.begin_secondary_draw_commands(cmd_buffer, vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)?;
 
-        let image_info = self.texture.descriptor();
+        let image_info = cubemap.descriptor();
         let viewproj_inv = (engine.projection * engine.camera.get_view_rotation()).inverse();
         unsafe {
             // background
@@ -385,7 +373,6 @@ impl Drop for SkyboxRenderer {
     fn drop(&mut self) {
         unsafe {
             self.device.device_wait_idle().unwrap();
-            self.texture.cleanup(&self.device);
             self.pipeline.cleanup(&self.device);
             self.shader.cleanup(&self.device);
             self.desc_layout.cleanup(&self.device);

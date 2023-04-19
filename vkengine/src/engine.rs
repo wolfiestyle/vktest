@@ -1,6 +1,6 @@
 use crate::camera::Camera;
 use crate::create::CreateFromInfo;
-use crate::device::{ImageData, ImageParams, MappedMemory, VkBuffer, VkImage, VulkanDevice};
+use crate::device::{CubeData, ImageData, ImageParams, MappedMemory, VkBuffer, VkImage, VulkanDevice};
 use crate::instance::DeviceSelection;
 use crate::swapchain::Swapchain;
 use crate::types::*;
@@ -303,6 +303,25 @@ impl VulkanEngine {
             ImageData::Single(image.to_rgba8().as_raw()),
             sampler,
             true,
+        )
+    }
+
+    pub fn create_cubemap(&self, width: u32, height: u32, cube_data: CubeData) -> VulkanResult<Texture> {
+        let sampler = self.get_sampler(
+            vk::Filter::LINEAR,
+            vk::Filter::LINEAR,
+            vk::SamplerAddressMode::CLAMP_TO_EDGE,
+            vk::SamplerAddressMode::CLAMP_TO_EDGE,
+            false,
+        )?;
+        Texture::new(
+            &self.device,
+            width,
+            height,
+            vk::Format::R8G8B8A8_SRGB,
+            ImageData::Cube(cube_data),
+            sampler,
+            false,
         )
     }
 

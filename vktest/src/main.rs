@@ -39,7 +39,7 @@ fn main() -> VulkanResult<()> {
     }
 
     let skybox_dir = args.skybox_dir.unwrap_or_else(|| "data/skybox".into());
-    let skybox = std::thread::scope(|scope| {
+    let skybox_img = std::thread::scope(|scope| {
         let dir_ref = &skybox_dir;
         ["posx", "negx", "posy", "negy", "posz", "negz"]
             .map(|side| {
@@ -52,7 +52,7 @@ fn main() -> VulkanResult<()> {
             })
             .map(|jh| jh.join().unwrap())
     });
-    let cube_data = CubeData::try_from_iter(skybox.iter().map(|img| img.as_raw().as_slice())).unwrap();
+    let cube_data = CubeData::try_from_iter(skybox_img.iter().map(|img| img.as_raw().as_slice())).unwrap();
 
     let event_loop = EventLoop::new();
     let window = winit::window::WindowBuilder::new()
@@ -97,13 +97,14 @@ fn main() -> VulkanResult<()> {
     vk_app.camera.look_at([0.0; 3]);
     let mut controller = CameraController::new(&vk_app.camera);
 
-    let mut skybox = SkyboxRenderer::new(&vk_app, skybox[0].dimensions(), cube_data)?;
+    let mut skybox = SkyboxRenderer::new(&vk_app)?;
+    let skybox_tex = vk_app.create_cubemap(skybox_img[0].width(), skybox_img[0].height(), cube_data)?;
 
     let mut gui = UiRenderer::new(&event_loop, &vk_app)?;
     let mut show_gui = true;
 
     let baker = Baker::new(&vk_app)?;
-    let irrmap = baker.generate_irradiance_map(&skybox.texture)?;
+    let irrmap = baker.generate_irradiance_map(&skybox_tex)?;
 
     let thread_pool = yastl::Pool::new(16);
     let mut draw_buffer = vec![];
@@ -273,7 +274,7 @@ fn main() -> VulkanResult<()> {
                         });
                     }
                 }
-                scope.execute(|| skybox_cmds = skybox.render(&vk_app));
+                scope.execute(|| skybox_cmds = skybox.render(&vk_app, &skybox_tex));
                 scope.execute(|| gui_cmds = gui.draw(&vk_app));
             });
 
