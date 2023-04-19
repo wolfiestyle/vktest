@@ -294,7 +294,7 @@ impl SkyboxRenderer {
         let push_constants = vk::PushConstantRange::builder()
             .stage_flags(vk::ShaderStageFlags::VERTEX)
             .offset(0)
-            .size(size_of::<Mat4>() as _)
+            .size(size_of::<SkyboxParams>() as _)
             .build();
         let pipeline = Pipeline::builder_graphics(&shader)
             .descriptor_layout(&desc_layout)
@@ -321,7 +321,9 @@ impl SkyboxRenderer {
         engine.begin_secondary_draw_commands(cmd_buffer, vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)?;
 
         let image_info = cubemap.descriptor();
-        let viewproj_inv = (engine.projection * engine.camera.get_view_rotation()).inverse();
+        let params = SkyboxParams {
+            viewproj_inv: (engine.projection * engine.camera.get_view_rotation()).inverse(),
+        };
         unsafe {
             // background
             self.device
@@ -346,7 +348,7 @@ impl SkyboxRenderer {
                 self.pipeline.layout,
                 vk::ShaderStageFlags::VERTEX,
                 0,
-                bytemuck::bytes_of(&viewproj_inv),
+                bytemuck::bytes_of(&params),
             );
             self.device.cmd_draw(cmd_buffer, 4, 1, 0, 0);
             self.device.debug(|d| d.cmd_end_label(cmd_buffer));
@@ -379,4 +381,10 @@ impl Drop for SkyboxRenderer {
             self.cmd_buffers.cleanup(&self.device);
         }
     }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, Pod, Zeroable)]
+struct SkyboxParams {
+    viewproj_inv: Mat4,
 }
