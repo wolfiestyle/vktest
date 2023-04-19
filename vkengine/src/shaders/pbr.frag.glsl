@@ -1,4 +1,5 @@
 #version 450
+#include "pbr.inc.glsl"
 layout(set = 0, binding = 0) uniform ObjectUniforms {
     mat4 mvp;
     mat4 model;
@@ -32,33 +33,6 @@ layout(location = 0) in FragIn {
 
 layout(location = 0) out vec4 outColor;
 
-const float PI = 3.14159265359;
-const float Epsilon = 0.00001;
-const vec3 Fdielectric = vec3(0.04);
-
-float distribution_ggx(float NdotH, float roughness) {
-    float a = roughness * roughness;
-    float a2 = a * a;
-    float denom = NdotH * NdotH * (a2 - 1.0) + 1.0;
-    return a2 / (PI * denom * denom);
-}
-
-float geometry_schlick_ggx(float NdotV, float k) {
-    return NdotV / (NdotV * (1.0 - k) + k);
-}
-
-float geometry_smith(float NdotL, float NdotV, float roughness) {
-    float r = roughness + 1.0;
-    float k = r * r / 8.0;
-    float ggx1 = geometry_schlick_ggx(NdotL, k);
-    float ggx2 = geometry_schlick_ggx(NdotV, k);
-    return ggx1 * ggx2;
-}
-
-vec3 fresnel_schlick(float cosTheta, vec3 F0) {
-    return F0 + (1.0 - F0) * pow(1.0 - cosTheta, 5.0);
-}
-
 vec3 direct_light(vec4 light, vec3 light_color, vec3 N, vec3 albedo, vec2 metalrough, vec3 irradiance) {
     vec3 V = normalize(view_pos.xyz - frag.Pos);
     vec3 dir = light.xyz - frag.Pos * light.w;
@@ -71,15 +45,15 @@ vec3 direct_light(vec4 light, vec3 light_color, vec3 N, vec3 albedo, vec2 metalr
     float NdotH = max(dot(N, H), 0.0);
     float NdotL = max(dot(N, L), 0.0);
     float NdotV = max(dot(N, V), 0.0);
-    float NDF = distribution_ggx(NdotH, metalrough.g);
-    float G = geometry_smith(NdotL, NdotV, metalrough.g);
-    vec3 F = fresnel_schlick(max(dot(H, V), 0.0), F0);
+    float NDF = distributionGGX(NdotH, metalrough.g);
+    float G = geometrySmith(NdotL, NdotV, metalrough.g);
+    vec3 F = fresnelSchlick(max(dot(H, V), 0.0), F0);
     vec3 specular = (NDF * G * F) / max(4.0 * NdotV * NdotL, Epsilon);
 
     vec3 kD = mix(vec3(1.0) - F, vec3(0.0), metalrough.r);
     vec3 diffuse = kD * albedo / PI;
 
-    vec3 kD_amb = 1.0 - fresnel_schlick(NdotV, F0);
+    vec3 kD_amb = 1.0 - fresnelSchlick(NdotV, F0);
     vec3 ambient = kD_amb * irradiance * albedo;
 
     return ambient + (diffuse + specular) * radiance * NdotL;
