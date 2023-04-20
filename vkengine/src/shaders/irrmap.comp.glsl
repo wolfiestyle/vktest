@@ -5,19 +5,15 @@ layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 layout(binding = 0) uniform samplerCube inputTex;
 layout(binding = 1, rgba16f) uniform writeonly imageCube outputTex;
 
-const uint NumSamples = 4096;
-
 void main() {
     vec3 N = getCubemapDir(gl_GlobalInvocationID, imageSize(outputTex));
-    vec3 S, T;
-    computeTangentBasis(N, S, T);
+    mat3 TBN = computeTangentBasis(N);
 
     vec3 color = vec3(0.0);
     float total_weight = 0.0;
     for (uint i = 0; i < NumSamples; ++i) {
-        vec2 Xi = sampleHammersley(i, NumSamples);
-        vec3 tangent_dir = sampleHemisphere(Xi);
-        vec3 world_dir = S * tangent_dir.x + T * tangent_dir.y + N * tangent_dir.z;
+        vec2 Xi = sampleHammersley(i);
+        vec3 world_dir = TBN * sampleHemisphere(Xi);
         float cosTheta = max(dot(world_dir, N), 0.0);
         color += texture(inputTex, world_dir).rgb * cosTheta;
         total_weight += cosTheta;

@@ -5,16 +5,14 @@ layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
 layout(binding = 0, rg16f) uniform writeonly image2D outputTex;
 
-const uint NumSamples = 4096;
-
 vec2 integrateBRDF(float NdotV, float roughness) {
     vec3 V = vec3(sqrt(1.0 - NdotV * NdotV), 0.0, NdotV);
     //vec3 N = vec3(0.0, 0.0, 1.0);
     vec2 res = vec2(0.0);
     for (uint i = 0; i < NumSamples; ++i) {
-        vec2 Xi = sampleHammersley(i, NumSamples);
+        vec2 Xi = sampleHammersley(i);
         vec3 H = importanceSampleGGX(Xi, roughness);
-        vec3 L = normalize(2.0 * dot(V, H) * H - V);
+        vec3 L = normalize(reflect(-V, H));
         float NdotL = max(L.z, 0.0);
         float NdotH = max(H.z, 0.0);
         float VdotH = max(dot(V, H), 0.0);

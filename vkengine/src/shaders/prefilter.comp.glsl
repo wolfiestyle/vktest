@@ -9,24 +9,20 @@ layout(push_constant) uniform PushConstants {
     float roughness;
 };
 
-const uint NumSamples = 4096;
-
 void main() {
     vec3 N = getCubemapDir(gl_GlobalInvocationID, imageSize(outputTex));
-    vec3 S, T;
-    computeTangentBasis(N, S, T);
+    mat3 TBN = computeTangentBasis(N);
 
     vec3 color = vec3(0.0);
     float total_weight = 0.0;
     for (uint i = 0; i < NumSamples; ++i) {
-        vec2 Xi = sampleHammersley(i, NumSamples);
-        vec3 tangent_dir = importanceSampleGGX(Xi, roughness);
-        vec3 H = S * tangent_dir.x + T * tangent_dir.y + N * tangent_dir.z;
-        vec3 L = normalize(2.0 * dot(N, H) * H - N);
+        vec2 Xi = sampleHammersley(i);
+        vec3 H = TBN * importanceSampleGGX(Xi, roughness);
+        vec3 L = normalize(reflect(-N, H));
         float NdotL = max(dot(N, L), 0.0);
         color += texture(inputTex, L).rgb * NdotL;
         total_weight += NdotL;
     }
-    vec3 prefiltered = color / total_weight;
+    vec3 prefiltered = color / (total_weight != 0.0 ? total_weight : NumSamples);
     imageStore(outputTex, ivec3(gl_GlobalInvocationID), vec4(prefiltered, 1.0));
 }
