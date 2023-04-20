@@ -155,7 +155,7 @@ impl UiRenderer {
     fn update_textures(&mut self, tex_delta: TexturesDelta) -> VulkanResult<Vec<Texture>> {
         // create or update textures
         for (id, image) in tex_delta.set {
-            let (pixels, [width, height]) = match image.image {
+            let (pixels, size) = match image.image {
                 egui::ImageData::Color(img) => (img.pixels, img.size.map(|v| v as _)),
                 egui::ImageData::Font(img) => (img.srgba_pixels(None).collect(), img.size.map(|v| v as _)),
             };
@@ -164,8 +164,7 @@ impl UiRenderer {
                 Entry::Vacant(entry) => {
                     entry.insert(Texture::new(
                         &self.device,
-                        width,
-                        height,
+                        size.into(),
                         vk::Format::R8G8B8A8_SRGB,
                         ImageData::Single(bytes),
                         vk::Sampler::null(),
@@ -173,8 +172,8 @@ impl UiRenderer {
                     )?);
                 }
                 Entry::Occupied(mut entry) => {
-                    let [x, y] = image.pos.unwrap_or([0, 0]).map(|v| v as _);
-                    entry.get_mut().update(&self.device, x, y, width, height, bytes)?;
+                    let pos = image.pos.unwrap_or([0, 0]).map(|v| v as _);
+                    entry.get_mut().update(&self.device, pos.into(), size.into(), bytes)?;
                 }
             }
         }

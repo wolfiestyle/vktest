@@ -256,32 +256,32 @@ impl VulkanDevice {
         })
     }
 
+    fn layout_to_access_and_stage(layout: vk::ImageLayout, is_dst: bool) -> (vk::AccessFlags, vk::PipelineStageFlags) {
+        match layout {
+            vk::ImageLayout::UNDEFINED if !is_dst => (vk::AccessFlags::empty(), vk::PipelineStageFlags::TOP_OF_PIPE),
+            vk::ImageLayout::TRANSFER_SRC_OPTIMAL => (vk::AccessFlags::TRANSFER_READ, vk::PipelineStageFlags::TRANSFER),
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL => (vk::AccessFlags::TRANSFER_WRITE, vk::PipelineStageFlags::TRANSFER),
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL => (vk::AccessFlags::SHADER_READ, vk::PipelineStageFlags::FRAGMENT_SHADER),
+            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL => (
+                vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            ),
+            vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL => (
+                vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
+                vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS | vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
+            ),
+            vk::ImageLayout::GENERAL => (vk::AccessFlags::SHADER_WRITE, vk::PipelineStageFlags::COMPUTE_SHADER),
+            vk::ImageLayout::PRESENT_SRC_KHR if is_dst => (vk::AccessFlags::empty(), vk::PipelineStageFlags::BOTTOM_OF_PIPE),
+            _ => panic!("Unsupported layout transition"),
+        }
+    }
+
     pub fn transition_image_layout(
         &self, cmd_buffer: vk::CommandBuffer, image: vk::Image, subresource: vk::ImageSubresourceRange, old_layout: vk::ImageLayout,
         new_layout: vk::ImageLayout,
     ) {
-        fn layout_to_access_and_stage(layout: vk::ImageLayout, is_dst: bool) -> (vk::AccessFlags, vk::PipelineStageFlags) {
-            match layout {
-                vk::ImageLayout::UNDEFINED if !is_dst => (vk::AccessFlags::empty(), vk::PipelineStageFlags::TOP_OF_PIPE),
-                vk::ImageLayout::TRANSFER_SRC_OPTIMAL => (vk::AccessFlags::TRANSFER_READ, vk::PipelineStageFlags::TRANSFER),
-                vk::ImageLayout::TRANSFER_DST_OPTIMAL => (vk::AccessFlags::TRANSFER_WRITE, vk::PipelineStageFlags::TRANSFER),
-                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL => (vk::AccessFlags::SHADER_READ, vk::PipelineStageFlags::FRAGMENT_SHADER),
-                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL => (
-                    vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
-                    vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                ),
-                vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL => (
-                    vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
-                    vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS | vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
-                ),
-                vk::ImageLayout::GENERAL => (vk::AccessFlags::SHADER_WRITE, vk::PipelineStageFlags::COMPUTE_SHADER),
-                vk::ImageLayout::PRESENT_SRC_KHR if is_dst => (vk::AccessFlags::empty(), vk::PipelineStageFlags::BOTTOM_OF_PIPE),
-                _ => panic!("Unsupported layout transition"),
-            }
-        }
-
-        let (src_access, src_stage) = layout_to_access_and_stage(old_layout, false);
-        let (dst_access, dst_stage) = layout_to_access_and_stage(new_layout, true);
+        let (src_access, src_stage) = Self::layout_to_access_and_stage(old_layout, false);
+        let (dst_access, dst_stage) = Self::layout_to_access_and_stage(new_layout, true);
 
         let barrier = vk::ImageMemoryBarrier::builder()
             .image(image)
@@ -306,21 +306,18 @@ impl VulkanDevice {
     }
 
     pub(crate) fn image_reuse_barrier(&self, cmd_buffer: vk::CommandBuffer, image: vk::Image, format: vk::Format, layout: vk::ImageLayout) {
-        let (src_access, dst_access, src_stage, dst_stage) = match layout {
+        let (src_access, src_stage) = match layout {
             vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL => (
                 vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
-                vk::AccessFlags::COLOR_ATTACHMENT_READ | vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
-                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
                 vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
             ),
             vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL => (
                 vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
-                vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
                 vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
-                vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS | vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
             ),
             _ => panic!("Unsupported image barrier"),
         };
+        let (dst_access, dst_stage) = Self::layout_to_access_and_stage(layout, true);
 
         let barrier = vk::ImageMemoryBarrier::builder()
             .image(image)
@@ -490,8 +487,7 @@ impl VulkanDevice {
             "Texture image",
         )?;
         // write image data to the staging buffer
-        let mut mem = src_buffer.map()?;
-        data.write_to_buffer(&mut mem, layer_size);
+        data.write_to_buffer(&mut src_buffer.map()?, layer_size);
         // setup all layers and mip levels for transfer
         let cmd_buffer = self.begin_one_time_commands()?;
         self.transition_image_layout(
@@ -541,18 +537,19 @@ impl VulkanDevice {
         let size = layer_size as vk::DeviceSize * layers as vk::DeviceSize;
         let mut src_buffer = self.allocate_cpu_buffer(size, vk::BufferUsageFlags::TRANSFER_SRC, "Staging")?;
 
-        let mut mem = src_buffer.map()?;
-        data.write_to_buffer(&mut mem, layer_size);
+        data.write_to_buffer(&mut src_buffer.map()?, layer_size);
 
         let cmd_buffer = self.begin_one_time_commands()?;
+        // transition everything because we're gonna recreate mipmaps after
         self.transition_image_layout(
             cmd_buffer,
             image.handle,
-            image.props.subresource_range(), //FIXME: transition only affected layers
+            image.props.subresource_range(),
             vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
         );
         unsafe {
+            // update base mip
             let region = vk::BufferImageCopy::builder()
                 .image_subresource(vk::ImageSubresourceLayers {
                     aspect_mask: image.props.aspect_flags(),
@@ -569,15 +566,9 @@ impl VulkanDevice {
                 vk::ImageLayout::TRANSFER_DST_OPTIMAL,
                 slice::from_ref(&region),
             );
-            //TODO: recreate mipmaps after update
+            // re-generate mips and put image back in shader read layout
+            self.generate_mipmaps(cmd_buffer, image.handle, image.props);
         }
-        self.transition_image_layout(
-            cmd_buffer,
-            image.handle,
-            image.props.subresource_range(),
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-        );
         self.end_one_time_commands(cmd_buffer)?;
 
         self.dispose_of(src_buffer);
@@ -784,6 +775,7 @@ impl MemoryObject<vk::Image, ImageParams> {
     }
 }
 
+#[derive(Debug)]
 pub struct MappedMemory<'a> {
     mapped: &'a mut [u8],
 }

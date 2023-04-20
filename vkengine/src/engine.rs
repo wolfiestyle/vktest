@@ -57,8 +57,7 @@ impl VulkanEngine {
 
         let default_texture = Texture::new(
             &device,
-            1,
-            1,
+            UVec2::ONE,
             vk::Format::R8G8B8A8_UNORM,
             ImageData::Single(&[255; 4]),
             vk::Sampler::null(),
@@ -66,8 +65,7 @@ impl VulkanEngine {
         )?;
         let default_normalmap = Texture::new(
             &device,
-            1,
-            1,
+            UVec2::ONE,
             vk::Format::R8G8B8A8_UNORM,
             ImageData::Single(&[128, 128, 255, 0]),
             vk::Sampler::null(),
@@ -297,8 +295,7 @@ impl VulkanEngine {
         };
         Texture::new(
             &self.device,
-            image.width(),
-            image.height(),
+            [image.width(), image.height()].into(),
             format,
             ImageData::Single(image.to_rgba8().as_raw()),
             sampler,
@@ -316,8 +313,7 @@ impl VulkanEngine {
         )?;
         Texture::new(
             &self.device,
-            width,
-            height,
+            [width, height].into(),
             vk::Format::R8G8B8A8_SRGB,
             ImageData::Cube(cube_data),
             sampler,
@@ -886,14 +882,14 @@ pub struct Texture {
 
 impl Texture {
     pub fn new(
-        device: &VulkanDevice, width: u32, height: u32, format: vk::Format, data: ImageData, sampler: vk::Sampler, gen_mipmaps: bool,
+        device: &VulkanDevice, size: UVec2, format: vk::Format, data: ImageData, sampler: vk::Sampler, gen_mipmaps: bool,
     ) -> VulkanResult<Self> {
         let params = ImageParams {
-            width,
-            height,
+            width: size.x,
+            height: size.y,
             format,
             layers: data.layer_count(),
-            mip_levels: if gen_mipmaps { width.max(height).ilog2() + 1 } else { 1 },
+            mip_levels: if gen_mipmaps { size.max_element().ilog2() + 1 } else { 1 },
             ..Default::default()
         };
         let image = device.create_image_from_data(params, data, data.image_create_flags())?;
@@ -936,13 +932,12 @@ impl Texture {
         })
     }
 
-    pub fn update(&mut self, device: &VulkanDevice, x: u32, y: u32, width: u32, height: u32, data: &[u8]) -> VulkanResult<()> {
-        let w = self.image.props.width;
-        let h = self.image.props.height;
-        if x >= w || y >= h || x + width >= w || y + height >= h {
+    pub fn update(&mut self, device: &VulkanDevice, pos: UVec2, size: UVec2, data: &[u8]) -> VulkanResult<()> {
+        let tex_size = UVec2::new(self.image.props.width, self.image.props.height);
+        if pos.cmpge(tex_size).any() || (pos + size).cmpge(tex_size).any() {
             return VkError::InvalidArgument("Texture update rect out of bounds").into();
         }
-        device.update_image_from_data(&self.image, x as _, y as _, width, height, 0, ImageData::Single(data))
+        device.update_image_from_data(&self.image, pos.x as _, pos.y as _, size.x, size.y, 0, ImageData::Single(data))
     }
 
     pub fn transition_layout(&mut self, device: &VulkanDevice, cmd_buffer: vk::CommandBuffer, new_layout: vk::ImageLayout) {
