@@ -329,7 +329,7 @@ impl VulkanEngine {
         let textures = gltf
             .textures
             .iter()
-            .map(|tex| self.create_gltf_texture(tex, &gltf))
+            .map(|tex| self.create_gltf_texture(tex, gltf))
             .collect::<Result<Vec<_>, _>>()?;
 
         let count = gltf.materials.len() as u32 + 1;

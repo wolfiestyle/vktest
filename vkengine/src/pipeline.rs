@@ -127,14 +127,13 @@ impl Pipeline {
     fn create_compute_pipeline(
         engine: &VulkanEngine, layout: vk::PipelineLayout, params: ComputePipelineBuilder,
     ) -> VulkanResult<vk::Pipeline> {
-        let entry_point = cstr!("main");
         let spec_info = vk::SpecializationInfo::builder()
             .map_entries(params.spec_entries)
             .data(params.spec_data);
         let shader_stages_ci = vk::PipelineShaderStageCreateInfo::builder()
             .stage(vk::ShaderStageFlags::COMPUTE)
             .module(params.shader)
-            .name(entry_point)
+            .name(cstr!("main"))
             .specialization_info(&spec_info)
             .build();
 
@@ -244,7 +243,7 @@ impl<'a> GraphicsPipelineBuilder<'a> {
 
     pub fn build(self, engine: &VulkanEngine) -> VulkanResult<Pipeline> {
         let layout = vk::PipelineLayoutCreateInfo::builder()
-            .set_layouts(&self.desc_layouts)
+            .set_layouts(self.desc_layouts)
             .push_constant_ranges(self.push_constants)
             .create(&engine.device)?;
         let handle = Pipeline::create_graphics_pipeline(engine, layout, self)?;
@@ -294,7 +293,7 @@ impl<'a> ComputePipelineBuilder<'a> {
 
     pub fn build(self, engine: &VulkanEngine) -> VulkanResult<Pipeline> {
         let layout = vk::PipelineLayoutCreateInfo::builder()
-            .set_layouts(&self.desc_layouts)
+            .set_layouts(self.desc_layouts)
             .push_constant_ranges(self.push_constants)
             .create(&engine.device)?;
         let handle = Pipeline::create_compute_pipeline(engine, layout, self)?;
