@@ -30,16 +30,21 @@ impl Pipeline {
     ) -> VulkanResult<vk::Pipeline> {
         let device = &engine.device;
         let entry_point = cstr!("main");
+        let spec_info = vk::SpecializationInfo::builder()
+            .map_entries(params.spec_entries)
+            .data(params.spec_data);
         let shader_stages_ci = [
             vk::PipelineShaderStageCreateInfo::builder()
                 .stage(vk::ShaderStageFlags::VERTEX)
                 .module(params.shader.vert)
                 .name(entry_point)
+                .specialization_info(&spec_info)
                 .build(),
             vk::PipelineShaderStageCreateInfo::builder()
                 .stage(vk::ShaderStageFlags::FRAGMENT)
                 .module(params.shader.frag)
                 .name(entry_point)
+                .specialization_info(&spec_info)
                 .build(),
         ];
 
@@ -119,12 +124,18 @@ impl Pipeline {
         Ok(pipeline[0])
     }
 
-    fn create_compute_pipeline(engine: &VulkanEngine, layout: vk::PipelineLayout, shader: vk::ShaderModule) -> VulkanResult<vk::Pipeline> {
+    fn create_compute_pipeline(
+        engine: &VulkanEngine, layout: vk::PipelineLayout, params: ComputePipelineBuilder,
+    ) -> VulkanResult<vk::Pipeline> {
         let entry_point = cstr!("main");
+        let spec_info = vk::SpecializationInfo::builder()
+            .map_entries(params.spec_entries)
+            .data(params.spec_data);
         let shader_stages_ci = vk::PipelineShaderStageCreateInfo::builder()
             .stage(vk::ShaderStageFlags::COMPUTE)
-            .module(shader)
+            .module(params.shader)
             .name(entry_point)
+            .specialization_info(&spec_info)
             .build();
 
         let pipeline_ci = vk::ComputePipelineCreateInfo::builder().stage(shader_stages_ci).layout(layout);
@@ -167,6 +178,8 @@ pub struct GraphicsPipelineBuilder<'a> {
     pub depth_format: vk::Format,
     pub mode: PipelineMode,
     pub topology: vk::PrimitiveTopology,
+    pub spec_entries: &'a [vk::SpecializationMapEntry],
+    pub spec_data: &'a [u8],
 }
 
 impl<'a> GraphicsPipelineBuilder<'a> {
@@ -181,6 +194,8 @@ impl<'a> GraphicsPipelineBuilder<'a> {
             depth_format: vk::Format::UNDEFINED,
             mode: PipelineMode::Opaque,
             topology: vk::PrimitiveTopology::TRIANGLE_LIST,
+            spec_entries: &[],
+            spec_data: &[],
         }
     }
 
@@ -221,6 +236,12 @@ impl<'a> GraphicsPipelineBuilder<'a> {
         self
     }
 
+    pub fn spec_constants(mut self, entries: &'a [vk::SpecializationMapEntry], data: &'a [u8]) -> Self {
+        self.spec_entries = entries;
+        self.spec_data = data;
+        self
+    }
+
     pub fn build(self, engine: &VulkanEngine) -> VulkanResult<Pipeline> {
         let layout = vk::PipelineLayoutCreateInfo::builder()
             .set_layouts(&self.desc_layouts)
@@ -235,6 +256,8 @@ pub struct ComputePipelineBuilder<'a> {
     pub shader: vk::ShaderModule,
     pub desc_layouts: &'a [vk::DescriptorSetLayout],
     pub push_constants: &'a [vk::PushConstantRange],
+    pub spec_entries: &'a [vk::SpecializationMapEntry],
+    pub spec_data: &'a [u8],
 }
 
 impl<'a> ComputePipelineBuilder<'a> {
@@ -243,6 +266,8 @@ impl<'a> ComputePipelineBuilder<'a> {
             shader,
             desc_layouts: &[],
             push_constants: &[],
+            spec_entries: &[],
+            spec_data: &[],
         }
     }
 
@@ -261,12 +286,18 @@ impl<'a> ComputePipelineBuilder<'a> {
         self
     }
 
+    pub fn spec_constants(mut self, entries: &'a [vk::SpecializationMapEntry], data: &'a [u8]) -> Self {
+        self.spec_entries = entries;
+        self.spec_data = data;
+        self
+    }
+
     pub fn build(self, engine: &VulkanEngine) -> VulkanResult<Pipeline> {
         let layout = vk::PipelineLayoutCreateInfo::builder()
             .set_layouts(&self.desc_layouts)
             .push_constant_ranges(self.push_constants)
             .create(&engine.device)?;
-        let handle = Pipeline::create_compute_pipeline(engine, layout, self.shader)?;
+        let handle = Pipeline::create_compute_pipeline(engine, layout, self)?;
         Ok(Pipeline { handle, layout })
     }
 }
