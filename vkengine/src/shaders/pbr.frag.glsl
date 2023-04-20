@@ -1,11 +1,17 @@
 #version 450
 #include "pbr.inc.glsl"
+struct LightData {
+    vec4 pos;
+    vec4 color;
+};
+
+layout(constant_id = 0) const uint NumLights = 1;
+
 layout(set = 0, binding = 0) uniform ObjectUniforms {
     mat4 mvp;
     mat4 model;
-    vec4 light;
-    vec4 light_color;
     vec4 view_pos;
+    LightData lights[NumLights];
 };
 
 layout(set = 0, binding = 1) uniform samplerCube irradianceMap;
@@ -35,29 +41,32 @@ layout(location = 0) in FragIn {
 
 layout(location = 0) out vec4 outColor;
 
-vec3 pbr_light(vec4 light, vec3 light_color, vec3 N, vec3 albedo, float metallic, float roughness, float ao) {
+vec3 pbr_light(vec3 N, vec3 albedo, float metallic, float roughness, float ao) {
     vec3 V = normalize(view_pos.xyz - frag.Pos);
     vec3 R = reflect(-V, N);
     float NdotV = max(dot(N, V), 0.0);
     vec3 F0 = mix(Fdielectric, albedo, metallic);
 
     // direct lighting
-    vec3 dir = light.xyz - frag.Pos * light.w;
-    vec3 L = normalize(dir);
-    vec3 H = normalize(V + L);
-    float attenuation = mix(1.0, dot(dir, dir), light.w);
-    vec3 radiance = light_color / attenuation;
+    vec3 direct = vec3(0.0);
+    for (int i = 0; i < lights.length(); ++i) {
+        vec3 dir = lights[i].pos.xyz - frag.Pos * lights[i].pos.w;
+        vec3 L = normalize(dir);
+        vec3 H = normalize(V + L);
+        float attenuation = mix(1.0, dot(dir, dir), lights[i].pos.w);
+        vec3 radiance = lights[i].color.rgb / attenuation;
 
-    float NdotH = max(dot(N, H), 0.0);
-    float NdotL = max(dot(N, L), 0.0);
-    float NDF = distributionGGX(NdotH, roughness);
-    float G = geometrySmith(NdotL, NdotV, roughness);
-    vec3 F = fresnelSchlick(max(dot(H, V), 0.0), F0);
-    vec3 specular = (NDF * G * F) / max(4.0 * NdotV * NdotL, Epsilon);
+        float NdotH = max(dot(N, H), 0.0);
+        float NdotL = max(dot(N, L), 0.0);
+        float NDF = distributionGGX(NdotH, roughness);
+        float G = geometrySmith(NdotL, NdotV, roughness);
+        vec3 F = fresnelSchlick(max(dot(H, V), 0.0), F0);
+        vec3 specular = (NDF * G * F) / max(4.0 * NdotV * NdotL, Epsilon);
 
-    vec3 kD = mix(vec3(1.0) - F, vec3(0.0), metallic);
-    vec3 diffuse = kD * albedo / PI;
-    vec3 direct = (diffuse + specular) * radiance * NdotL;
+        vec3 kD = mix(vec3(1.0) - F, vec3(0.0), metallic);
+        vec3 diffuse = kD * albedo / PI;
+        direct += (diffuse + specular) * radiance * NdotL;
+    }
 
     // IBL
     vec3 envF = fresnelSchlickRoughness(NdotV, F0, roughness);
@@ -81,7 +90,7 @@ void main() {
     vec3 emissive = texture(texEmissive, frag.TexCoord).rgb * material.emissive;
     float occlusion = (texture(texOcclusion, frag.TexCoord).r - 1.0) * material.base_pbr.r + 1.0;
     vec3 normal = normalize(frag.TBN * normal_map * vec3(vec2(material.normal_scale), 1.0));
-    vec3 direct = pbr_light(light, light_color.rgb, normal, albedo.rgb, metalrough.r, metalrough.g, occlusion);
+    vec3 direct = pbr_light(normal, albedo.rgb, metalrough.r, metalrough.g, occlusion);
     vec3 color = direct + emissive;
     outColor = vec4(color, 1.0);
 }

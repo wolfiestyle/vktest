@@ -75,6 +75,14 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
             .vertex_input::<V>()
             .descriptor_layouts(&[push_desc_layout, engine.image_desc_layout])
             .push_constants(slice::from_ref(&push_constants))
+            .spec_constants(
+                &[vk::SpecializationMapEntry {
+                    constant_id: 0,
+                    offset: 0,
+                    size: size_of::<u32>(),
+                }],
+                bytemuck::bytes_of(&NUM_LIGHTS),
+            )
             .render_to_swapchain(&engine.swapchain)
             .build(engine)?;
 
@@ -192,13 +200,14 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
     }
 
     fn calc_uniforms(&self, engine: &VulkanEngine) -> ObjectUniforms {
-        let ambient = 0.1;
         ObjectUniforms {
             mvp: engine.view_proj * self.model,
             model: self.model.into(),
-            light: engine.light,
-            light_color: Vec3::splat(3.0).extend(ambient),
             view_pos: engine.camera.position.extend(1.0),
+            lights: [LightData {
+                pos: engine.light,
+                color: Vec3::splat(3.0).extend(0.0),
+            }],
         }
     }
 
@@ -207,6 +216,14 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
             .vertex_input::<V>()
             .descriptor_layouts(&[self.push_desc_layout, engine.image_desc_layout])
             .push_constants(slice::from_ref(&self.push_constants))
+            .spec_constants(
+                &[vk::SpecializationMapEntry {
+                    constant_id: 0,
+                    offset: 0,
+                    size: size_of::<u32>(),
+                }],
+                bytemuck::bytes_of(&NUM_LIGHTS),
+            )
             .render_to_swapchain(&engine.swapchain)
             .build(engine)?;
         let old_pipeline = std::mem::replace(&mut self.pipeline, pipeline);
@@ -251,14 +268,22 @@ impl MeshRenderData {
     }
 }
 
+const NUM_LIGHTS: u32 = 1;
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, Pod, Zeroable)]
+struct LightData {
+    pos: Vec4,
+    color: Vec4,
+}
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default, Pod, Zeroable)]
 struct ObjectUniforms {
     mvp: Mat4,
     model: Mat4,
-    light: Vec4,
-    light_color: Vec4,
     view_pos: Vec4,
+    lights: [LightData; NUM_LIGHTS as usize],
 }
 
 #[repr(C)]
