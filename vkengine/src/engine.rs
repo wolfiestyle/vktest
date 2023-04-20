@@ -933,11 +933,7 @@ impl Texture {
     }
 
     pub fn update(&mut self, device: &VulkanDevice, pos: UVec2, size: UVec2, data: &[u8]) -> VulkanResult<()> {
-        let tex_size = UVec2::new(self.image.props.width, self.image.props.height);
-        if pos.cmpge(tex_size).any() || (pos + size).cmpge(tex_size).any() {
-            return VkError::InvalidArgument("Texture update rect out of bounds").into();
-        }
-        device.update_image_from_data(&self.image, pos.x as _, pos.y as _, size.x, size.y, 0, ImageData::Single(data))
+        device.update_image_from_data(&self.image, pos, size, 0, ImageData::Single(data))
     }
 
     pub fn transition_layout(&mut self, device: &VulkanDevice, cmd_buffer: vk::CommandBuffer, new_layout: vk::ImageLayout) {

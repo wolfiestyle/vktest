@@ -1,9 +1,11 @@
 use crate::create::CreateFromInfo;
 use crate::debug::DebugUtils;
+use crate::format::FormatInfo;
 use crate::instance::{DeviceInfo, DeviceSelection, VulkanInstance};
 use crate::types::*;
 use ash::extensions::khr;
 use ash::vk;
+use glam::UVec2;
 use gpu_allocator::vulkan::{Allocation, AllocationCreateDesc, AllocationScheme, Allocator, AllocatorCreateDesc};
 use gpu_allocator::MemoryLocation;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
@@ -474,8 +476,12 @@ impl VulkanDevice {
                 return VkError::EngineError("Image linear filter not supported").into();
             }
         }
-        let layer_size = params.width as usize * params.height as usize * 4; //FIXME: calc size from format
+        let fmt_info = FormatInfo::try_from(params.format)?;
+        let layer_size = params.width as usize * params.height as usize * fmt_info.size;
         let size = layer_size as vk::DeviceSize * params.layers as vk::DeviceSize;
+        if !data.check_size(layer_size) {
+            return VkError::InvalidArgument("Image data size doesn't match the expected size").into();
+        }
         // create staging buffer that will contain the image bytes
         let mut src_buffer = self.allocate_cpu_buffer(size, vk::BufferUsageFlags::TRANSFER_SRC, "Staging")?;
         // create destination image that will be usable from shaders
@@ -487,7 +493,7 @@ impl VulkanDevice {
             "Texture image",
         )?;
         // write image data to the staging buffer
-        data.write_to_buffer(&mut src_buffer.map()?, layer_size);
+        data.write_to_buffer(&mut src_buffer.map()?);
         // setup all layers and mip levels for transfer
         let cmd_buffer = self.begin_one_time_commands()?;
         self.transition_image_layout(
@@ -526,18 +532,24 @@ impl VulkanDevice {
         Ok(tex_image)
     }
 
-    pub(crate) fn update_image_from_data(
-        &self, image: &VkImage, x: i32, y: i32, width: u32, height: u32, base_layer: u32, data: ImageData,
-    ) -> VulkanResult<()> {
+    pub fn update_image_from_data(&self, image: &VkImage, pos: UVec2, dims: UVec2, base_layer: u32, data: ImageData) -> VulkanResult<()> {
         let layers = data.layer_count();
         if base_layer + layers > image.props.layers {
             return VkError::InvalidArgument("Data layer count out of bounds").into();
         }
-        let layer_size = width as usize * height as usize * 4;
+        let my_dims = UVec2::new(image.props.width, image.props.height);
+        if pos.cmpge(my_dims).any() || (pos + dims).cmpge(my_dims).any() {
+            return VkError::InvalidArgument("Image update rect out of bounds").into();
+        }
+        let fmt_info = FormatInfo::try_from(image.props.format)?;
+        let layer_size = dims.x as usize * dims.y as usize * fmt_info.size;
         let size = layer_size as vk::DeviceSize * layers as vk::DeviceSize;
-        let mut src_buffer = self.allocate_cpu_buffer(size, vk::BufferUsageFlags::TRANSFER_SRC, "Staging")?;
+        if !data.check_size(layer_size) {
+            return VkError::InvalidArgument("Image data size doesn't match the expected size").into();
+        }
 
-        data.write_to_buffer(&mut src_buffer.map()?, layer_size);
+        let mut src_buffer = self.allocate_cpu_buffer(size, vk::BufferUsageFlags::TRANSFER_SRC, "Staging")?;
+        data.write_to_buffer(&mut src_buffer.map()?);
 
         let cmd_buffer = self.begin_one_time_commands()?;
         // transition everything because we're gonna recreate mipmaps after
@@ -557,8 +569,16 @@ impl VulkanDevice {
                     base_array_layer: base_layer,
                     layer_count: layers,
                 })
-                .image_offset(vk::Offset3D { x, y, z: 0 })
-                .image_extent(vk::Extent3D { width, height, depth: 1 });
+                .image_offset(vk::Offset3D {
+                    x: pos.x as _,
+                    y: pos.y as _,
+                    z: 0,
+                })
+                .image_extent(vk::Extent3D {
+                    width: dims.x,
+                    height: dims.y,
+                    depth: 1,
+                });
             self.device.cmd_copy_buffer_to_image(
                 cmd_buffer,
                 *src_buffer,
@@ -833,6 +853,15 @@ impl<'a> CubeData<'a> {
             negz: iter.next()?,
         })
     }
+
+    fn check_size(&self, layer_size: usize) -> bool {
+        self.posx.len() == layer_size
+            && self.negx.len() == layer_size
+            && self.posy.len() == layer_size
+            && self.negy.len() == layer_size
+            && self.posz.len() == layer_size
+            && self.negz.len() == layer_size
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -851,6 +880,14 @@ impl<'a> ImageData<'a> {
         }
     }
 
+    fn check_size(&self, layer_size: usize) -> bool {
+        match self {
+            Self::Single(data) => data.len() == layer_size,
+            Self::Array(data_arr) => data_arr.iter().all(|data| data.len() == layer_size),
+            Self::Cube(cube) => cube.check_size(layer_size),
+        }
+    }
+
     pub(crate) fn image_create_flags(&self) -> vk::ImageCreateFlags {
         match self {
             Self::Cube(_) => vk::ImageCreateFlags::CUBE_COMPATIBLE,
@@ -866,23 +903,24 @@ impl<'a> ImageData<'a> {
     }
 
     #[rustfmt::skip]
-    fn write_to_buffer(self, mem: &mut MappedMemory, layer_size: usize) {
+    fn write_to_buffer(self, mem: &mut MappedMemory) {
         match self {
             ImageData::Single(bytes) => {
                 mem.write_bytes(bytes, 0);
             }
             ImageData::Array(bytes_arr) => {
-                for (i, &bytes) in bytes_arr.iter().enumerate() {
-                    mem.write_bytes(bytes, layer_size * i);
+                let mut offset = 0;
+                for &bytes in bytes_arr.iter() {
+                    mem.write_bytes(bytes, offset);
+                    offset += bytes.len();
                 }
             }
             ImageData::Cube(CubeData { posx, negx, posy, negy, posz, negz })=> {
-                mem.write_bytes(posx, 0);
-                mem.write_bytes(negx, layer_size);
-                mem.write_bytes(posy, layer_size * 2);
-                mem.write_bytes(negy, layer_size * 3);
-                mem.write_bytes(posz, layer_size * 4);
-                mem.write_bytes(negz, layer_size * 5);
+                let mut offset = 0;
+                for bytes in [posx, negx, posy, negy, posz, negz] {
+                    mem.write_bytes(bytes, offset);
+                    offset += bytes.len();
+                }
             }
         }
     }
