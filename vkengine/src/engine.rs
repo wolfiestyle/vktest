@@ -256,7 +256,7 @@ impl VulkanEngine {
                     .compare_op(vk::CompareOp::ALWAYS)
                     .min_lod(0.0)
                     .max_lod(vk::LOD_CLAMP_NONE)
-                    .mipmap_mode(vk::SamplerMipmapMode::NEAREST)
+                    .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
                     .create(&self.device)?;
                 entry.insert(sampler);
                 Ok(sampler)

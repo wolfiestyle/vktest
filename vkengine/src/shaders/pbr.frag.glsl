@@ -9,6 +9,8 @@ layout(set = 0, binding = 0) uniform ObjectUniforms {
 };
 
 layout(set = 0, binding = 1) uniform samplerCube irradianceMap;
+layout(set = 0, binding = 2) uniform samplerCube prefilterMap;
+layout(set = 0, binding = 3) uniform sampler2D brdfLut;
 
 layout(set = 1, binding = 0) uniform sampler2D texColor;
 layout(set = 1, binding = 1) uniform sampler2D texMetalRough;
@@ -33,30 +35,43 @@ layout(location = 0) in FragIn {
 
 layout(location = 0) out vec4 outColor;
 
-vec3 direct_light(vec4 light, vec3 light_color, vec3 N, vec3 albedo, vec2 metalrough, vec3 irradiance) {
+vec3 pbr_light(vec4 light, vec3 light_color, vec3 N, vec3 albedo, float metallic, float roughness, float ao) {
     vec3 V = normalize(view_pos.xyz - frag.Pos);
+    vec3 R = reflect(-V, N);
+    float NdotV = max(dot(N, V), 0.0);
+    vec3 F0 = mix(Fdielectric, albedo, metallic);
+
+    // direct lighting
     vec3 dir = light.xyz - frag.Pos * light.w;
     vec3 L = normalize(dir);
     vec3 H = normalize(V + L);
     float attenuation = mix(1.0, dot(dir, dir), light.w);
     vec3 radiance = light_color / attenuation;
 
-    vec3 F0 = mix(Fdielectric, albedo, metalrough.r);
     float NdotH = max(dot(N, H), 0.0);
     float NdotL = max(dot(N, L), 0.0);
-    float NdotV = max(dot(N, V), 0.0);
-    float NDF = distributionGGX(NdotH, metalrough.g);
-    float G = geometrySmith(NdotL, NdotV, metalrough.g);
+    float NDF = distributionGGX(NdotH, roughness);
+    float G = geometrySmith(NdotL, NdotV, roughness);
     vec3 F = fresnelSchlick(max(dot(H, V), 0.0), F0);
     vec3 specular = (NDF * G * F) / max(4.0 * NdotV * NdotL, Epsilon);
 
-    vec3 kD = mix(vec3(1.0) - F, vec3(0.0), metalrough.r);
+    vec3 kD = mix(vec3(1.0) - F, vec3(0.0), metallic);
     vec3 diffuse = kD * albedo / PI;
+    vec3 direct = (diffuse + specular) * radiance * NdotL;
 
-    vec3 kD_amb = 1.0 - fresnelSchlick(NdotV, F0);
-    vec3 ambient = kD_amb * irradiance * albedo;
+    // IBL
+    vec3 envF = fresnelSchlickRoughness(NdotV, F0, roughness);
+    vec3 env_kD = mix(1.0 - envF, vec3(0.0), metallic);
+    vec3 irradiance = texture(irradianceMap, N).rgb;
+    vec3 envDiffuse = env_kD * irradiance * albedo;
 
-    return ambient + (diffuse + specular) * radiance * NdotL;
+    float maxLod = textureQueryLevels(prefilterMap) - 1;
+    vec3 prefColor = textureLod(prefilterMap, R, roughness * maxLod).rgb;
+    vec2 envBRDF = texture(brdfLut, vec2(NdotV, roughness)).rg;
+    vec3 envSpec = prefColor * (envF * envBRDF.x + envBRDF.y);
+    vec3 ambient = (envDiffuse + envSpec) * ao;
+
+    return ambient + direct;
 }
 
 void main() {
@@ -66,8 +81,7 @@ void main() {
     vec3 emissive = texture(texEmissive, frag.TexCoord).rgb * material.emissive;
     float occlusion = (texture(texOcclusion, frag.TexCoord).r - 1.0) * material.base_pbr.r + 1.0;
     vec3 normal = normalize(frag.TBN * normal_map * vec3(vec2(material.normal_scale), 1.0));
-    vec3 irradiance = texture(irradianceMap, normal).rgb * occlusion;
-    vec3 direct = direct_light(light, light_color.rgb, normal, albedo.rgb, metalrough, irradiance);
+    vec3 direct = pbr_light(light, light_color.rgb, normal, albedo.rgb, metalrough.r, metalrough.g, occlusion);
     vec3 color = direct + emissive;
     outColor = vec4(color, 1.0);
 }

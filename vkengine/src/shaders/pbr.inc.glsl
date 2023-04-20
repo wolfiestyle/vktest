@@ -21,6 +21,17 @@ float geometrySmith(float NdotL, float NdotV, float roughness) {
     return ggx1 * ggx2;
 }
 
+float geometrySmith_IBL(float NdotL, float NdotV, float roughness) {
+    float k = roughness * roughness / 2.0;
+    float ggx1 = geometrySchlickGGX(NdotL, k);
+    float ggx2 = geometrySchlickGGX(NdotV, k);
+    return ggx1 * ggx2;
+}
+
 vec3 fresnelSchlick(float cosTheta, vec3 F0) {
     return F0 + (1.0 - F0) * pow(1.0 - cosTheta, 5.0);
+}
+
+vec3 fresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness) {
+    return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(1.0 - cosTheta, 5.0);
 }

@@ -19,6 +19,14 @@ vec3 sampleHemisphere(vec2 u) {
     return vec3(cos(phi) * u1p, sin(phi) * u1p, u.x);
 }
 
+vec3 importanceSampleGGX(vec2 Xi, float roughness) {
+    float a = roughness * roughness;
+    float phi = 2.0 * PI * Xi.x;
+    float cosTheta = sqrt((1.0 - Xi.y) / (1.0 + (a * a - 1.0) * Xi.y));
+    float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
+    return vec3(cos(phi) * sinTheta, sin(phi) * sinTheta, cosTheta);
+}
+
 vec3 getCubemapDir(uvec3 img_coord, ivec2 img_size) {
     vec2 st = img_coord.xy / vec2(img_size);
     vec2 uv = 2.0 * vec2(st.x, 1.0 - st.y) - vec2(1.0);

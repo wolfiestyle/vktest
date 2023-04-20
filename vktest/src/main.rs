@@ -104,7 +104,9 @@ fn main() -> VulkanResult<()> {
     let mut show_gui = true;
 
     let baker = Baker::new(&vk_app)?;
-    let irrmap = baker.generate_irradiance_map(&skybox_tex)?;
+    let irr_map = baker.generate_irradiance_map(&skybox_tex)?;
+    let pref_map = baker.generate_prefilter_map(&skybox_tex)?;
+    let brdf_lut = baker.generate_brdf_lut(&vk_app)?;
 
     let thread_pool = yastl::Pool::new(16);
     let mut draw_buffer = vec![];
@@ -270,7 +272,7 @@ fn main() -> VulkanResult<()> {
                 for (i, (obj, draw_ret)) in mesh_chunks.zip(ret_chunks).enumerate() {
                     if mesh_enabled[cur_scene][i] {
                         scope.execute(|| {
-                            draw_ret[0] = obj[0].renderer.render(&vk_app, &obj[0].slices, &irrmap);
+                            draw_ret[0] = obj[0].renderer.render(&vk_app, &obj[0].slices, &irr_map, &pref_map, &brdf_lut);
                         });
                     }
                 }

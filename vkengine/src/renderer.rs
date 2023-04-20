@@ -52,6 +52,18 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
                     .descriptor_count(1)
                     .stage_flags(vk::ShaderStageFlags::FRAGMENT)
                     .build(),
+                vk::DescriptorSetLayoutBinding::builder()
+                    .binding(2)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                    .build(),
+                vk::DescriptorSetLayoutBinding::builder()
+                    .binding(3)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                    .build(),
             ])
             .create(&device)?;
         let push_constants = vk::PushConstantRange {
@@ -93,7 +105,9 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
         })
     }
 
-    pub fn render(&mut self, engine: &VulkanEngine, submeshes: &[MeshRenderData], irrmap: &Texture) -> VulkanResult<DrawPayload> {
+    pub fn render(
+        &mut self, engine: &VulkanEngine, submeshes: &[MeshRenderData], irrmap: &Texture, prefmap: &Texture, brdf_lut: &Texture,
+    ) -> VulkanResult<DrawPayload> {
         let cmd_buffer = self.cmd_buffers.get_current_buffer(engine)?;
         engine.begin_secondary_draw_commands(cmd_buffer, vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)?;
 
@@ -110,6 +124,8 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
             self.device.cmd_set_scissor(cmd_buffer, 0, &[engine.swapchain.extent_rect()]);
             let obj_buffer_info = self.obj_uniforms.descriptor(engine);
             let irrmap_info = irrmap.descriptor();
+            let prefmap_info = prefmap.descriptor();
+            let brdf_info = brdf_lut.descriptor();
             self.device.pushdesc_fn.cmd_push_descriptor_set(
                 cmd_buffer,
                 vk::PipelineBindPoint::GRAPHICS,
@@ -125,6 +141,16 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
                         .dst_binding(1)
                         .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                         .image_info(slice::from_ref(&irrmap_info))
+                        .build(),
+                    vk::WriteDescriptorSet::builder()
+                        .dst_binding(2)
+                        .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                        .image_info(slice::from_ref(&prefmap_info))
+                        .build(),
+                    vk::WriteDescriptorSet::builder()
+                        .dst_binding(3)
+                        .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                        .image_info(slice::from_ref(&brdf_info))
                         .build(),
                 ],
             );
