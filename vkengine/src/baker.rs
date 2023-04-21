@@ -5,6 +5,7 @@ use crate::pipeline::Pipeline;
 use crate::types::*;
 use ash::vk;
 use inline_spirv::include_spirv;
+use std::mem::size_of;
 use std::slice;
 use std::sync::Arc;
 
@@ -19,6 +20,7 @@ const IRRMAP_SIZE: u32 = 32;
 const IRRMAP_WG: u32 = IRRMAP_SIZE / 16;
 const PREFILTERED_SIZE: u32 = 256;
 const PREFILTERED_WG: u32 = PREFILTERED_SIZE / 8;
+const PREFILTERED_MIP_LEVELS: u32 = PREFILTERED_SIZE.ilog2() + 1;
 const BRDFLUT_SIZE: u32 = 512;
 const BRDFLUT_WG: u32 = BRDFLUT_SIZE / 16;
 
@@ -26,48 +28,68 @@ impl Baker {
     pub fn new(engine: &VulkanEngine) -> VulkanResult<Self> {
         let device = engine.device.clone();
 
-        let bindings = [
-            vk::DescriptorSetLayoutBinding::builder()
-                .binding(0)
-                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .descriptor_count(1)
-                .stage_flags(vk::ShaderStageFlags::COMPUTE)
-                .build(),
-            vk::DescriptorSetLayoutBinding::builder()
-                .binding(1)
-                .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
-                .descriptor_count(1)
-                .stage_flags(vk::ShaderStageFlags::COMPUTE)
-                .build(),
-        ];
         // irradiance map (diffuse lighting)
         let irrmap_shader = vk::ShaderModuleCreateInfo::builder()
             .code(include_spirv!("src/shaders/irrmap.comp.glsl", comp, glsl))
             .create(&device)?;
         let desc_layout = vk::DescriptorSetLayoutCreateInfo::builder()
             .flags(vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR)
-            .bindings(&bindings)
+            .bindings(&[
+                vk::DescriptorSetLayoutBinding::builder()
+                    .binding(0)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::COMPUTE)
+                    .build(),
+                vk::DescriptorSetLayoutBinding::builder()
+                    .binding(1)
+                    .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::COMPUTE)
+                    .build(),
+            ])
             .create(&device)?;
         let irrmap_pipeline = Pipeline::builder_compute(irrmap_shader)
             .descriptor_layout(&desc_layout)
             .build(engine)?;
+
         // prefilter map (specular lighting)
         let prefilter_shader = vk::ShaderModuleCreateInfo::builder()
             .code(include_spirv!("src/shaders/prefilter.comp.glsl", comp, glsl))
             .create(&device)?;
         let desc_layout = vk::DescriptorSetLayoutCreateInfo::builder()
             .flags(vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR)
-            .bindings(&bindings)
+            .bindings(&[
+                vk::DescriptorSetLayoutBinding::builder()
+                    .binding(0)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::COMPUTE)
+                    .build(),
+                vk::DescriptorSetLayoutBinding::builder()
+                    .binding(1)
+                    .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+                    .descriptor_count(PREFILTERED_MIP_LEVELS)
+                    .stage_flags(vk::ShaderStageFlags::COMPUTE)
+                    .build(),
+            ])
             .create(&device)?;
         let push_constants = vk::PushConstantRange {
             stage_flags: vk::ShaderStageFlags::COMPUTE,
             offset: 0,
-            size: std::mem::size_of::<f32>() as _,
+            size: size_of::<u32>() as _,
+        };
+        let spec_constants = vk::SpecializationMapEntry {
+            constant_id: 1,
+            offset: 0,
+            size: size_of::<u32>(),
         };
         let prefilter_pipeline = Pipeline::builder_compute(prefilter_shader)
             .descriptor_layout(&desc_layout)
             .push_constants(&[push_constants])
+            .spec_constants(slice::from_ref(&spec_constants), bytemuck::bytes_of(&PREFILTERED_MIP_LEVELS))
             .build(engine)?;
+
         // precomputed BRDF for specular
         let brdf_shader = vk::ShaderModuleCreateInfo::builder()
             .code(include_spirv!("src/shaders/brdf_lut.comp.glsl", comp, glsl))
@@ -89,6 +111,7 @@ impl Baker {
             device.destroy_shader_module(prefilter_shader, None);
             device.destroy_shader_module(brdf_shader, None);
         }
+
         Ok(Self {
             device,
             irrmap_pipeline,
@@ -142,12 +165,11 @@ impl Baker {
     }
 
     pub fn generate_prefilter_map(&self, cubemap: &Texture) -> VulkanResult<Texture> {
-        let mip_levels = PREFILTERED_WG.ilog2() + 1;
         let params = ImageParams {
             width: PREFILTERED_SIZE,
             height: PREFILTERED_SIZE,
             layers: 6,
-            mip_levels,
+            mip_levels: PREFILTERED_MIP_LEVELS,
             format: vk::Format::R16G16B16A16_SFLOAT,
             ..Default::default()
         };
@@ -158,9 +180,9 @@ impl Baker {
             vk::ImageLayout::GENERAL,
             vk::Sampler::null(),
         )?;
-        let mip_imgviews = (0..mip_levels)
+        let mip_infos = (0..PREFILTERED_MIP_LEVELS)
             .map(|level| {
-                prefmap.image.create_view_subresource(
+                let image_view = prefmap.image.create_view_subresource(
                     &self.device,
                     vk::ImageViewType::CUBE,
                     vk::ImageSubresourceRange {
@@ -170,9 +192,13 @@ impl Baker {
                         base_array_layer: 0,
                         layer_count: 6,
                     },
-                )
+                )?;
+                Ok(vk::DescriptorImageInfo {
+                    image_view,
+                    ..prefmap.info
+                })
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<Vec<_>, VkError>>()?;
         let cmd_buffer = self.device.begin_one_time_commands()?;
         unsafe {
             self.device
@@ -182,44 +208,37 @@ impl Baker {
                 vk::PipelineBindPoint::COMPUTE,
                 self.prefilter_pipeline.layout,
                 0,
-                &[vk::WriteDescriptorSet::builder()
-                    .dst_binding(0)
-                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                    .image_info(slice::from_ref(&cubemap.info))
-                    .build()],
-            );
-            let mut wg_size = PREFILTERED_WG;
-            for mip in 0..mip_levels {
-                let roughness = mip as f32 / (mip_levels - 1) as f32;
-                let mip_info = vk::DescriptorImageInfo {
-                    image_view: mip_imgviews[mip as usize],
-                    ..prefmap.info
-                };
-                self.device.pushdesc_fn.cmd_push_descriptor_set(
-                    cmd_buffer,
-                    vk::PipelineBindPoint::COMPUTE,
-                    self.prefilter_pipeline.layout,
-                    0,
-                    &[vk::WriteDescriptorSet::builder()
+                &[
+                    vk::WriteDescriptorSet::builder()
+                        .dst_binding(0)
+                        .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                        .image_info(slice::from_ref(&cubemap.info))
+                        .build(),
+                    vk::WriteDescriptorSet::builder()
                         .dst_binding(1)
                         .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
-                        .image_info(slice::from_ref(&mip_info))
-                        .build()],
-                );
+                        .image_info(&mip_infos)
+                        .build(),
+                ],
+            );
+            let mut wg_size = PREFILTERED_WG;
+            for level in 0..PREFILTERED_MIP_LEVELS {
                 self.device.cmd_push_constants(
                     cmd_buffer,
                     self.prefilter_pipeline.layout,
                     vk::ShaderStageFlags::COMPUTE,
                     0,
-                    bytemuck::bytes_of(&roughness),
+                    bytemuck::bytes_of(&level),
                 );
                 self.device.cmd_dispatch(cmd_buffer, wg_size, wg_size, 6);
-                wg_size /= 2;
+                wg_size = 1.max(wg_size / 2);
             }
         }
         prefmap.transition_layout(&self.device, cmd_buffer, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
         self.device.end_one_time_commands(cmd_buffer)?;
-        self.device.dispose_of(mip_imgviews);
+        for info in mip_infos {
+            self.device.dispose_of(info.image_view);
+        }
         Ok(prefmap)
     }
 
