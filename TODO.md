@@ -1,31 +1,24 @@
 # TODO
 
-- Optimize glTF loading. Write custom importer that outputs GPU-friendly data
-- Build a global descriptor set for all textures and material settings used on
-  the scene, indexed by push constant or another buffer. Evaluate performance
-  vs push descriptors
-- Rough visibility determination with bounding boxes, rebuild command buffer
-  when visibility changes. Could use occlusion queries
-- Depth pre-pass, do shading with depth test equal + depth writes off. It might
-  not be necessary if objects are properly sorted in depth order and not
-  overlapping.
-- Group objects by pipeline (shader, material settings, culling mode..)
-- Alpha tested (cutout) materials will likely need a separate pass. Shaders
-  with discard can be slower than opaque ones. Could just alpha blend them, but
-  now they can't write to depth (no shadows)
-- Possibly join all same size textures on an array sampler, but would have to
-  compare performance/complexity with push constant version. Will need a per-face
-  texture index, could be an external array indexed by gl_VertexIndex/3 or
-  actual per-face attributes if using mesh shaders
+- Material system. Group objects by pipeline (shader, pipeline state), ideally
+  sorted to avoid state changes
+- Rough visibility determination with bounding boxes, can be done as a compute
+  pre-pass, then use the results with draw indirect.
+- Depth pre-pass, do shading with depth test equal + depth writes off
+- Can do alpha test in depth pre-pass, depth test equal will fail for the
+  discarded fragments, now opaque and cutout share the same pass
+- Implement order independant transparency
+- Setup for bindless (descriptor indexing). Needs a single global vertex/index
+  buffer. Index materials by push constant or gl_DrawID
 - Put all lightmaps on an single array image. Can be done for shadow maps too
+- Could use raytracing for realtime lightmap generation, also the IBL maps
 - Implement shadow maps, store results per light an only recalculate when
   objects move. Possibly implement stencil shadows as an alternative
-- Animation data stored on a streaming buffer (only weights), skinning done on
-  vertex shader or a compute pass. The matrix tranform part of skeletal animation
-  probably needs to be done on CPU, since it's a tree object. There could be
-  GPU optimization for humanoid skeletons or other standard rigs
+- Animation could be done in series of compute pre-passes, transform vertices
+  before vertex shader
+- Light probes with spherical harmonics
 - Do async resource loading, synchronize between frames
 - Configurable settings (multisampling, anisotropic filtering, shadow quality, 
-  depth buffer mode, engine fine tuning, ...)
+  engine fine tuning, ...)
 - OpenXR integration. It requires special creation procedures for the instance,
   device and uses it's own swapchain
