@@ -270,11 +270,10 @@ impl UiRenderer {
                     let n_vert = mesh.vertices.len() as i32;
                     let n_idx = mesh.indices.len() as u32;
                     let texture = self.textures.get(&mesh.texture_id).unwrap_or(&engine.default_texture);
-                    let image_info = texture.descriptor();
                     let desc_writes = vk::WriteDescriptorSet::builder()
                         .dst_binding(0)
                         .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                        .image_info(slice::from_ref(&image_info));
+                        .image_info(slice::from_ref(&texture.info));
                     unsafe {
                         device.pushdesc_fn.cmd_push_descriptor_set(
                             cmd_buffer,

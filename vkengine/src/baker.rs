@@ -110,12 +110,10 @@ impl Baker {
             params,
             vk::ImageCreateFlags::CUBE_COMPATIBLE,
             vk::ImageLayout::GENERAL,
-            cubemap.sampler,
+            cubemap.info.sampler,
         )?;
         let cmd_buffer = self.device.begin_one_time_commands()?;
         unsafe {
-            let cubemap_info = cubemap.descriptor();
-            let irrmap_info = irrmap.descriptor();
             self.device
                 .cmd_bind_pipeline(cmd_buffer, vk::PipelineBindPoint::COMPUTE, *self.irrmap_pipeline);
             self.device.pushdesc_fn.cmd_push_descriptor_set(
@@ -127,12 +125,12 @@ impl Baker {
                     vk::WriteDescriptorSet::builder()
                         .dst_binding(0)
                         .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                        .image_info(slice::from_ref(&cubemap_info))
+                        .image_info(slice::from_ref(&cubemap.info))
                         .build(),
                     vk::WriteDescriptorSet::builder()
                         .dst_binding(1)
                         .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
-                        .image_info(slice::from_ref(&irrmap_info))
+                        .image_info(slice::from_ref(&irrmap.info))
                         .build(),
                 ],
             );
@@ -158,7 +156,7 @@ impl Baker {
             params,
             vk::ImageCreateFlags::CUBE_COMPATIBLE,
             vk::ImageLayout::GENERAL,
-            cubemap.sampler,
+            cubemap.info.sampler,
         )?;
         let mip_imgviews = (0..mip_levels)
             .map(|level| {
@@ -177,8 +175,6 @@ impl Baker {
             .collect::<Result<Vec<_>, _>>()?;
         let cmd_buffer = self.device.begin_one_time_commands()?;
         unsafe {
-            let cubemap_info = cubemap.descriptor();
-            let prefilter_info = prefmap.descriptor();
             self.device
                 .cmd_bind_pipeline(cmd_buffer, vk::PipelineBindPoint::COMPUTE, *self.prefilter_pipeline);
             self.device.pushdesc_fn.cmd_push_descriptor_set(
@@ -189,16 +185,15 @@ impl Baker {
                 &[vk::WriteDescriptorSet::builder()
                     .dst_binding(0)
                     .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                    .image_info(slice::from_ref(&cubemap_info))
+                    .image_info(slice::from_ref(&cubemap.info))
                     .build()],
             );
             let mut wg_size = PREFILTERED_WG;
             for mip in 0..mip_levels {
                 let roughness = mip as f32 / (mip_levels - 1) as f32;
-                //let v = (roughness.exp() - 1.0) / (std::f32::consts::E - 1.0);
                 let mip_info = vk::DescriptorImageInfo {
                     image_view: mip_imgviews[mip as usize],
-                    ..prefilter_info
+                    ..prefmap.info
                 };
                 self.device.pushdesc_fn.cmd_push_descriptor_set(
                     cmd_buffer,
@@ -249,7 +244,6 @@ impl Baker {
         )?;
         let cmd_buffer = self.device.begin_one_time_commands()?;
         unsafe {
-            let bdrf_info = brdf_lut.descriptor();
             self.device
                 .cmd_bind_pipeline(cmd_buffer, vk::PipelineBindPoint::COMPUTE, *self.brdf_pipeline);
             self.device.pushdesc_fn.cmd_push_descriptor_set(
@@ -260,7 +254,7 @@ impl Baker {
                 &[vk::WriteDescriptorSet::builder()
                     .dst_binding(0)
                     .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
-                    .image_info(slice::from_ref(&bdrf_info))
+                    .image_info(slice::from_ref(&brdf_lut.info))
                     .build()],
             );
             self.device.cmd_dispatch(cmd_buffer, BRDFLUT_WG, BRDFLUT_WG, 1);

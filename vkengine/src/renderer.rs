@@ -131,9 +131,6 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
             self.device.cmd_set_viewport(cmd_buffer, 0, &[engine.swapchain.viewport_inv()]);
             self.device.cmd_set_scissor(cmd_buffer, 0, &[engine.swapchain.extent_rect()]);
             let obj_buffer_info = self.obj_uniforms.descriptor(engine);
-            let irrmap_info = irrmap.descriptor();
-            let prefmap_info = prefmap.descriptor();
-            let brdf_info = brdf_lut.descriptor();
             self.device.pushdesc_fn.cmd_push_descriptor_set(
                 cmd_buffer,
                 vk::PipelineBindPoint::GRAPHICS,
@@ -148,17 +145,17 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
                     vk::WriteDescriptorSet::builder()
                         .dst_binding(1)
                         .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                        .image_info(slice::from_ref(&irrmap_info))
+                        .image_info(slice::from_ref(&irrmap.info))
                         .build(),
                     vk::WriteDescriptorSet::builder()
                         .dst_binding(2)
                         .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                        .image_info(slice::from_ref(&prefmap_info))
+                        .image_info(slice::from_ref(&prefmap.info))
                         .build(),
                     vk::WriteDescriptorSet::builder()
                         .dst_binding(3)
                         .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                        .image_info(slice::from_ref(&brdf_info))
+                        .image_info(slice::from_ref(&brdf_lut.info))
                         .build(),
                 ],
             );
@@ -369,7 +366,6 @@ impl SkyboxRenderer {
         let cmd_buffer = self.cmd_buffers.get_current_buffer(engine)?;
         engine.begin_secondary_draw_commands(cmd_buffer, vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)?;
 
-        let image_info = cubemap.descriptor();
         let params = SkyboxParams {
             viewproj_inv: (engine.projection * engine.camera.get_view_rotation()).inverse(),
         };
@@ -389,7 +385,7 @@ impl SkyboxRenderer {
                 &[vk::WriteDescriptorSet::builder()
                     .dst_binding(0)
                     .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                    .image_info(slice::from_ref(&image_info))
+                    .image_info(slice::from_ref(&cubemap.info))
                     .build()],
             );
             self.device.cmd_push_constants(

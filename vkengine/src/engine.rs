@@ -141,8 +141,8 @@ impl VulkanEngine {
             min_filter: vk::Filter::NEAREST,
             ..Default::default()
         })?;
-        this.default_texture.sampler = sampler;
-        this.default_normalmap.sampler = sampler;
+        this.default_texture.info.sampler = sampler;
+        this.default_normalmap.info.sampler = sampler;
 
         Ok(this)
     }
@@ -312,55 +312,63 @@ impl VulkanEngine {
             .create(&self.device)?;
 
         let default_material = material_desc[0];
-        let deftex_info = self.default_texture.descriptor();
-        let defnorm_info = self.default_normalmap.descriptor();
         let desc_writes = [
             vk::WriteDescriptorSet::builder()
                 .dst_set(default_material)
                 .dst_binding(0)
                 .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .image_info(slice::from_ref(&deftex_info))
+                .image_info(slice::from_ref(&self.default_texture.info))
                 .build(),
             vk::WriteDescriptorSet::builder()
                 .dst_set(default_material)
                 .dst_binding(1)
                 .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .image_info(slice::from_ref(&deftex_info))
+                .image_info(slice::from_ref(&self.default_texture.info))
                 .build(),
             vk::WriteDescriptorSet::builder()
                 .dst_set(default_material)
                 .dst_binding(2)
                 .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .image_info(slice::from_ref(&defnorm_info))
+                .image_info(slice::from_ref(&self.default_normalmap.info))
                 .build(),
             vk::WriteDescriptorSet::builder()
                 .dst_set(default_material)
                 .dst_binding(3)
                 .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .image_info(slice::from_ref(&deftex_info))
+                .image_info(slice::from_ref(&self.default_texture.info))
                 .build(),
             vk::WriteDescriptorSet::builder()
                 .dst_set(default_material)
                 .dst_binding(4)
                 .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .image_info(slice::from_ref(&deftex_info))
+                .image_info(slice::from_ref(&self.default_texture.info))
                 .build(),
         ];
         unsafe {
             self.device.update_descriptor_sets(&desc_writes, &[]);
         }
 
-        let tex_infos: Vec<_> = textures.iter().map(|tex| tex.descriptor()).collect();
-
         for (material, &descriptor) in gltf.materials.iter().zip(material_desc.iter().skip(1)) {
-            let color_tex = material.color_tex.map(|tex| &tex_infos[tex.id]).unwrap_or(&deftex_info);
+            let color_tex = material
+                .color_tex
+                .map(|tex| &textures[tex.id].info)
+                .unwrap_or(&self.default_texture.info);
             let metal_rough_tex = material
                 .metallic_roughness_tex
-                .map(|tex| &tex_infos[tex.id])
-                .unwrap_or(&deftex_info);
-            let normal_tex = material.normal_tex.map(|tex| &tex_infos[tex.id]).unwrap_or(&defnorm_info);
-            let emiss_tex = material.emissive_tex.map(|tex| &tex_infos[tex.id]).unwrap_or(&deftex_info);
-            let occlusion_tex = material.occlusion_tex.map(|tex| &tex_infos[tex.id]).unwrap_or(&deftex_info);
+                .map(|tex| &textures[tex.id].info)
+                .unwrap_or(&self.default_texture.info);
+            let normal_tex = material
+                .normal_tex
+                .map(|tex| &textures[tex.id].info)
+                .unwrap_or(&self.default_normalmap.info);
+            let emiss_tex = material
+                .emissive_tex
+                .map(|tex| &textures[tex.id].info)
+                .unwrap_or(&self.default_texture.info);
+            let occlusion_tex = material
+                .occlusion_tex
+                .map(|tex| &textures[tex.id].info)
+                .unwrap_or(&self.default_texture.info);
             let desc_writes = [
                 vk::WriteDescriptorSet::builder()
                     .dst_set(descriptor)
@@ -829,9 +837,7 @@ pub struct TextureOptions {
 #[derive(Debug)]
 pub struct Texture {
     pub image: VkImage,
-    pub imgview: vk::ImageView,
-    pub sampler: vk::Sampler,
-    layout: vk::ImageLayout,
+    pub info: vk::DescriptorImageInfo,
 }
 
 impl Texture {
@@ -847,16 +853,18 @@ impl Texture {
             ..Default::default()
         };
         let image = device.create_image_from_data(params, data, data.image_create_flags())?;
-        let imgview = if let Some(swizzle) = options.swizzle {
+        let image_view = if let Some(swizzle) = options.swizzle {
             image.create_view_swizzle(device, data.view_type(), swizzle)?
         } else {
             image.create_view(device, data.view_type())?
         };
         Ok(Self {
             image,
-            imgview,
-            sampler,
-            layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            info: vk::DescriptorImageInfo {
+                sampler,
+                image_view,
+                image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            },
         })
     }
 
@@ -881,12 +889,14 @@ impl Texture {
         } else {
             vk::ImageViewType::TYPE_2D
         };
-        let imgview = image.create_view(device, view_type)?;
+        let image_view = image.create_view(device, view_type)?;
         Ok(Self {
             image,
-            imgview,
-            sampler,
-            layout,
+            info: vk::DescriptorImageInfo {
+                sampler,
+                image_view,
+                image_layout: layout,
+            },
         })
     }
 
@@ -899,24 +909,16 @@ impl Texture {
             cmd_buffer,
             *self.image,
             self.image.props.subresource_range(),
-            self.layout,
+            self.info.image_layout,
             new_layout,
         );
-        self.layout = new_layout;
-    }
-
-    pub fn descriptor(&self) -> vk::DescriptorImageInfo {
-        vk::DescriptorImageInfo {
-            image_layout: self.layout,
-            image_view: self.imgview,
-            sampler: self.sampler,
-        }
+        self.info.image_layout = new_layout;
     }
 }
 
 impl Cleanup<VulkanDevice> for Texture {
     unsafe fn cleanup(&mut self, device: &VulkanDevice) {
-        self.imgview.cleanup(device);
+        self.info.image_view.cleanup(device);
         self.image.cleanup(device);
     }
 }
