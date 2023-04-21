@@ -1,6 +1,6 @@
 use crate::create::CreateFromInfo;
 use crate::device::{ImageData, VulkanDevice};
-use crate::engine::{CmdBufferRing, DrawPayload, Shader, Texture, UploadBuffer, VulkanEngine};
+use crate::engine::{CmdBufferRing, DrawPayload, Shader, Texture, TextureOptions, UploadBuffer, VulkanEngine};
 use crate::pipeline::{Pipeline, PipelineMode};
 use crate::types::{Cleanup, VulkanResult};
 use ash::vk;
@@ -155,20 +155,36 @@ impl UiRenderer {
     fn update_textures(&mut self, tex_delta: TexturesDelta) -> VulkanResult<Vec<Texture>> {
         // create or update textures
         for (id, image) in tex_delta.set {
-            let (pixels, size) = match image.image {
-                egui::ImageData::Color(img) => (img.pixels, img.size.map(|v| v as _)),
-                egui::ImageData::Font(img) => (img.srgba_pixels(None).collect(), img.size.map(|v| v as _)),
+            let (bytes, size, format) = match &image.image {
+                egui::ImageData::Color(img) => (
+                    bytemuck::cast_slice::<egui::Color32, u8>(&img.pixels),
+                    img.size.map(|v| v as u32),
+                    vk::Format::R8G8B8A8_SRGB,
+                ),
+                egui::ImageData::Font(img) => (
+                    bytemuck::cast_slice::<f32, u8>(&img.pixels),
+                    img.size.map(|v| v as u32),
+                    vk::Format::R32_SFLOAT,
+                ),
             };
-            let bytes = bytemuck::cast_slice(&pixels);
             match self.textures.entry(id) {
                 Entry::Vacant(entry) => {
+                    let swizzle = (format == vk::Format::R32_SFLOAT).then(|| vk::ComponentMapping {
+                        r: vk::ComponentSwizzle::R,
+                        g: vk::ComponentSwizzle::R,
+                        b: vk::ComponentSwizzle::R,
+                        a: vk::ComponentSwizzle::R,
+                    });
                     entry.insert(Texture::new(
                         &self.device,
                         size.into(),
-                        vk::Format::R8G8B8A8_SRGB,
+                        format,
                         ImageData::Single(bytes),
                         vk::Sampler::null(),
-                        false,
+                        TextureOptions {
+                            gen_mipmaps: false,
+                            swizzle,
+                        },
                     )?);
                 }
                 Entry::Occupied(mut entry) => {

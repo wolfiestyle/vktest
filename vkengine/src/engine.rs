@@ -61,7 +61,7 @@ impl VulkanEngine {
             vk::Format::R8G8B8A8_UNORM,
             ImageData::Single(&[255; 4]),
             vk::Sampler::null(),
-            false,
+            Default::default(),
         )?;
         let default_normalmap = Texture::new(
             &device,
@@ -69,7 +69,7 @@ impl VulkanEngine {
             vk::Format::R8G8B8A8_UNORM,
             ImageData::Single(&[128, 128, 255, 0]),
             vk::Sampler::null(),
-            false,
+            Default::default(),
         )?;
 
         let pipeline_cache = vk::PipelineCacheCreateInfo::builder().create(&device)?; //TODO: save/load cache data
@@ -299,7 +299,10 @@ impl VulkanEngine {
             format,
             ImageData::Single(image.to_rgba8().as_raw()),
             sampler,
-            true,
+            TextureOptions {
+                gen_mipmaps: true,
+                swizzle: None,
+            },
         )
     }
 
@@ -317,7 +320,7 @@ impl VulkanEngine {
             vk::Format::R8G8B8A8_SRGB,
             ImageData::Cube(cube_data),
             sampler,
-            false,
+            Default::default(),
         )
     }
 
@@ -872,6 +875,12 @@ impl Cleanup<VulkanDevice> for FrameState {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TextureOptions {
+    pub gen_mipmaps: bool,
+    pub swizzle: Option<vk::ComponentMapping>,
+}
+
 #[derive(Debug)]
 pub struct Texture {
     pub image: VkImage,
@@ -882,18 +891,22 @@ pub struct Texture {
 
 impl Texture {
     pub fn new(
-        device: &VulkanDevice, size: UVec2, format: vk::Format, data: ImageData, sampler: vk::Sampler, gen_mipmaps: bool,
+        device: &VulkanDevice, size: UVec2, format: vk::Format, data: ImageData, sampler: vk::Sampler, options: TextureOptions,
     ) -> VulkanResult<Self> {
         let params = ImageParams {
             width: size.x,
             height: size.y,
             format,
             layers: data.layer_count(),
-            mip_levels: if gen_mipmaps { size.max_element().ilog2() + 1 } else { 1 },
+            mip_levels: if options.gen_mipmaps { size.max_element().ilog2() + 1 } else { 1 },
             ..Default::default()
         };
         let image = device.create_image_from_data(params, data, data.image_create_flags())?;
-        let imgview = image.create_view(device, data.view_type())?;
+        let imgview = if let Some(swizzle) = options.swizzle {
+            image.create_view_swizzle(device, data.view_type(), swizzle)?
+        } else {
+            image.create_view(device, data.view_type())?
+        };
         Ok(Self {
             image,
             imgview,

@@ -793,6 +793,18 @@ impl MemoryObject<vk::Image, ImageParams> {
             .subresource_range(subresource)
             .create(device)
     }
+
+    pub fn create_view_swizzle(
+        &self, device: &ash::Device, view_type: vk::ImageViewType, swizzle: vk::ComponentMapping,
+    ) -> VulkanResult<vk::ImageView> {
+        vk::ImageViewCreateInfo::builder()
+            .image(self.handle)
+            .format(self.props.format)
+            .view_type(view_type)
+            .subresource_range(self.props.subresource_range())
+            .components(swizzle)
+            .create(device)
+    }
 }
 
 #[derive(Debug)]
