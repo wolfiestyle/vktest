@@ -167,7 +167,7 @@ impl UiRenderer {
             };
             match self.textures.entry(id) {
                 Entry::Vacant(entry) => {
-                    let swizzle = (format == vk::Format::R32_SFLOAT).then(|| vk::ComponentMapping {
+                    let swizzle = (format == vk::Format::R32_SFLOAT).then_some(vk::ComponentMapping {
                         r: vk::ComponentSwizzle::R,
                         g: vk::ComponentSwizzle::R,
                         b: vk::ComponentSwizzle::R,
