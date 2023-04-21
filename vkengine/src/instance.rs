@@ -485,7 +485,7 @@ impl From<DeviceType> for DeviceSelection<'_> {
 }
 
 fn vk_to_cstr(raw: &[c_char]) -> &CStr {
-    let raw_u8 = unsafe { std::mem::transmute(raw) };
+    let raw_u8 = bytemuck::cast_slice(raw);
     CStr::from_bytes_until_nul(raw_u8).unwrap_or(cstr!(""))
 }
 
