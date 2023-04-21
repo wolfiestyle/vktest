@@ -37,6 +37,11 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
             include_spirv!("src/shaders/pbr.vert.glsl", vert, glsl),
             include_spirv!("src/shaders/pbr.frag.glsl", frag, glsl),
         )?;
+        let sampler = engine.get_sampler(SamplerOptions {
+            wrap_u: vk::SamplerAddressMode::CLAMP_TO_EDGE,
+            wrap_v: vk::SamplerAddressMode::CLAMP_TO_EDGE,
+            ..Default::default()
+        })?;
         let push_desc_layout = vk::DescriptorSetLayoutCreateInfo::builder()
             .flags(vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR)
             .bindings(&[
@@ -51,18 +56,21 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
                     .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                     .descriptor_count(1)
                     .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                    .immutable_samplers(slice::from_ref(&sampler))
                     .build(),
                 vk::DescriptorSetLayoutBinding::builder()
                     .binding(2)
                     .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                     .descriptor_count(1)
                     .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                    .immutable_samplers(slice::from_ref(&sampler))
                     .build(),
                 vk::DescriptorSetLayoutBinding::builder()
                     .binding(3)
                     .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                     .descriptor_count(1)
                     .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                    .immutable_samplers(slice::from_ref(&sampler))
                     .build(),
             ])
             .create(&device)?;

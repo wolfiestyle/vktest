@@ -1,6 +1,6 @@
 use crate::create::CreateFromInfo;
 use crate::device::{ImageParams, VulkanDevice};
-use crate::engine::{SamplerOptions, Texture, VulkanEngine};
+use crate::engine::{Texture, VulkanEngine};
 use crate::pipeline::Pipeline;
 use crate::types::*;
 use ash::vk;
@@ -110,7 +110,7 @@ impl Baker {
             params,
             vk::ImageCreateFlags::CUBE_COMPATIBLE,
             vk::ImageLayout::GENERAL,
-            cubemap.info.sampler,
+            vk::Sampler::null(),
         )?;
         let cmd_buffer = self.device.begin_one_time_commands()?;
         unsafe {
@@ -156,7 +156,7 @@ impl Baker {
             params,
             vk::ImageCreateFlags::CUBE_COMPATIBLE,
             vk::ImageLayout::GENERAL,
-            cubemap.info.sampler,
+            vk::Sampler::null(),
         )?;
         let mip_imgviews = (0..mip_levels)
             .map(|level| {
@@ -223,24 +223,19 @@ impl Baker {
         Ok(prefmap)
     }
 
-    pub fn generate_brdf_lut(&self, engine: &VulkanEngine) -> VulkanResult<Texture> {
+    pub fn generate_brdf_lut(&self) -> VulkanResult<Texture> {
         let params = ImageParams {
             width: BRDFLUT_SIZE,
             height: BRDFLUT_SIZE,
             format: vk::Format::R16G16_SFLOAT,
             ..Default::default()
         };
-        let sampler = engine.get_sampler(SamplerOptions {
-            wrap_u: vk::SamplerAddressMode::CLAMP_TO_EDGE,
-            wrap_v: vk::SamplerAddressMode::CLAMP_TO_EDGE,
-            ..Default::default()
-        })?;
         let mut brdf_lut = Texture::new_empty(
             &self.device,
             params,
             vk::ImageCreateFlags::empty(),
             vk::ImageLayout::GENERAL,
-            sampler,
+            vk::Sampler::null(),
         )?;
         let cmd_buffer = self.device.begin_one_time_commands()?;
         unsafe {

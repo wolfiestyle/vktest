@@ -106,7 +106,7 @@ fn main() -> VulkanResult<()> {
     let baker = Baker::new(&vk_app)?;
     let irr_map = baker.generate_irradiance_map(&skybox_tex)?;
     let pref_map = baker.generate_prefilter_map(&skybox_tex)?;
-    let brdf_lut = baker.generate_brdf_lut(&vk_app)?;
+    let brdf_lut = baker.generate_brdf_lut()?;
 
     let thread_pool = yastl::Pool::new(16);
     let mut draw_buffer = vec![];
