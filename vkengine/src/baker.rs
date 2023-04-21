@@ -1,7 +1,6 @@
 use crate::create::CreateFromInfo;
-use crate::device::ImageParams;
-use crate::device::VulkanDevice;
-use crate::engine::{Texture, VulkanEngine};
+use crate::device::{ImageParams, VulkanDevice};
+use crate::engine::{SamplerOptions, Texture, VulkanEngine};
 use crate::pipeline::Pipeline;
 use crate::types::*;
 use ash::vk;
@@ -236,13 +235,11 @@ impl Baker {
             format: vk::Format::R16G16_SFLOAT,
             ..Default::default()
         };
-        let sampler = engine.get_sampler(
-            vk::Filter::LINEAR,
-            vk::Filter::LINEAR,
-            vk::SamplerAddressMode::CLAMP_TO_EDGE,
-            vk::SamplerAddressMode::CLAMP_TO_EDGE,
-            false,
-        )?;
+        let sampler = engine.get_sampler(SamplerOptions {
+            wrap_u: vk::SamplerAddressMode::CLAMP_TO_EDGE,
+            wrap_v: vk::SamplerAddressMode::CLAMP_TO_EDGE,
+            ..Default::default()
+        })?;
         let mut brdf_lut = Texture::new_empty(
             &self.device,
             params,

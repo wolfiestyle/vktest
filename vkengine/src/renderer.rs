@@ -1,6 +1,6 @@
 use crate::create::CreateFromInfo;
 use crate::device::{VkBuffer, VulkanDevice};
-use crate::engine::{CmdBufferRing, DrawPayload, Shader, Texture, UploadBuffer, VulkanEngine};
+use crate::engine::{CmdBufferRing, DrawPayload, SamplerOptions, Shader, Texture, UploadBuffer, VulkanEngine};
 use crate::pipeline::{Pipeline, PipelineMode};
 use crate::types::{Cleanup, VulkanResult};
 use crate::vertex::{IndexInput, VertexInput};
@@ -325,13 +325,11 @@ impl SkyboxRenderer {
             include_spirv!("src/shaders/skybox.vert.glsl", vert, glsl),
             include_spirv!("src/shaders/skybox.frag.glsl", frag, glsl),
         )?;
-        let sampler = engine.get_sampler(
-            vk::Filter::LINEAR,
-            vk::Filter::LINEAR,
-            vk::SamplerAddressMode::CLAMP_TO_EDGE,
-            vk::SamplerAddressMode::CLAMP_TO_EDGE,
-            false,
-        )?;
+        let sampler = engine.get_sampler(SamplerOptions {
+            wrap_u: vk::SamplerAddressMode::CLAMP_TO_EDGE,
+            wrap_v: vk::SamplerAddressMode::CLAMP_TO_EDGE,
+            ..Default::default()
+        })?;
         let desc_layout = vk::DescriptorSetLayoutCreateInfo::builder()
             .flags(vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR)
             .bindings(&[vk::DescriptorSetLayoutBinding::builder()

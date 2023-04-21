@@ -136,13 +136,11 @@ impl VulkanEngine {
             light: Vec4::Y,
         };
 
-        let sampler = this.get_sampler(
-            vk::Filter::NEAREST,
-            vk::Filter::NEAREST,
-            vk::SamplerAddressMode::REPEAT,
-            vk::SamplerAddressMode::REPEAT,
-            false,
-        )?;
+        let sampler = this.get_sampler(SamplerOptions {
+            mag_filter: vk::Filter::NEAREST,
+            min_filter: vk::Filter::NEAREST,
+            ..Default::default()
+        })?;
         this.default_texture.sampler = sampler;
         this.default_normalmap.sampler = sampler;
 
@@ -225,28 +223,18 @@ impl VulkanEngine {
         Duration::from_nanos((self.gpu_time as f64 * self.device.dev_info.timestamp_period as f64) as u64)
     }
 
-    pub fn get_sampler(
-        &self, mag_filter: vk::Filter, min_filter: vk::Filter, wrap_u: vk::SamplerAddressMode, wrap_v: vk::SamplerAddressMode,
-        aniso_enabled: bool,
-    ) -> VulkanResult<vk::Sampler> {
+    pub fn get_sampler(&self, params: SamplerOptions) -> VulkanResult<vk::Sampler> {
         use std::collections::hash_map::Entry;
-        let key = SamplerOptions {
-            mag_filter,
-            min_filter,
-            wrap_u,
-            wrap_v,
-            aniso_enabled,
-        };
-        match self.samplers.lock().unwrap().entry(key) {
+        match self.samplers.lock().unwrap().entry(params) {
             Entry::Occupied(entry) => Ok(*entry.get()),
             Entry::Vacant(entry) => {
                 let sampler = vk::SamplerCreateInfo::builder()
-                    .mag_filter(mag_filter)
-                    .min_filter(min_filter)
-                    .address_mode_u(wrap_u)
-                    .address_mode_v(wrap_v)
+                    .mag_filter(params.mag_filter)
+                    .min_filter(params.min_filter)
+                    .address_mode_u(params.wrap_u)
+                    .address_mode_v(params.wrap_v)
                     .address_mode_w(vk::SamplerAddressMode::REPEAT)
-                    .anisotropy_enable(aniso_enabled)
+                    .anisotropy_enable(params.aniso_enabled)
                     .max_anisotropy(self.device.dev_info.max_aniso)
                     .border_color(vk::BorderColor::INT_OPAQUE_BLACK)
                     .unnormalized_coordinates(false)
@@ -263,30 +251,10 @@ impl VulkanEngine {
     }
 
     pub fn create_gltf_texture(&self, tex_data: &gltf_import::Texture, gltf: &gltf_import::Gltf) -> VulkanResult<Texture> {
-        use gltf_import::{MagFilter, MinFilter, WrappingMode};
-
         let image_info = &gltf[tex_data.image];
         let gltf_import::ImageData::Decoded(image) = &image_info.data else { return Err(VkError::EngineError("missing texture image")) };
 
-        let mag = match tex_data.mag_filter {
-            MagFilter::Nearest => vk::Filter::NEAREST,
-            MagFilter::Linear => vk::Filter::LINEAR,
-        };
-        let min = match tex_data.min_filter {
-            MinFilter::Nearest | MinFilter::NearestMipmapNearest | MinFilter::NearestMipmapLinear => vk::Filter::NEAREST,
-            MinFilter::Linear | MinFilter::LinearMipmapNearest | MinFilter::LinearMipmapLinear => vk::Filter::LINEAR,
-        };
-        let wrap_u = match tex_data.wrap_u {
-            WrappingMode::Repeat => vk::SamplerAddressMode::REPEAT,
-            WrappingMode::ClampToEdge => vk::SamplerAddressMode::CLAMP_TO_EDGE,
-            WrappingMode::MirroredRepeat => vk::SamplerAddressMode::MIRRORED_REPEAT,
-        };
-        let wrap_v = match tex_data.wrap_v {
-            WrappingMode::Repeat => vk::SamplerAddressMode::REPEAT,
-            WrappingMode::ClampToEdge => vk::SamplerAddressMode::CLAMP_TO_EDGE,
-            WrappingMode::MirroredRepeat => vk::SamplerAddressMode::MIRRORED_REPEAT,
-        };
-        let sampler = self.get_sampler(mag, min, wrap_u, wrap_v, true)?;
+        let sampler = self.get_sampler(SamplerOptions::from_gltf(tex_data))?;
 
         let format = if image_info.srgb {
             vk::Format::R8G8B8A8_SRGB
@@ -307,13 +275,11 @@ impl VulkanEngine {
     }
 
     pub fn create_cubemap(&self, width: u32, height: u32, cube_data: CubeData) -> VulkanResult<Texture> {
-        let sampler = self.get_sampler(
-            vk::Filter::LINEAR,
-            vk::Filter::LINEAR,
-            vk::SamplerAddressMode::CLAMP_TO_EDGE,
-            vk::SamplerAddressMode::CLAMP_TO_EDGE,
-            false,
-        )?;
+        let sampler = self.get_sampler(SamplerOptions {
+            wrap_u: vk::SamplerAddressMode::CLAMP_TO_EDGE,
+            wrap_v: vk::SamplerAddressMode::CLAMP_TO_EDGE,
+            ..Default::default()
+        })?;
         Texture::new(
             &self.device,
             [width, height].into(),
@@ -956,12 +922,51 @@ impl Cleanup<VulkanDevice> for Texture {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct SamplerOptions {
-    mag_filter: vk::Filter,
-    min_filter: vk::Filter,
-    wrap_u: vk::SamplerAddressMode,
-    wrap_v: vk::SamplerAddressMode,
-    aniso_enabled: bool,
+pub struct SamplerOptions {
+    pub mag_filter: vk::Filter,
+    pub min_filter: vk::Filter,
+    pub wrap_u: vk::SamplerAddressMode,
+    pub wrap_v: vk::SamplerAddressMode,
+    pub aniso_enabled: bool,
+}
+
+impl SamplerOptions {
+    pub fn from_gltf(texture: &gltf_import::Texture) -> Self {
+        use gltf_import::{MagFilter, MinFilter, WrappingMode};
+        SamplerOptions {
+            mag_filter: match texture.mag_filter {
+                MagFilter::Nearest => vk::Filter::NEAREST,
+                MagFilter::Linear => vk::Filter::LINEAR,
+            },
+            min_filter: match texture.min_filter {
+                MinFilter::Nearest | MinFilter::NearestMipmapNearest | MinFilter::NearestMipmapLinear => vk::Filter::NEAREST,
+                MinFilter::Linear | MinFilter::LinearMipmapNearest | MinFilter::LinearMipmapLinear => vk::Filter::LINEAR,
+            },
+            wrap_u: match texture.wrap_u {
+                WrappingMode::Repeat => vk::SamplerAddressMode::REPEAT,
+                WrappingMode::ClampToEdge => vk::SamplerAddressMode::CLAMP_TO_EDGE,
+                WrappingMode::MirroredRepeat => vk::SamplerAddressMode::MIRRORED_REPEAT,
+            },
+            wrap_v: match texture.wrap_v {
+                WrappingMode::Repeat => vk::SamplerAddressMode::REPEAT,
+                WrappingMode::ClampToEdge => vk::SamplerAddressMode::CLAMP_TO_EDGE,
+                WrappingMode::MirroredRepeat => vk::SamplerAddressMode::MIRRORED_REPEAT,
+            },
+            aniso_enabled: true,
+        }
+    }
+}
+
+impl Default for SamplerOptions {
+    fn default() -> Self {
+        Self {
+            mag_filter: vk::Filter::LINEAR,
+            min_filter: vk::Filter::LINEAR,
+            wrap_u: vk::SamplerAddressMode::REPEAT,
+            wrap_v: vk::SamplerAddressMode::REPEAT,
+            aniso_enabled: false,
+        }
+    }
 }
 
 #[derive(Debug)]
