@@ -29,6 +29,6 @@ vec2 integrateBRDF(float NdotV, float roughness) {
 
 void main() {
     vec2 coord = gl_GlobalInvocationID.xy / vec2(imageSize(outputTex));
-    vec2 value = integrateBRDF(max(coord.x, Epsilon), coord.y);
+    vec2 value = integrateBRDF(max(coord.x, 0.0001), coord.y);
     imageStore(outputTex, ivec2(gl_GlobalInvocationID.xy), vec4(value, 0.0, 0.0));
 }

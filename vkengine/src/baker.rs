@@ -246,7 +246,7 @@ impl Baker {
         let params = ImageParams {
             width: BRDFLUT_SIZE,
             height: BRDFLUT_SIZE,
-            format: vk::Format::R16G16_SFLOAT,
+            format: vk::Format::R16G16_UNORM,
             ..Default::default()
         };
         let mut brdf_lut = Texture::new_empty(
