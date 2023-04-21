@@ -219,6 +219,39 @@ impl Swapchain {
     pub fn aspect(&self) -> f32 {
         self.extent.width as f32 / self.extent.height as f32
     }
+
+    pub(crate) fn color_attachment(&self, image_idx: usize) -> vk::RenderingAttachmentInfo {
+        if let Some(msaa_imgview) = self.msaa_imgview {
+            vk::RenderingAttachmentInfo::builder()
+                .image_view(msaa_imgview)
+                .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+                .load_op(vk::AttachmentLoadOp::DONT_CARE)
+                .store_op(vk::AttachmentStoreOp::DONT_CARE)
+                .resolve_mode(vk::ResolveModeFlags::AVERAGE)
+                .resolve_image_view(self.image_views[image_idx])
+                .resolve_image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+                .build()
+        } else {
+            vk::RenderingAttachmentInfo::builder()
+                .image_view(self.image_views[image_idx])
+                .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+                .load_op(vk::AttachmentLoadOp::DONT_CARE)
+                .store_op(vk::AttachmentStoreOp::STORE)
+                .build()
+        }
+    }
+
+    pub(crate) fn depth_attachment(&self) -> vk::RenderingAttachmentInfo {
+        vk::RenderingAttachmentInfo::builder()
+            .image_view(self.depth_imgview.expect("missing depth image view"))
+            .image_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
+            .load_op(vk::AttachmentLoadOp::CLEAR)
+            .store_op(vk::AttachmentStoreOp::DONT_CARE)
+            .clear_value(vk::ClearValue {
+                depth_stencil: vk::ClearDepthStencilValue { depth: 1.0, stencil: 0 },
+            })
+            .build()
+    }
 }
 
 impl std::ops::Deref for Swapchain {

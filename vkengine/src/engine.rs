@@ -449,37 +449,6 @@ impl VulkanEngine {
             self.device.cmd_reset_query_pool(cmd_buffer, frame.time_query, 0, 2);
         }
 
-        let color_attach = if let Some(msaa_imgview) = self.swapchain.msaa_imgview {
-            vk::RenderingAttachmentInfo::builder()
-                .image_view(msaa_imgview)
-                .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-                .load_op(vk::AttachmentLoadOp::DONT_CARE)
-                .store_op(vk::AttachmentStoreOp::DONT_CARE)
-                .resolve_mode(vk::ResolveModeFlags::AVERAGE)
-                .resolve_image_view(self.swapchain.image_views[image_idx])
-                .resolve_image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-        } else {
-            vk::RenderingAttachmentInfo::builder()
-                .image_view(self.swapchain.image_views[image_idx])
-                .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-                .load_op(vk::AttachmentLoadOp::DONT_CARE)
-                .store_op(vk::AttachmentStoreOp::STORE)
-        };
-        let depth_attach = vk::RenderingAttachmentInfo::builder()
-            .image_view(self.swapchain.depth_imgview.expect("missing depth image view"))
-            .image_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
-            .load_op(vk::AttachmentLoadOp::CLEAR)
-            .store_op(vk::AttachmentStoreOp::DONT_CARE)
-            .clear_value(vk::ClearValue {
-                depth_stencil: vk::ClearDepthStencilValue { depth: 1.0, stencil: 0 },
-            });
-        let render_info = vk::RenderingInfo::builder()
-            .flags(vk::RenderingFlags::CONTENTS_SECONDARY_COMMAND_BUFFERS)
-            .render_area(self.swapchain.extent_rect())
-            .layer_count(1)
-            .color_attachments(slice::from_ref(&color_attach))
-            .depth_attachment(&depth_attach);
-
         self.device.transition_image_layout(
             cmd_buffer,
             self.swapchain.images[image_idx],
@@ -501,6 +470,16 @@ impl VulkanEngine {
                 vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
             );
         }
+
+        let color_attach = self.swapchain.color_attachment(image_idx);
+        let depth_attach = self.swapchain.depth_attachment();
+        let render_info = vk::RenderingInfo::builder()
+            .flags(vk::RenderingFlags::CONTENTS_SECONDARY_COMMAND_BUFFERS)
+            .render_area(self.swapchain.extent_rect())
+            .layer_count(1)
+            .color_attachments(slice::from_ref(&color_attach))
+            .depth_attachment(&depth_attach);
+
         unsafe {
             self.device
                 .cmd_write_timestamp(cmd_buffer, vk::PipelineStageFlags::BOTTOM_OF_PIPE, frame.time_query, 0);
