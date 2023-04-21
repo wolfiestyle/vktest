@@ -5,7 +5,7 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 layout(constant_id = 1) const uint MipLevels = 1;
 
 layout(binding = 0) uniform samplerCube inputTex;
-layout(binding = 1, rgba16f) uniform writeonly imageCube outputTex[MipLevels];
+layout(binding = 1) uniform writeonly imageCube outputTex[MipLevels];
 
 layout(push_constant) uniform PushConstants {
     uint level;

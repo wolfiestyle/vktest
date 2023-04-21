@@ -3,7 +3,7 @@
 #include "pbr.inc.glsl"
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
-layout(binding = 0, rg16f) uniform writeonly image2D outputTex;
+layout(binding = 0) uniform writeonly image2D outputTex;
 
 vec2 integrateBRDF(float NdotV, float roughness) {
     vec3 V = vec3(sqrt(1.0 - NdotV * NdotV), 0.0, NdotV);

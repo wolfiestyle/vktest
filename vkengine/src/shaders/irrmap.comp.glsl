@@ -3,7 +3,7 @@
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
 layout(binding = 0) uniform samplerCube inputTex;
-layout(binding = 1, rgba16f) uniform writeonly imageCube outputTex;
+layout(binding = 1) uniform writeonly imageCube outputTex;
 
 void main() {
     vec3 N = getCubemapDir(gl_GlobalInvocationID, imageSize(outputTex));

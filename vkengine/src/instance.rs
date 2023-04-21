@@ -281,7 +281,9 @@ impl VulkanInstance {
             })
             .collect();
 
-        let features = vk::PhysicalDeviceFeatures::builder().sampler_anisotropy(true);
+        let features = vk::PhysicalDeviceFeatures::builder()
+            .sampler_anisotropy(true)
+            .shader_storage_image_write_without_format(true);
 
         let extensions: Vec<_> = DEVICE_EXTENSIONS
             .into_iter()
