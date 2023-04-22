@@ -83,6 +83,8 @@ impl<V: VertexStorage> GltfData<V> {
     }
 
     fn update_transforms(&mut self) {
+        let mut pending = vec![false; self.nodes.len()];
+        let mut all_done = true;
         for i in 0..self.nodes.len() {
             if let Some(NodeId(parent_id)) = self.nodes[i].parent {
                 if parent_id < i {
@@ -90,8 +92,23 @@ impl<V: VertexStorage> GltfData<V> {
                     let node = &mut self.nodes[i];
                     node.transform = parent_transform * node.local_transform;
                 } else {
-                    //FIXME
-                    eprintln!("Node {i} has parent {parent_id} after itself, skipping transform update");
+                    all_done = false;
+                    pending[i] = true;
+                }
+            }
+        }
+        if all_done {
+            return;
+        }
+        for i in (0..self.nodes.len()).rev() {
+            if pending[i] {
+                let parent_id = self.nodes[i].parent.unwrap().0;
+                if parent_id > i && !pending[parent_id] {
+                    let parent_transform = self.nodes[parent_id].transform;
+                    let node = &mut self.nodes[i];
+                    node.transform = parent_transform * node.local_transform;
+                } else {
+                    eprintln!("Couldn't compute transform for Node {i} with parent {parent_id}");
                 }
             }
         }
