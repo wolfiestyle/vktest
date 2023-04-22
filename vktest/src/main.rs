@@ -93,8 +93,20 @@ fn main() -> VulkanResult<()> {
     let mut mesh_enabled: Vec<Vec<_>> = scenes.iter().map(|meshes| vec![true; meshes.len()]).collect();
     let mut cur_scene = 0;
 
-    vk_app.camera.position = [2.0, 2.0, 2.0].into();
-    vk_app.camera.look_at([0.0; 3]);
+    let camera_node = gltf
+        .scenes
+        .iter()
+        .find_map(|scene| scene.nodes(&gltf).find(|&node| node.camera.is_some()));
+    if let Some(node) = camera_node {
+        let camera = &gltf[node.camera.unwrap()];
+        vk_app.camera.set_transform(node.transform);
+        if let gltf_import::Projection::Perspective { yfov, .. } = camera.projection {
+            vk_app.camera.fov = yfov;
+        }
+    } else {
+        vk_app.camera.position = [0.0, 1.0, 2.0].into();
+        vk_app.camera.look_at([0.0; 3]);
+    }
     let mut controller = CameraController::new(&vk_app.camera);
 
     let mut skybox = SkyboxRenderer::new(&vk_app)?;
@@ -122,6 +134,7 @@ fn main() -> VulkanResult<()> {
     let mut vsync = vk_app.is_vsync_on();
     let mut light = -vk_app.light;
     let mut light_directional = true;
+    let mut fov = vk_app.camera.fov.to_degrees();
 
     event_loop.run(move |event, _, control_flow| match event {
         Event::WindowEvent { event, .. } => {
@@ -203,7 +216,7 @@ fn main() -> VulkanResult<()> {
                         ui.checkbox(&mut controller.flying, "Flying");
                         ui.horizontal(|ui| {
                             ui.label("fov: ");
-                            ui.add(egui::Slider::new(&mut vk_app.camera.fov, 10.0..=120.0));
+                            ui.add(egui::Slider::new(&mut fov, 1.0..=120.0));
                         });
                         ui.add_space(10.0);
                         ui.label("Light:");
@@ -256,6 +269,8 @@ fn main() -> VulkanResult<()> {
                 light.w = 1.0;
                 vk_app.light = light;
             };
+
+            vk_app.camera.fov = fov.to_radians();
 
             window.request_redraw();
         }

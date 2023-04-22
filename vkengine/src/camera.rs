@@ -41,6 +41,12 @@ impl Camera {
         self.rotation = Quat::from_euler(EulerRot::YXZ, yaw, pitch, roll);
     }
 
+    pub fn set_transform(&mut self, affine: Affine3A) {
+        let (_, rotation, translation) = affine.to_scale_rotation_translation();
+        self.position = translation;
+        self.rotation = rotation;
+    }
+
     pub(crate) fn get_view_transform(&self) -> Affine3A {
         Affine3A::from_quat(self.rotation.conjugate()) * Affine3A::from_translation(-self.position)
     }
@@ -50,7 +56,7 @@ impl Camera {
     }
 
     pub(crate) fn get_projection(&self, aspect: f32) -> Mat4 {
-        Mat4::perspective_rh(self.fov.to_radians(), aspect, self.near, self.far)
+        Mat4::perspective_rh(self.fov, aspect, self.near, self.far)
     }
 }
 
@@ -60,7 +66,7 @@ impl Default for Camera {
         Self {
             position: Vec3::ZERO,
             rotation: Quat::IDENTITY,
-            fov: 60.0,
+            fov: 60.0_f32.to_radians(),
             near: 0.05,
             far: 1000.0,
         }
