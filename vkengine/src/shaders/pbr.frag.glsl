@@ -16,7 +16,7 @@ layout(set = 0, binding = 0) uniform ObjectUniforms {
 
 layout(set = 0, binding = 1) uniform samplerCube irradianceMap;
 layout(set = 0, binding = 2) uniform samplerCube prefilterMap;
-layout(set = 0, binding = 3) uniform sampler2D brdfLut;
+layout(set = 0, binding = 3) uniform sampler2D BRDF_lut;
 
 layout(set = 1, binding = 0) uniform sampler2D texColor;
 layout(set = 1, binding = 1) uniform sampler2D texMetalRough;
@@ -69,16 +69,16 @@ vec3 pbr_light(vec3 N, vec3 albedo, float metallic, float roughness, float ao) {
     }
 
     // IBL
-    vec3 envF = fresnelSchlickRoughness(NdotV, F0, roughness);
-    vec3 env_kD = mix(1.0 - envF, vec3(0.0), metallic);
     vec3 irradiance = texture(irradianceMap, N).rgb;
-    vec3 envDiffuse = env_kD * irradiance * albedo;
+    vec3 F = fresnelSchlickRoughness(NdotV, F0, roughness);
+    vec3 kD = mix(1.0 - F, vec3(0.0), metallic);
+    vec3 iblDiffuse = kD * irradiance * albedo;
 
     float maxLod = textureQueryLevels(prefilterMap) - 1;
     vec3 prefColor = textureLod(prefilterMap, R, roughness * maxLod).rgb;
-    vec2 envBRDF = texture(brdfLut, vec2(NdotV, roughness)).rg;
-    vec3 envSpec = prefColor * (envF * envBRDF.x + envBRDF.y);
-    vec3 ambient = (envDiffuse + envSpec) * ao;
+    vec2 envBRDF = texture(BRDF_lut, vec2(NdotV, roughness)).rg;
+    vec3 iblSpec = prefColor * (F * envBRDF.x + envBRDF.y);
+    vec3 ambient = (iblDiffuse + iblSpec) * ao;
 
     return ambient + direct;
 }
@@ -90,7 +90,7 @@ void main() {
     vec3 emissive = texture(texEmissive, frag.TexCoord).rgb * material.emissive;
     float occlusion = (texture(texOcclusion, frag.TexCoord).r - 1.0) * material.base_pbr.r + 1.0;
     vec3 normal = normalize(frag.TBN * normal_map * vec3(vec2(material.normal_scale), 1.0));
-    vec3 direct = pbr_light(normal, albedo.rgb, metalrough.r, metalrough.g, occlusion);
-    vec3 color = direct + emissive;
-    outColor = vec4(color, 1.0);
+    vec3 radiance = pbr_light(normal, albedo.rgb, metalrough.r, metalrough.g, occlusion) + emissive;
+    vec3 color = radiance / (radiance + 1.0);
+    outColor = vec4(color, albedo.a);
 }

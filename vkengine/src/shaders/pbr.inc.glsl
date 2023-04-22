@@ -9,8 +9,8 @@ float distributionGGX(float NdotH, float roughness) {
     return a2 / (PI * denom * denom);
 }
 
-float geometrySchlickGGX(float NdotV, float k) {
-    return NdotV / (NdotV * (1.0 - k) + k);
+float geometrySchlickGGX(float cosTheta, float k) {
+    return cosTheta / (cosTheta * (1.0 - k) + k);
 }
 
 float geometrySmith(float NdotL, float NdotV, float roughness) {

@@ -211,7 +211,7 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
             view_pos: engine.camera.position.extend(1.0),
             lights: [LightData {
                 pos: engine.light,
-                color: Vec3::splat(3.0).extend(0.0),
+                color: Vec3::splat(4.0).extend(0.0),
             }],
         }
     }
