@@ -52,8 +52,13 @@ pub struct Vertex {
     pub position: [f32; 3],
     pub normal: [f32; 3],
     pub tangent: [f32; 4],
-    pub texcoord: [f32; 2],
+    pub texcoord0: [f32; 2],
+    pub texcoord1: [f32; 2],
     pub color: [f32; 4],
+}
+
+impl Vertex {
+    pub const NUM_UVS: u32 = 2;
 }
 
 impl Default for Vertex {
@@ -62,7 +67,8 @@ impl Default for Vertex {
             position: [0.0; 3],
             normal: [0.0; 3],
             tangent: [0.0; 4],
-            texcoord: [0.0; 2],
+            texcoord0: [0.0; 2],
+            texcoord1: [0.0; 2],
             color: [1.0; 4],
         }
     }
@@ -86,10 +92,10 @@ impl VertexStorage for Vec<Vertex> {
 
     #[inline]
     fn get_texcoord(&self, index: usize, set: u32) -> [f32; 2] {
-        if set == 0 {
-            self[index].texcoord
-        } else {
-            [0.0; 2]
+        match set {
+            0 => self[index].texcoord0,
+            1 => self[index].texcoord1,
+            _ => [0.0; 2],
         }
     }
 
@@ -115,8 +121,10 @@ impl VertexStorage for Vec<Vertex> {
 
     #[inline]
     fn write_texcoord_f32(&mut self, index: usize, set: u32, value: [f32; 2]) {
-        if set == 0 {
-            self[index].texcoord = value;
+        match set {
+            0 => self[index].texcoord0 = value,
+            1 => self[index].texcoord1 = value,
+            _ => (),
         }
     }
 

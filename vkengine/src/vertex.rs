@@ -176,7 +176,7 @@ impl_vertex!(tuple: A 0, B 1, C 2, D 3, E 4, F 5);
 #[cfg(feature = "egui")]
 impl_vertex!(struct egui::epaint::Vertex: pos, uv, color);
 
-impl_vertex!(struct gltf_import::Vertex: position, normal, tangent, texcoord, color);
+impl_vertex!(struct gltf_import::Vertex: position, normal, tangent, texcoord0, texcoord1, color);
 
 trait LensFormat {
     #[inline(always)]

@@ -291,6 +291,9 @@ struct ObjectUniforms {
     lights: [LightData; NUM_LIGHTS as usize],
 }
 
+const UV_BITS: u32 = 1;
+const UV_MASK: u32 = (1 << UV_BITS) - 1;
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default, Pod, Zeroable)]
 pub struct MaterialData {
@@ -298,17 +301,26 @@ pub struct MaterialData {
     pub base_pbr: Vec3,
     pub normal_scale: f32,
     pub emissive: Vec3,
-    pub unused0: f32,
+    pub uv_sets: u32,
 }
 
 impl MaterialData {
     pub fn from_gltf(material: &gltf_import::Material) -> Self {
+        let color_uv = material.color_tex.map(|tex| tex.uv_set & UV_MASK).unwrap_or_default();
+        let metrough_uv = material.metallic_roughness_tex.map(|tex| tex.uv_set & UV_MASK).unwrap_or_default();
+        let normal_uv = material.normal_tex.map(|tex| tex.uv_set & UV_MASK).unwrap_or_default();
+        let emiss_uv = material.emissive_tex.map(|tex| tex.uv_set & UV_MASK).unwrap_or_default();
+        let occl_uv = material.occlusion_tex.map(|tex| tex.uv_set & UV_MASK).unwrap_or_default();
         Self {
             base_color: material.base_color.into(),
             base_pbr: Vec3::new(material.occlusion_strength, material.roughness, material.metallic),
             normal_scale: material.normal_scale,
             emissive: material.emissive.into(),
-            unused0: 0.0,
+            uv_sets: (color_uv)
+                | (metrough_uv << UV_BITS)
+                | (normal_uv << UV_BITS * 2)
+                | (emiss_uv << UV_BITS * 3)
+                | (occl_uv << UV_BITS * 4),
         }
     }
 }
