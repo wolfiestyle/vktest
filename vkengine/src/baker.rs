@@ -26,9 +26,17 @@ const BRDFLUT_WG: u32 = BRDFLUT_SIZE / 16;
 
 impl Baker {
     pub fn new(engine: &VulkanEngine) -> VulkanResult<Self> {
-        let device = engine.device.clone();
+        Ok(Self {
+            device: engine.device.clone(),
+            irrmap_pipeline: Self::create_irrmap_pipeline(engine)?,
+            prefilter_pipeline: Self::create_prefilter_pipeline(engine)?,
+            brdf_pipeline: Self::create_brdf_lut_pipeline(engine)?,
+        })
+    }
 
-        // irradiance map (diffuse lighting)
+    // irradiance map (diffuse lighting)
+    fn create_irrmap_pipeline(engine: &VulkanEngine) -> VulkanResult<Pipeline> {
+        let device = &*engine.device;
         let irrmap_shader = vk::ShaderModuleCreateInfo::builder()
             .code(include_spirv!("src/shaders/irrmap.comp.glsl", comp, glsl))
             .create(&device)?;
@@ -52,8 +60,15 @@ impl Baker {
         let irrmap_pipeline = Pipeline::builder_compute(irrmap_shader)
             .descriptor_layout(&desc_layout)
             .build(engine)?;
+        unsafe {
+            device.destroy_shader_module(irrmap_shader, None);
+        }
+        Ok(irrmap_pipeline)
+    }
 
-        // prefilter map (specular lighting)
+    // prefilter map (specular lighting)
+    fn create_prefilter_pipeline(engine: &VulkanEngine) -> VulkanResult<Pipeline> {
+        let device = &*engine.device;
         let prefilter_shader = vk::ShaderModuleCreateInfo::builder()
             .code(include_spirv!("src/shaders/prefilter.comp.glsl", comp, glsl))
             .create(&device)?;
@@ -89,8 +104,15 @@ impl Baker {
             .push_constants(&[push_constants])
             .spec_constants(slice::from_ref(&spec_constants), bytemuck::bytes_of(&PREFILTERED_MIP_LEVELS))
             .build(engine)?;
+        unsafe {
+            device.destroy_shader_module(prefilter_shader, None);
+        }
+        Ok(prefilter_pipeline)
+    }
 
-        // precomputed BRDF for specular
+    // precomputed BRDF for specular
+    fn create_brdf_lut_pipeline(engine: &VulkanEngine) -> VulkanResult<Pipeline> {
+        let device = &*engine.device;
         let brdf_shader = vk::ShaderModuleCreateInfo::builder()
             .code(include_spirv!("src/shaders/brdf_lut.comp.glsl", comp, glsl))
             .create(&device)?;
@@ -107,17 +129,11 @@ impl Baker {
             .descriptor_layout(&desc_layout)
             .build(engine)?;
         unsafe {
-            device.destroy_shader_module(irrmap_shader, None);
-            device.destroy_shader_module(prefilter_shader, None);
             device.destroy_shader_module(brdf_shader, None);
         }
+        Ok(brdf_pipeline)
+    }
 
-        Ok(Self {
-            device,
-            irrmap_pipeline,
-            prefilter_pipeline,
-            brdf_pipeline,
-        })
     }
 
     pub fn generate_irradiance_map(&self, cubemap: &Texture) -> VulkanResult<Texture> {

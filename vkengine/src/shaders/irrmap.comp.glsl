@@ -1,12 +1,13 @@
 #version 450
 #include "sampling.inc.glsl"
+#include "cubemap.inc.glsl"
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
 layout(binding = 0) uniform samplerCube inputTex;
 layout(binding = 1) uniform writeonly imageCube outputTex;
 
 void main() {
-    vec3 N = getCubemapDir(gl_GlobalInvocationID, imageSize(outputTex));
+    vec3 N = getCubemapDir(gl_GlobalInvocationID.xy / vec2(imageSize(outputTex)), gl_GlobalInvocationID.z);
     mat3 TBN = computeTangentBasis(N);
 
     vec3 color = vec3(0.0);
