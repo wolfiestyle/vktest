@@ -98,6 +98,5 @@ void main() {
     float occlusion = (texture(texOcclusion, frag.TexCoord[occl_uv]).r - 1.0) * material.base_pbr.r + 1.0;
     vec3 normal = normalize(frag.TBN * normal_map * vec3(vec2(material.normal_scale), 1.0));
     vec3 radiance = pbr_light(normal, albedo.rgb, metalrough.r, metalrough.g, occlusion) + emissive;
-    vec3 color = radiance / (radiance + 1.0);
-    outColor = vec4(color, albedo.a);
+    outColor = vec4(radiance, albedo.a);
 }
