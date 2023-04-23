@@ -250,28 +250,96 @@ impl VulkanEngine {
         }
     }
 
-    pub fn create_gltf_texture(&self, tex_data: &gltf_import::Texture, gltf: &gltf_import::Gltf) -> VulkanResult<Texture> {
-        let image_info = &gltf[tex_data.image];
-        let gltf_import::ImageData::Decoded(image) = &image_info.data else { return Err(VkError::EngineError("missing texture image")) };
+    #[allow(unused_assignments)]
+    pub fn create_dynamicimage_texture(
+        &self, image: &gltf_import::DynamicImage, is_srgb: bool, sampler: vk::Sampler,
+    ) -> VulkanResult<Texture> {
+        use gltf_import::DynamicImage::*;
 
-        let sampler = self.get_sampler(SamplerOptions::from_gltf(tex_data))?;
+        let mut temp8 = vec![];
+        let mut temp16 = vec![];
+        let mut temp32 = vec![];
 
-        let format = if image_info.srgb {
-            vk::Format::R8G8B8A8_SRGB
-        } else {
-            vk::Format::R8G8B8A8_UNORM
+        let bytes = match image {
+            ImageLuma8(img) => img.as_raw(),
+            ImageLumaA8(img) => img.as_raw(),
+            ImageRgb8(_) => {
+                temp8 = image.to_rgba8().into_raw();
+                &temp8
+            }
+            ImageRgba8(img) => img.as_raw(),
+            ImageLuma16(img) => bytemuck::cast_slice(img.as_raw()),
+            ImageLumaA16(img) => bytemuck::cast_slice(img.as_raw()),
+            ImageRgb16(_) => {
+                temp16 = image.to_rgba16().into_raw();
+                bytemuck::cast_slice(&temp16)
+            }
+            ImageRgba16(img) => bytemuck::cast_slice(img.as_raw()),
+            ImageRgb32F(_) => {
+                temp32 = image.to_rgba32f().into_raw();
+                bytemuck::cast_slice(&temp32)
+            }
+            ImageRgba32F(img) => bytemuck::cast_slice(img.as_raw()),
+            _ => {
+                temp8 = image.to_rgba8().into_raw();
+                &temp8
+            }
         };
+
+        let format = match image {
+            ImageLuma8(_) if is_srgb => vk::Format::R8_SRGB,
+            ImageLuma8(_) if !is_srgb => vk::Format::R8_UNORM,
+            ImageLumaA8(_) if is_srgb => vk::Format::R8G8_SRGB,
+            ImageLumaA8(_) if !is_srgb => vk::Format::R8G8_UNORM,
+            ImageRgb8(_) | ImageRgba8(_) if is_srgb => vk::Format::R8G8B8A8_SRGB,
+            ImageRgb8(_) | ImageRgba8(_) if !is_srgb => vk::Format::R8G8B8A8_UNORM,
+            ImageLuma16(_) => vk::Format::R16_UNORM,
+            ImageLumaA16(_) => vk::Format::R16G16_UNORM,
+            ImageRgb16(_) | ImageRgba16(_) => vk::Format::R16G16B16A16_UNORM,
+            ImageRgb32F(_) | ImageRgba32F(_) => vk::Format::R32G32B32A32_SFLOAT,
+            _ => {
+                if is_srgb {
+                    vk::Format::R8G8B8A8_SRGB
+                } else {
+                    vk::Format::R8G8B8A8_UNORM
+                }
+            }
+        };
+
+        let swizzle = match image {
+            ImageLuma8(_) | ImageLuma16(_) => Some(vk::ComponentMapping {
+                r: vk::ComponentSwizzle::R,
+                g: vk::ComponentSwizzle::R,
+                b: vk::ComponentSwizzle::R,
+                a: vk::ComponentSwizzle::ONE,
+            }),
+            ImageLumaA8(_) | ImageLumaA16(_) => Some(vk::ComponentMapping {
+                r: vk::ComponentSwizzle::R,
+                g: vk::ComponentSwizzle::R,
+                b: vk::ComponentSwizzle::R,
+                a: vk::ComponentSwizzle::G,
+            }),
+            _ => None,
+        };
+
         Texture::new(
             &self.device,
             [image.width(), image.height()].into(),
             format,
-            ImageData::Single(image.to_rgba8().as_raw()),
+            ImageData::Single(bytes),
             sampler,
             TextureOptions {
                 gen_mipmaps: true,
-                swizzle: None,
+                swizzle,
             },
         )
+    }
+
+    pub fn create_gltf_texture(&self, tex_data: &gltf_import::Texture, gltf: &gltf_import::Gltf) -> VulkanResult<Texture> {
+        let image_info = &gltf[tex_data.image];
+        let gltf_import::ImageData::Decoded(image) = &image_info.data else { return Err(VkError::EngineError("missing texture image")) };
+        let sampler = self.get_sampler(SamplerOptions::from_gltf(tex_data))?;
+        self.create_dynamicimage_texture(image, image_info.srgb, sampler)
     }
 
     pub fn create_cubemap(&self, width: u32, height: u32, cube_data: CubeData) -> VulkanResult<Texture> {

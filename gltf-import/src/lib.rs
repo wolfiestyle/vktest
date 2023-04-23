@@ -12,3 +12,4 @@ pub use scene::*;
 pub use types::*;
 
 pub use gltf::texture::{MagFilter, MinFilter, WrappingMode};
+pub use image::DynamicImage;
