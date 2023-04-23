@@ -964,6 +964,14 @@ impl Default for ImageParams {
 
 impl ImageParams {
     #[inline]
+    pub fn size(&self) -> UVec2 {
+        UVec2 {
+            x: self.width,
+            y: self.height,
+        }
+    }
+
+    #[inline]
     pub fn extent(&self) -> vk::Extent3D {
         vk::Extent3D {
             width: self.width,

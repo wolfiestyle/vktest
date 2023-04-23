@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use structopt::StructOpt;
 use vkengine::gui::{egui, UiRenderer};
-use vkengine::{Baker, CameraController, CubeData, MeshRenderData, MeshRenderer, SkyboxRenderer, VkError, VulkanEngine, VulkanResult};
+use vkengine::{Baker, CameraController, MeshRenderData, MeshRenderer, SkyboxRenderer, VkError, VulkanEngine, VulkanResult};
 use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
@@ -14,8 +14,8 @@ use winit::window::Fullscreen;
 struct Arguments {
     #[structopt(short, long, parse(from_os_str), help = "glTF model file")]
     model: Option<PathBuf>,
-    #[structopt(short, long, parse(from_os_str), help = "Directory with cubemap images for the skybox")]
-    skybox_dir: Option<PathBuf>,
+    #[structopt(short, long, parse(from_os_str), help = "File with the HDR panorama skybox")]
+    skybox: Option<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -38,21 +38,7 @@ fn main() -> VulkanResult<()> {
         );
     }
 
-    let skybox_dir = args.skybox_dir.unwrap_or_else(|| "data/skybox".into());
-    let skybox_img = std::thread::scope(|scope| {
-        let dir_ref = &skybox_dir;
-        ["posx", "negx", "posy", "negy", "posz", "negz"]
-            .map(|side| {
-                scope.spawn(move || {
-                    let filename = format!("{side}.jpg"); //FIXME: detect format
-                    let path = dir_ref.join(filename);
-                    eprintln!("loading {path:?}");
-                    image::open(path).unwrap().into_rgba8()
-                })
-            })
-            .map(|jh| jh.join().unwrap())
-    });
-    let cube_data = CubeData::try_from_iter(skybox_img.iter().map(|img| img.as_raw().as_slice())).unwrap();
+    let skybox_img = image::open(args.skybox.unwrap_or_else(|| "data/skybox.exr".into())).unwrap();
 
     let event_loop = EventLoop::new();
     let window = winit::window::WindowBuilder::new()
@@ -110,12 +96,13 @@ fn main() -> VulkanResult<()> {
     let mut controller = CameraController::new(&vk_app.camera);
 
     let mut skybox = SkyboxRenderer::new(&vk_app)?;
-    let skybox_tex = vk_app.create_cubemap(skybox_img[0].width(), skybox_img[0].height(), cube_data)?;
+    let skybox_equirect = vk_app.create_dynamicimage_texture(&skybox_img, false, false, Default::default())?;
 
     let mut gui = UiRenderer::new(&event_loop, &vk_app)?;
     let mut show_gui = true;
 
     let baker = Baker::new(&vk_app)?;
+    let skybox_tex = baker.equirect_to_cubemap(&skybox_equirect)?;
     let irr_map = baker.generate_irradiance_map(&skybox_tex)?;
     let pref_map = baker.generate_prefilter_map(&skybox_tex)?;
     let brdf_lut = baker.generate_brdf_lut()?;

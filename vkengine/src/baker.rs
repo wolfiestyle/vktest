@@ -1,6 +1,6 @@
 use crate::create::CreateFromInfo;
 use crate::device::{ImageParams, VulkanDevice};
-use crate::engine::{Texture, VulkanEngine};
+use crate::engine::{SamplerOptions, Texture, VulkanEngine};
 use crate::pipeline::Pipeline;
 use crate::types::*;
 use ash::vk;
@@ -14,6 +14,7 @@ pub struct Baker {
     irrmap_pipeline: Pipeline,
     prefilter_pipeline: Pipeline,
     brdf_pipeline: Pipeline,
+    eq2cube_pipeline: Pipeline,
 }
 
 const IRRMAP_SIZE: u32 = 32;
@@ -23,6 +24,7 @@ const PREFILTERED_WG: u32 = PREFILTERED_SIZE / 8;
 const PREFILTERED_MIP_LEVELS: u32 = PREFILTERED_SIZE.ilog2() + 1;
 const BRDFLUT_SIZE: u32 = 512;
 const BRDFLUT_WG: u32 = BRDFLUT_SIZE / 16;
+const EQ2CUBE_WG_SIZE: u32 = 16;
 
 impl Baker {
     pub fn new(engine: &VulkanEngine) -> VulkanResult<Self> {
@@ -31,15 +33,20 @@ impl Baker {
             irrmap_pipeline: Self::create_irrmap_pipeline(engine)?,
             prefilter_pipeline: Self::create_prefilter_pipeline(engine)?,
             brdf_pipeline: Self::create_brdf_lut_pipeline(engine)?,
+            eq2cube_pipeline: Self::create_eq2cube_pipeline(engine)?,
         })
     }
 
-    // irradiance map (diffuse lighting)
     fn create_irrmap_pipeline(engine: &VulkanEngine) -> VulkanResult<Pipeline> {
         let device = &*engine.device;
         let irrmap_shader = vk::ShaderModuleCreateInfo::builder()
             .code(include_spirv!("src/shaders/irrmap.comp.glsl", comp, glsl))
             .create(&device)?;
+        let sampler = engine.get_sampler(SamplerOptions {
+            wrap_u: vk::SamplerAddressMode::CLAMP_TO_EDGE,
+            wrap_v: vk::SamplerAddressMode::CLAMP_TO_EDGE,
+            ..Default::default()
+        })?;
         let desc_layout = vk::DescriptorSetLayoutCreateInfo::builder()
             .flags(vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR)
             .bindings(&[
@@ -48,6 +55,7 @@ impl Baker {
                     .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                     .descriptor_count(1)
                     .stage_flags(vk::ShaderStageFlags::COMPUTE)
+                    .immutable_samplers(slice::from_ref(&sampler))
                     .build(),
                 vk::DescriptorSetLayoutBinding::builder()
                     .binding(1)
@@ -66,12 +74,16 @@ impl Baker {
         Ok(irrmap_pipeline)
     }
 
-    // prefilter map (specular lighting)
     fn create_prefilter_pipeline(engine: &VulkanEngine) -> VulkanResult<Pipeline> {
         let device = &*engine.device;
         let prefilter_shader = vk::ShaderModuleCreateInfo::builder()
             .code(include_spirv!("src/shaders/prefilter.comp.glsl", comp, glsl))
             .create(&device)?;
+        let sampler = engine.get_sampler(SamplerOptions {
+            wrap_u: vk::SamplerAddressMode::CLAMP_TO_EDGE,
+            wrap_v: vk::SamplerAddressMode::CLAMP_TO_EDGE,
+            ..Default::default()
+        })?;
         let desc_layout = vk::DescriptorSetLayoutCreateInfo::builder()
             .flags(vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR)
             .bindings(&[
@@ -80,6 +92,7 @@ impl Baker {
                     .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                     .descriptor_count(1)
                     .stage_flags(vk::ShaderStageFlags::COMPUTE)
+                    .immutable_samplers(slice::from_ref(&sampler))
                     .build(),
                 vk::DescriptorSetLayoutBinding::builder()
                     .binding(1)
@@ -110,7 +123,6 @@ impl Baker {
         Ok(prefilter_pipeline)
     }
 
-    // precomputed BRDF for specular
     fn create_brdf_lut_pipeline(engine: &VulkanEngine) -> VulkanResult<Pipeline> {
         let device = &*engine.device;
         let brdf_shader = vk::ShaderModuleCreateInfo::builder()
@@ -134,9 +146,45 @@ impl Baker {
         Ok(brdf_pipeline)
     }
 
+    fn create_eq2cube_pipeline(engine: &VulkanEngine) -> VulkanResult<Pipeline> {
+        let device = &*engine.device;
+        let eq2cube_shader = vk::ShaderModuleCreateInfo::builder()
+            .code(include_spirv!("src/shaders/equirect2cube.comp.glsl", comp, glsl))
+            .create(&device)?;
+        let sampler = engine.get_sampler(SamplerOptions {
+            wrap_u: vk::SamplerAddressMode::REPEAT,
+            wrap_v: vk::SamplerAddressMode::CLAMP_TO_EDGE,
+            ..Default::default()
+        })?;
+        let desc_layout = vk::DescriptorSetLayoutCreateInfo::builder()
+            .flags(vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR)
+            .bindings(&[
+                vk::DescriptorSetLayoutBinding::builder()
+                    .binding(0)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::COMPUTE)
+                    .immutable_samplers(slice::from_ref(&sampler))
+                    .build(),
+                vk::DescriptorSetLayoutBinding::builder()
+                    .binding(1)
+                    .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::COMPUTE)
+                    .build(),
+            ])
+            .create(&device)?;
+        let eq2cube_pipeline = Pipeline::builder_compute(eq2cube_shader)
+            .descriptor_layout(&desc_layout)
+            .build(engine)?;
+        unsafe {
+            device.destroy_shader_module(eq2cube_shader, None);
+        }
+        Ok(eq2cube_pipeline)
     }
 
     pub fn generate_irradiance_map(&self, cubemap: &Texture) -> VulkanResult<Texture> {
+        eprintln!("generating irradiance map..");
         let params = ImageParams {
             width: IRRMAP_SIZE,
             height: IRRMAP_SIZE,
@@ -181,6 +229,7 @@ impl Baker {
     }
 
     pub fn generate_prefilter_map(&self, cubemap: &Texture) -> VulkanResult<Texture> {
+        eprintln!("generating prefiltered map..");
         let params = ImageParams {
             width: PREFILTERED_SIZE,
             height: PREFILTERED_SIZE,
@@ -259,6 +308,7 @@ impl Baker {
     }
 
     pub fn generate_brdf_lut(&self) -> VulkanResult<Texture> {
+        eprintln!("generating BRDF lut..");
         let params = ImageParams {
             width: BRDFLUT_SIZE,
             height: BRDFLUT_SIZE,
@@ -293,6 +343,53 @@ impl Baker {
         self.device.end_one_time_commands(cmd_buffer)?;
         Ok(brdf_lut)
     }
+
+    pub fn equirect_to_cubemap(&self, equirect: &Texture) -> VulkanResult<Texture> {
+        eprintln!("converting equirect to cubemap..");
+        let size = equirect.image.props.size().min_element();
+        let params = ImageParams {
+            width: size,
+            height: size,
+            layers: 6,
+            format: vk::Format::R16G16B16A16_SFLOAT,
+            ..Default::default()
+        };
+        let mut cubemap = Texture::new_empty(
+            &self.device,
+            params,
+            vk::ImageCreateFlags::CUBE_COMPATIBLE,
+            vk::ImageLayout::GENERAL,
+            vk::Sampler::null(),
+        )?;
+        let cmd_buffer = self.device.begin_one_time_commands()?;
+        unsafe {
+            self.device
+                .cmd_bind_pipeline(cmd_buffer, vk::PipelineBindPoint::COMPUTE, *self.eq2cube_pipeline);
+            self.device.pushdesc_fn.cmd_push_descriptor_set(
+                cmd_buffer,
+                vk::PipelineBindPoint::COMPUTE,
+                self.eq2cube_pipeline.layout,
+                0,
+                &[
+                    vk::WriteDescriptorSet::builder()
+                        .dst_binding(0)
+                        .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                        .image_info(slice::from_ref(&equirect.info))
+                        .build(),
+                    vk::WriteDescriptorSet::builder()
+                        .dst_binding(1)
+                        .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+                        .image_info(slice::from_ref(&cubemap.info))
+                        .build(),
+                ],
+            );
+            let wg_size = size / EQ2CUBE_WG_SIZE;
+            self.device.cmd_dispatch(cmd_buffer, wg_size, wg_size, 6);
+        }
+        cubemap.transition_layout(&self.device, cmd_buffer, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
+        self.device.end_one_time_commands(cmd_buffer)?;
+        Ok(cubemap)
+    }
 }
 
 impl Drop for Baker {
@@ -301,6 +398,7 @@ impl Drop for Baker {
             self.irrmap_pipeline.cleanup(&self.device);
             self.prefilter_pipeline.cleanup(&self.device);
             self.brdf_pipeline.cleanup(&self.device);
+            self.eq2cube_pipeline.cleanup(&self.device);
         }
     }
 }

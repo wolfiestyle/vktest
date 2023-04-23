@@ -1,3 +1,5 @@
+#include "constants.inc.glsl"
+
 vec3 getCubemapDir(vec2 st, uint face) {
     vec2 uv = 2.0 * vec2(st.x, 1.0 - st.y) - vec2(1.0);
     vec3 ret;
@@ -10,4 +12,11 @@ vec3 getCubemapDir(vec2 st, uint face) {
         case 5: ret = vec3(-uv.x, uv.y, -1.0); break;
     }
     return normalize(ret);
+}
+
+vec2 cubemapDirToEquirect(vec3 dir) {
+    return vec2(
+        0.5 + atan(dir.z, dir.x) / (2.0 * PI),
+        acos(dir.y) / PI
+    );
 }
