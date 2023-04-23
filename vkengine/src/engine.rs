@@ -242,7 +242,7 @@ impl VulkanEngine {
                     .compare_op(vk::CompareOp::ALWAYS)
                     .min_lod(0.0)
                     .max_lod(vk::LOD_CLAMP_NONE)
-                    .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
+                    .mipmap_mode(params.mipmap_mode)
                     .create(&self.device)?;
                 entry.insert(sampler);
                 Ok(sampler)
@@ -252,7 +252,7 @@ impl VulkanEngine {
 
     #[allow(unused_assignments)]
     pub fn create_dynamicimage_texture(
-        &self, image: &gltf_import::DynamicImage, is_srgb: bool, sampler: vk::Sampler,
+        &self, image: &gltf_import::DynamicImage, is_srgb: bool, gen_mipmaps: bool, sampler: vk::Sampler,
     ) -> VulkanResult<Texture> {
         use gltf_import::DynamicImage::*;
 
@@ -328,10 +328,7 @@ impl VulkanEngine {
             format,
             ImageData::Single(bytes),
             sampler,
-            TextureOptions {
-                gen_mipmaps: true,
-                swizzle,
-            },
+            TextureOptions { gen_mipmaps, swizzle },
         )
     }
 
@@ -339,7 +336,7 @@ impl VulkanEngine {
         let image_info = &gltf[tex_data.image];
         let gltf_import::ImageData::Decoded(image) = &image_info.data else { return Err(VkError::EngineError("missing texture image")) };
         let sampler = self.get_sampler(SamplerOptions::from_gltf(tex_data))?;
-        self.create_dynamicimage_texture(image, image_info.srgb, sampler)
+        self.create_dynamicimage_texture(image, image_info.srgb, true, sampler)
     }
 
     pub fn create_cubemap(&self, width: u32, height: u32, cube_data: CubeData) -> VulkanResult<Texture> {
@@ -995,6 +992,7 @@ impl Cleanup<VulkanDevice> for Texture {
 pub struct SamplerOptions {
     pub mag_filter: vk::Filter,
     pub min_filter: vk::Filter,
+    pub mipmap_mode: vk::SamplerMipmapMode,
     pub wrap_u: vk::SamplerAddressMode,
     pub wrap_v: vk::SamplerAddressMode,
     pub aniso_enabled: bool,
@@ -1011,6 +1009,10 @@ impl SamplerOptions {
             min_filter: match texture.min_filter {
                 MinFilter::Nearest | MinFilter::NearestMipmapNearest | MinFilter::NearestMipmapLinear => vk::Filter::NEAREST,
                 MinFilter::Linear | MinFilter::LinearMipmapNearest | MinFilter::LinearMipmapLinear => vk::Filter::LINEAR,
+            },
+            mipmap_mode: match texture.min_filter {
+                MinFilter::Nearest | MinFilter::NearestMipmapNearest | MinFilter::LinearMipmapNearest => vk::SamplerMipmapMode::NEAREST,
+                MinFilter::Linear | MinFilter::NearestMipmapLinear | MinFilter::LinearMipmapLinear => vk::SamplerMipmapMode::LINEAR,
             },
             wrap_u: match texture.wrap_u {
                 WrappingMode::Repeat => vk::SamplerAddressMode::REPEAT,
@@ -1032,6 +1034,7 @@ impl Default for SamplerOptions {
         Self {
             mag_filter: vk::Filter::LINEAR,
             min_filter: vk::Filter::LINEAR,
+            mipmap_mode: vk::SamplerMipmapMode::LINEAR,
             wrap_u: vk::SamplerAddressMode::REPEAT,
             wrap_v: vk::SamplerAddressMode::REPEAT,
             aniso_enabled: false,
