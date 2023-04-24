@@ -933,9 +933,7 @@ impl Texture {
         })
     }
 
-    pub fn new_empty(
-        device: &VulkanDevice, params: ImageParams, flags: vk::ImageCreateFlags, layout: vk::ImageLayout, sampler: vk::Sampler,
-    ) -> VulkanResult<Self> {
+    pub fn new_empty(device: &VulkanDevice, params: ImageParams, flags: vk::ImageCreateFlags, sampler: vk::Sampler) -> VulkanResult<Self> {
         let image = device.allocate_image(
             params,
             flags,
@@ -943,12 +941,6 @@ impl Texture {
             gpu_allocator::MemoryLocation::GpuOnly,
             "Texture image",
         )?;
-        if layout != vk::ImageLayout::UNDEFINED {
-            let cmd_buffer = device.begin_one_time_commands()?;
-            device.transition_image_layout(cmd_buffer, *image, params.subresource_range(), vk::ImageLayout::UNDEFINED, layout);
-            device.end_one_time_commands(cmd_buffer)?;
-        }
-
         let view_type = if flags.contains(vk::ImageCreateFlags::CUBE_COMPATIBLE) {
             vk::ImageViewType::CUBE
         } else {
@@ -960,7 +952,7 @@ impl Texture {
             info: vk::DescriptorImageInfo {
                 sampler,
                 image_view,
-                image_layout: layout,
+                image_layout: vk::ImageLayout::UNDEFINED,
             },
         })
     }

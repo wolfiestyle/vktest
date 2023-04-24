@@ -192,14 +192,9 @@ impl Baker {
             format: vk::Format::R16G16B16A16_SFLOAT,
             ..Default::default()
         };
-        let mut irrmap = Texture::new_empty(
-            &self.device,
-            params,
-            vk::ImageCreateFlags::CUBE_COMPATIBLE,
-            vk::ImageLayout::GENERAL,
-            vk::Sampler::null(),
-        )?;
+        let mut irrmap = Texture::new_empty(&self.device, params, vk::ImageCreateFlags::CUBE_COMPATIBLE, vk::Sampler::null())?;
         let cmd_buffer = self.device.begin_one_time_commands()?;
+        irrmap.transition_layout(&self.device, cmd_buffer, vk::ImageLayout::GENERAL);
         unsafe {
             self.device
                 .cmd_bind_pipeline(cmd_buffer, vk::PipelineBindPoint::COMPUTE, *self.irrmap_pipeline);
@@ -238,13 +233,9 @@ impl Baker {
             format: vk::Format::R16G16B16A16_SFLOAT,
             ..Default::default()
         };
-        let mut prefmap = Texture::new_empty(
-            &self.device,
-            params,
-            vk::ImageCreateFlags::CUBE_COMPATIBLE,
-            vk::ImageLayout::GENERAL,
-            vk::Sampler::null(),
-        )?;
+        let mut prefmap = Texture::new_empty(&self.device, params, vk::ImageCreateFlags::CUBE_COMPATIBLE, vk::Sampler::null())?;
+        let cmd_buffer = self.device.begin_one_time_commands()?;
+        prefmap.transition_layout(&self.device, cmd_buffer, vk::ImageLayout::GENERAL);
         let mip_infos = (0..PREFILTERED_MIP_LEVELS)
             .map(|level| {
                 let image_view = prefmap.image.create_view_subresource(
@@ -264,7 +255,6 @@ impl Baker {
                 })
             })
             .collect::<Result<Vec<_>, VkError>>()?;
-        let cmd_buffer = self.device.begin_one_time_commands()?;
         unsafe {
             self.device
                 .cmd_bind_pipeline(cmd_buffer, vk::PipelineBindPoint::COMPUTE, *self.prefilter_pipeline);
@@ -315,14 +305,9 @@ impl Baker {
             format: vk::Format::R16G16_UNORM,
             ..Default::default()
         };
-        let mut brdf_lut = Texture::new_empty(
-            &self.device,
-            params,
-            vk::ImageCreateFlags::empty(),
-            vk::ImageLayout::GENERAL,
-            vk::Sampler::null(),
-        )?;
+        let mut brdf_lut = Texture::new_empty(&self.device, params, vk::ImageCreateFlags::empty(), vk::Sampler::null())?;
         let cmd_buffer = self.device.begin_one_time_commands()?;
+        brdf_lut.transition_layout(&self.device, cmd_buffer, vk::ImageLayout::GENERAL);
         unsafe {
             self.device
                 .cmd_bind_pipeline(cmd_buffer, vk::PipelineBindPoint::COMPUTE, *self.brdf_pipeline);
@@ -354,14 +339,9 @@ impl Baker {
             format: vk::Format::R16G16B16A16_SFLOAT,
             ..Default::default()
         };
-        let mut cubemap = Texture::new_empty(
-            &self.device,
-            params,
-            vk::ImageCreateFlags::CUBE_COMPATIBLE,
-            vk::ImageLayout::GENERAL,
-            vk::Sampler::null(),
-        )?;
+        let mut cubemap = Texture::new_empty(&self.device, params, vk::ImageCreateFlags::CUBE_COMPATIBLE, vk::Sampler::null())?;
         let cmd_buffer = self.device.begin_one_time_commands()?;
+        cubemap.transition_layout(&self.device, cmd_buffer, vk::ImageLayout::GENERAL);
         unsafe {
             self.device
                 .cmd_bind_pipeline(cmd_buffer, vk::PipelineBindPoint::COMPUTE, *self.eq2cube_pipeline);
