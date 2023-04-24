@@ -1,7 +1,5 @@
 #include "constants.inc.glsl"
 
-layout(constant_id = 0) const uint NumSamples = 4096;
-
 float radicalInverse_VdC(uint bits) {
     bits = (bits << 16u) | (bits >> 16u);
     bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
@@ -11,7 +9,7 @@ float radicalInverse_VdC(uint bits) {
     return float(bits) * 2.3283064365386963e-10; // / 0x100000000
 }
 
-vec2 sampleHammersley(uint i) {
+vec2 sampleHammersley(uint i, uint NumSamples) {
     return vec2(float(i) / float(NumSamples), radicalInverse_VdC(i));
 }
 

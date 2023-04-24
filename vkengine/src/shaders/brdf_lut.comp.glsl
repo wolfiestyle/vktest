@@ -3,6 +3,8 @@
 #include "pbr.inc.glsl"
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
+const uint NumSamples = 1024 * 4;
+
 layout(binding = 0) uniform writeonly image2D outputTex;
 
 vec2 integrateBRDF(float NdotV, float roughness) {
@@ -10,7 +12,7 @@ vec2 integrateBRDF(float NdotV, float roughness) {
     //vec3 N = vec3(0.0, 0.0, 1.0);
     vec2 res = vec2(0.0);
     for (uint i = 0; i < NumSamples; ++i) {
-        vec2 Xi = sampleHammersley(i);
+        vec2 Xi = sampleHammersley(i, NumSamples);
         vec3 H = importanceSampleGGX(Xi, roughness);
         vec3 L = normalize(reflect(-V, H));
         float NdotL = max(L.z, 0.0);
