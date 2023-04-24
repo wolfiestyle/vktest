@@ -1,5 +1,5 @@
 use crate::material::{ImageId, Material, MaterialId, Texture, TextureInfo};
-use crate::mesh::{MeshData, MeshId, Vertex, VertexStorage};
+use crate::mesh::{MeshData, MeshId};
 use crate::scene::{Camera, CameraId, Node, NodeId, Scene};
 use crate::types::*;
 use crate::uri::Uri;
@@ -12,14 +12,14 @@ use std::ops;
 use std::path::Path;
 use std::sync::Arc;
 
-pub type Gltf = GltfData<Vec<Vertex>>;
+pub type Gltf = GltfData;
 
 #[derive(Debug, Clone)]
-pub struct GltfData<V> {
+pub struct GltfData {
     pub document: Document,
     pub buffers: Vec<BufferData>,
     pub images: Vec<Image>,
-    pub meshes: Vec<MeshData<V>>,
+    pub meshes: Vec<MeshData>,
     pub materials: Vec<Material>,
     pub textures: Vec<Texture>,
     pub nodes: Vec<Node>,
@@ -27,7 +27,7 @@ pub struct GltfData<V> {
     pub cameras: Vec<Camera>,
 }
 
-impl<V: VertexStorage> GltfData<V> {
+impl GltfData {
     pub fn from_file(path: impl AsRef<Path>) -> ImportResult<Self> {
         let path = path.as_ref();
         let base_path = path.parent().unwrap_or_else(|| Path::new("."));
@@ -128,7 +128,7 @@ impl<V: VertexStorage> GltfData<V> {
     }
 }
 
-impl<V> ops::Index<ImageId> for GltfData<V> {
+impl ops::Index<ImageId> for GltfData {
     type Output = Image;
 
     #[inline]
@@ -137,8 +137,8 @@ impl<V> ops::Index<ImageId> for GltfData<V> {
     }
 }
 
-impl<V> ops::Index<MeshId> for GltfData<V> {
-    type Output = MeshData<V>;
+impl ops::Index<MeshId> for GltfData {
+    type Output = MeshData;
 
     #[inline]
     fn index(&self, id: MeshId) -> &Self::Output {
@@ -146,7 +146,7 @@ impl<V> ops::Index<MeshId> for GltfData<V> {
     }
 }
 
-impl<V> ops::Index<MaterialId> for GltfData<V> {
+impl ops::Index<MaterialId> for GltfData {
     type Output = Material;
 
     #[inline]
@@ -155,7 +155,7 @@ impl<V> ops::Index<MaterialId> for GltfData<V> {
     }
 }
 
-impl<V> ops::Index<TextureInfo> for GltfData<V> {
+impl ops::Index<TextureInfo> for GltfData {
     type Output = Texture;
 
     #[inline]
@@ -164,7 +164,7 @@ impl<V> ops::Index<TextureInfo> for GltfData<V> {
     }
 }
 
-impl<V> ops::Index<NodeId> for GltfData<V> {
+impl ops::Index<NodeId> for GltfData {
     type Output = Node;
 
     #[inline]
@@ -173,7 +173,7 @@ impl<V> ops::Index<NodeId> for GltfData<V> {
     }
 }
 
-impl<V> ops::Index<CameraId> for GltfData<V> {
+impl ops::Index<CameraId> for GltfData {
     type Output = Camera;
 
     #[inline]

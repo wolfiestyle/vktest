@@ -2,7 +2,6 @@ use crate::import::BufferData;
 use crate::material::MaterialId;
 use bevy_mikktspace::{generate_tangents, Geometry};
 use glam::Vec3A;
-use gltf::mesh::util::{ReadColors, ReadTexCoords};
 use gltf::mesh::Mode;
 use gltf::Semantic;
 use std::ops::Range;
@@ -14,36 +13,6 @@ pub struct VertexAttribs {
     pub tangent: bool,
     pub texcoord: u32,
     pub color: u32,
-}
-
-pub trait VertexStorage: Default {
-    fn count(&self) -> usize;
-
-    fn get_position(&self, index: usize) -> [f32; 3];
-
-    fn get_normal(&self, index: usize) -> [f32; 3];
-
-    fn get_texcoord(&self, index: usize, set: u32) -> [f32; 2];
-
-    fn set_count(&mut self, new_size: usize);
-
-    fn write_position(&mut self, index: usize, value: [f32; 3]);
-
-    fn write_normal(&mut self, index: usize, value: [f32; 3]);
-
-    fn write_tangent(&mut self, index: usize, value: [f32; 4]);
-
-    fn write_texcoord_f32(&mut self, index: usize, set: u32, value: [f32; 2]);
-
-    fn write_texcoord_u8(&mut self, index: usize, set: u32, value: [u8; 2]);
-
-    fn write_texcoord_u16(&mut self, index: usize, set: u32, value: [u16; 2]);
-
-    fn write_color_f32(&mut self, index: usize, set: u32, value: [f32; 4]);
-
-    fn write_color_u8(&mut self, index: usize, set: u32, value: [u8; 4]);
-
-    fn write_color_u16(&mut self, index: usize, set: u32, value: [u16; 4]);
 }
 
 #[repr(C)]
@@ -59,6 +28,7 @@ pub struct Vertex {
 
 impl Vertex {
     pub const NUM_UVS: u32 = 2;
+    pub const NUM_COLORS: u32 = 1;
 }
 
 impl Default for Vertex {
@@ -71,88 +41,6 @@ impl Default for Vertex {
             texcoord1: [0.0; 2],
             color: [1.0; 4],
         }
-    }
-}
-
-impl VertexStorage for Vec<Vertex> {
-    #[inline]
-    fn count(&self) -> usize {
-        self.len()
-    }
-
-    #[inline]
-    fn get_position(&self, index: usize) -> [f32; 3] {
-        self[index].position
-    }
-
-    #[inline]
-    fn get_normal(&self, index: usize) -> [f32; 3] {
-        self[index].normal
-    }
-
-    #[inline]
-    fn get_texcoord(&self, index: usize, set: u32) -> [f32; 2] {
-        match set {
-            0 => self[index].texcoord0,
-            1 => self[index].texcoord1,
-            _ => [0.0; 2],
-        }
-    }
-
-    #[inline]
-    fn set_count(&mut self, new_count: usize) {
-        self.resize_with(new_count, Default::default)
-    }
-
-    #[inline]
-    fn write_position(&mut self, index: usize, value: [f32; 3]) {
-        self[index].position = value;
-    }
-
-    #[inline]
-    fn write_normal(&mut self, index: usize, value: [f32; 3]) {
-        self[index].normal = value;
-    }
-
-    #[inline]
-    fn write_tangent(&mut self, index: usize, value: [f32; 4]) {
-        self[index].tangent = value;
-    }
-
-    #[inline]
-    fn write_texcoord_f32(&mut self, index: usize, set: u32, value: [f32; 2]) {
-        match set {
-            0 => self[index].texcoord0 = value,
-            1 => self[index].texcoord1 = value,
-            _ => (),
-        }
-    }
-
-    #[inline]
-    fn write_texcoord_u8(&mut self, index: usize, set: u32, value: [u8; 2]) {
-        self.write_texcoord_f32(index, set, value.map(|n| n as f32 / 255.0))
-    }
-
-    #[inline]
-    fn write_texcoord_u16(&mut self, index: usize, set: u32, value: [u16; 2]) {
-        self.write_texcoord_f32(index, set, value.map(|n| n as f32 / 65535.0))
-    }
-
-    #[inline]
-    fn write_color_f32(&mut self, index: usize, set: u32, value: [f32; 4]) {
-        if set == 0 {
-            self[index].color = value;
-        }
-    }
-
-    #[inline]
-    fn write_color_u8(&mut self, index: usize, set: u32, value: [u8; 4]) {
-        self.write_color_f32(index, set, value.map(|n| n as f32 / 255.0))
-    }
-
-    #[inline]
-    fn write_color_u16(&mut self, index: usize, set: u32, value: [u16; 4]) {
-        self.write_color_f32(index, set, value.map(|n| n as f32 / 65535.0))
     }
 }
 
@@ -181,8 +69,8 @@ impl Submesh {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct MeshData<V> {
-    pub vertices: V,
+pub struct MeshData {
+    pub vertices: Vec<Vertex>,
     pub indices: Vec<u32>,
     pub submeshes: Vec<Submesh>,
     pub name: Option<String>,
@@ -190,7 +78,7 @@ pub struct MeshData<V> {
     pub(crate) idx_offset: usize,
 }
 
-impl<V: VertexStorage> MeshData<V> {
+impl MeshData {
     pub(crate) fn import_meshes(document: &gltf::Document, buffers: &[BufferData]) -> Vec<Self> {
         document
             .meshes()
@@ -208,8 +96,8 @@ impl<V: VertexStorage> MeshData<V> {
     }
 
     fn begin_primitives(&mut self, vert_count: usize, index_count: Option<usize>, mode: Mode, material: Option<MaterialId>) {
-        let vert_offset = self.vertices.count();
-        self.vertices.set_count(vert_offset + vert_count);
+        let vert_offset = self.vertices.len();
+        self.vertices.resize_with(vert_offset + vert_count, Default::default);
         self.vert_offset = vert_offset;
         let idx_offset = self.indices.len();
         if let Some(idx_count) = index_count {
@@ -283,72 +171,35 @@ impl<V: VertexStorage> MeshData<V> {
         let reader = prim.reader(|buffer| buffers.get(buffer.index()).map(|buf| buf.data.as_slice()));
         if let Some(iter) = reader.read_positions() {
             for (pos, i) in iter.zip(self.vert_offset..) {
-                self.vertices.write_position(i, pos);
+                self.vertices[i].position = pos;
             }
         }
         if let Some(iter) = reader.read_normals() {
             for (normal, i) in iter.zip(self.vert_offset..) {
-                self.vertices.write_normal(i, normal);
+                self.vertices[i].normal = normal;
             }
         }
         if let Some(iter) = reader.read_tangents() {
             for (tangent, i) in iter.zip(self.vert_offset..) {
-                self.vertices.write_tangent(i, tangent);
+                self.vertices[i].tangent = tangent;
             }
         }
-        for set in 0..attribs.texcoord {
-            if let Some(ty) = reader.read_tex_coords(set) {
-                match ty {
-                    ReadTexCoords::U8(iter) => {
-                        for (texc, i) in iter.zip(self.vert_offset..) {
-                            self.vertices.write_texcoord_u8(i, set, texc);
-                        }
-                    }
-                    ReadTexCoords::U16(iter) => {
-                        for (texc, i) in iter.zip(self.vert_offset..) {
-                            self.vertices.write_texcoord_u16(i, set, texc);
-                        }
-                    }
-                    ReadTexCoords::F32(iter) => {
-                        for (texc, i) in iter.zip(self.vert_offset..) {
-                            self.vertices.write_texcoord_f32(i, set, texc);
-                        }
+        for set in 0..attribs.texcoord.max(Vertex::NUM_UVS) {
+            if let Some(iter) = reader.read_tex_coords(set) {
+                for (texc, i) in iter.into_f32().zip(self.vert_offset..) {
+                    match set {
+                        0 => self.vertices[i].texcoord0 = texc,
+                        1 => self.vertices[i].texcoord1 = texc,
+                        _ => (),
                     }
                 }
             }
         }
-        for set in 0..attribs.color {
-            if let Some(ty) = reader.read_colors(set) {
-                match ty {
-                    ReadColors::RgbU8(iter) => {
-                        for ([r, g, b], i) in iter.zip(self.vert_offset..) {
-                            self.vertices.write_color_u8(i, set, [r, g, b, u8::MAX]);
-                        }
-                    }
-                    ReadColors::RgbU16(iter) => {
-                        for ([r, g, b], i) in iter.zip(self.vert_offset..) {
-                            self.vertices.write_color_u16(i, set, [r, g, b, u16::MAX]);
-                        }
-                    }
-                    ReadColors::RgbF32(iter) => {
-                        for ([r, g, b], i) in iter.zip(self.vert_offset..) {
-                            self.vertices.write_color_f32(i, set, [r, g, b, 1.0]);
-                        }
-                    }
-                    ReadColors::RgbaU8(iter) => {
-                        for (color, i) in iter.zip(self.vert_offset..) {
-                            self.vertices.write_color_u8(i, set, color);
-                        }
-                    }
-                    ReadColors::RgbaU16(iter) => {
-                        for (color, i) in iter.zip(self.vert_offset..) {
-                            self.vertices.write_color_u16(i, set, color);
-                        }
-                    }
-                    ReadColors::RgbaF32(iter) => {
-                        for (color, i) in iter.zip(self.vert_offset..) {
-                            self.vertices.write_color_f32(i, set, color);
-                        }
+        for set in 0..attribs.color.max(Vertex::NUM_COLORS) {
+            if let Some(iter) = reader.read_colors(set) {
+                for (color, i) in iter.into_rgba_f32().zip(self.vert_offset..) {
+                    if set == 0 {
+                        self.vertices[i].color = color;
                     }
                 }
             }
@@ -365,14 +216,14 @@ impl<V: VertexStorage> MeshData<V> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MeshId(pub usize);
 
-struct GeomWrapper<'a, V> {
-    vertices: &'a mut V,
+struct GeomWrapper<'a> {
+    vertices: &'a mut [Vertex],
     indices: &'a [u32],
     vert_offset: usize,
     vert_count: usize,
 }
 
-impl<V: VertexStorage> Geometry for GeomWrapper<'_, V> {
+impl Geometry for GeomWrapper<'_> {
     fn num_faces(&self) -> usize {
         self.indices.len() / 3
     }
@@ -382,40 +233,39 @@ impl<V: VertexStorage> Geometry for GeomWrapper<'_, V> {
     }
 
     fn position(&self, face: usize, vert: usize) -> [f32; 3] {
-        self.vertices.get_position(self.indices[face * 3 + vert] as usize)
+        self.vertices[self.indices[face * 3 + vert] as usize].position
     }
 
     fn normal(&self, face: usize, vert: usize) -> [f32; 3] {
-        self.vertices.get_normal(self.indices[face * 3 + vert] as usize)
+        self.vertices[self.indices[face * 3 + vert] as usize].normal
     }
 
     fn tex_coord(&self, face: usize, vert: usize) -> [f32; 2] {
-        self.vertices.get_texcoord(self.indices[face * 3 + vert] as usize, 0)
+        self.vertices[self.indices[face * 3 + vert] as usize].texcoord0
     }
 
     fn set_tangent_encoded(&mut self, tangent: [f32; 4], face: usize, vert: usize) {
-        self.vertices.write_tangent(self.indices[face * 3 + vert] as usize, tangent);
+        self.vertices[self.indices[face * 3 + vert] as usize].tangent = tangent;
     }
 }
 
-impl<V: VertexStorage> GeomWrapper<'_, V> {
+impl GeomWrapper<'_> {
     fn generate_normals(&mut self) {
         let mut normals = vec![Vec3A::ZERO; self.vert_count];
         for i in (0..self.indices.len()).step_by(3) {
             let ia = self.indices[i] as usize;
             let ib = self.indices[i + 1] as usize;
             let ic = self.indices[i + 2] as usize;
-            let posa = Vec3A::from_array(self.vertices.get_position(ia + self.vert_offset));
-            let posb = Vec3A::from_array(self.vertices.get_position(ib + self.vert_offset));
-            let posc = Vec3A::from_array(self.vertices.get_position(ic + self.vert_offset));
+            let posa = Vec3A::from_array(self.vertices[ia + self.vert_offset].position);
+            let posb = Vec3A::from_array(self.vertices[ib + self.vert_offset].position);
+            let posc = Vec3A::from_array(self.vertices[ic + self.vert_offset].position);
             let normal = (posb - posa).cross(posc - posa);
             normals[ia] += normal;
             normals[ib] += normal;
             normals[ic] += normal;
         }
         for (i, normal) in normals.iter().enumerate() {
-            self.vertices
-                .write_normal(i + self.vert_offset, normal.normalize_or_zero().to_array());
+            self.vertices[i + self.vert_offset].normal = normal.normalize_or_zero().to_array();
         }
     }
 }

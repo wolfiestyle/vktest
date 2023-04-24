@@ -49,7 +49,7 @@ pub struct Scene {
 }
 
 impl Scene {
-    pub fn nodes<'a, V>(&self, gltf: &'a GltfData<V>) -> NodeTreeIter<'a> {
+    pub fn nodes<'a>(&self, gltf: &'a GltfData) -> NodeTreeIter<'a> {
         NodeTreeIter {
             nodes: &gltf.nodes,
             queue: VecDeque::from(self.root_nodes.clone()),
