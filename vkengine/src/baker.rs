@@ -329,13 +329,14 @@ impl Baker {
         Ok(brdf_lut)
     }
 
-    pub fn equirect_to_cubemap(&self, equirect: &Texture) -> VulkanResult<Texture> {
+    pub fn equirect_to_cubemap(&self, equirect: &Texture, gen_mipmaps: bool) -> VulkanResult<Texture> {
         eprintln!("converting equirect to cubemap..");
         let size = equirect.image.props.size().min_element();
         let params = ImageParams {
             width: size,
             height: size,
             layers: 6,
+            mip_levels: if gen_mipmaps { size.ilog2() + 1 } else { 1 },
             format: vk::Format::R16G16B16A16_SFLOAT,
             ..Default::default()
         };
@@ -366,7 +367,15 @@ impl Baker {
             let wg_size = size / EQ2CUBE_WG_SIZE;
             self.device.cmd_dispatch(cmd_buffer, wg_size, wg_size, 6);
         }
-        cubemap.transition_layout(&self.device, cmd_buffer, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
+        if gen_mipmaps {
+            cubemap.transition_layout(&self.device, cmd_buffer, vk::ImageLayout::TRANSFER_DST_OPTIMAL);
+            unsafe {
+                self.device.generate_mipmaps(cmd_buffer, *cubemap.image, params);
+            }
+            cubemap.info.image_layout = vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL;
+        } else {
+            cubemap.transition_layout(&self.device, cmd_buffer, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
+        }
         self.device.end_one_time_commands(cmd_buffer)?;
         Ok(cubemap)
     }

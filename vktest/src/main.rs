@@ -102,7 +102,7 @@ fn main() -> VulkanResult<()> {
     let mut show_gui = true;
 
     let baker = Baker::new(&vk_app)?;
-    let skybox_tex = baker.equirect_to_cubemap(&skybox_equirect)?;
+    let skybox_tex = baker.equirect_to_cubemap(&skybox_equirect, true)?;
     let irr_map = baker.generate_irradiance_map(&skybox_tex)?;
     let pref_map = baker.generate_prefilter_map(&skybox_tex)?;
     let brdf_lut = baker.generate_brdf_lut()?;

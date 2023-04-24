@@ -937,7 +937,10 @@ impl Texture {
         let image = device.allocate_image(
             params,
             flags,
-            vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::TRANSFER_DST,
+            vk::ImageUsageFlags::SAMPLED
+                | vk::ImageUsageFlags::STORAGE
+                | vk::ImageUsageFlags::TRANSFER_SRC
+                | vk::ImageUsageFlags::TRANSFER_DST,
             gpu_allocator::MemoryLocation::GpuOnly,
             "Texture image",
         )?;

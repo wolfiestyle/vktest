@@ -349,7 +349,7 @@ impl VulkanDevice {
         }
     }
 
-    unsafe fn generate_mipmaps(&self, cmd_buffer: vk::CommandBuffer, image: vk::Image, params: ImageParams) {
+    pub(crate) unsafe fn generate_mipmaps(&self, cmd_buffer: vk::CommandBuffer, image: vk::Image, params: ImageParams) {
         let aspect_mask = params.aspect_flags();
         let mut barrier = vk::ImageMemoryBarrier::builder()
             .image(image)
