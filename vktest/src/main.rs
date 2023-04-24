@@ -1,4 +1,4 @@
-use gltf_import::{Gltf, Material, Vertex};
+use gltf_import::{GltfData, Material, Vertex};
 use std::mem::ManuallyDrop;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -28,7 +28,7 @@ pub struct MeshNode {
 fn main() -> VulkanResult<()> {
     let args = Arguments::from_args();
 
-    let gltf = Gltf::from_file(args.model.unwrap_or_else(|| "data/model.glb".into())).unwrap();
+    let gltf = GltfData::from_file(args.model.unwrap_or_else(|| "data/model.glb".into())).unwrap();
     for mesh in &gltf.meshes {
         println!(
             "loaded model: vertices={} indices={}, submeshes={}",

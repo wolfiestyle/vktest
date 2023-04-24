@@ -12,8 +12,6 @@ use std::ops;
 use std::path::Path;
 use std::sync::Arc;
 
-pub type Gltf = GltfData;
-
 #[derive(Debug, Clone)]
 pub struct GltfData {
     pub document: Document,

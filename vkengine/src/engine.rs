@@ -332,7 +332,7 @@ impl VulkanEngine {
         )
     }
 
-    pub fn create_gltf_texture(&self, tex_data: &gltf_import::Texture, gltf: &gltf_import::Gltf) -> VulkanResult<Texture> {
+    pub fn create_gltf_texture(&self, tex_data: &gltf_import::Texture, gltf: &gltf_import::GltfData) -> VulkanResult<Texture> {
         let image_info = &gltf[tex_data.image];
         let gltf_import::ImageData::Decoded(image) = &image_info.data else { return Err(VkError::EngineError("missing texture image")) };
         let sampler = self.get_sampler(SamplerOptions::from_gltf(tex_data))?;
@@ -355,7 +355,7 @@ impl VulkanEngine {
         )
     }
 
-    pub fn create_resources_for_model(&self, gltf: &gltf_import::Gltf) -> VulkanResult<ModelResources> {
+    pub fn create_resources_for_model(&self, gltf: &gltf_import::GltfData) -> VulkanResult<ModelResources> {
         let textures = gltf
             .textures
             .iter()
