@@ -1,5 +1,6 @@
 #version 450
 #include "pbr.inc.glsl"
+#include "tonemap.inc.glsl"
 layout(constant_id = 0) const uint NumLights = 1;
 const int UVbits = 1;
 const uint NumUVs = 1 << UVbits;
@@ -98,5 +99,6 @@ void main() {
     float occlusion = (texture(texOcclusion, frag.TexCoord[occl_uv]).r - 1.0) * material.base_pbr.r + 1.0;
     vec3 normal = normalize(frag.TBN * normal_map * vec3(vec2(material.normal_scale), 1.0));
     vec3 radiance = pbr_light(normal, albedo.rgb, metalrough.r, metalrough.g, occlusion) + emissive;
-    outColor = vec4(radiance, albedo.a);
+    vec3 color = tonemapReinhard(radiance);
+    outColor = vec4(color, albedo.a);
 }
