@@ -1,7 +1,8 @@
 use crate::create::CreateFromInfo;
 use crate::device::{ImageParams, VulkanDevice};
-use crate::engine::{SamplerOptions, Texture, VulkanEngine};
+use crate::engine::{SamplerOptions, VulkanEngine};
 use crate::pipeline::Pipeline;
+use crate::texture::Texture;
 use crate::types::*;
 use ash::vk;
 use inline_spirv::include_spirv;

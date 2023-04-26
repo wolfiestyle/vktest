@@ -1,6 +1,6 @@
 use crate::create::CreateFromInfo;
 use crate::debug::DebugUtils;
-use crate::format::FormatInfo;
+use crate::format::{image_aspect_flags, FormatInfo};
 use crate::instance::{DeviceInfo, DeviceSelection, VulkanInstance};
 use crate::types::*;
 use ash::extensions::khr;
@@ -994,16 +994,5 @@ impl ImageParams {
             base_array_layer: 0,
             layer_count: self.layers,
         }
-    }
-}
-
-fn image_aspect_flags(format: vk::Format) -> vk::ImageAspectFlags {
-    match format {
-        vk::Format::D16_UNORM_S8_UINT | vk::Format::D24_UNORM_S8_UINT | vk::Format::D32_SFLOAT_S8_UINT => {
-            vk::ImageAspectFlags::DEPTH | vk::ImageAspectFlags::STENCIL
-        }
-        vk::Format::D16_UNORM | vk::Format::X8_D24_UNORM_PACK32 | vk::Format::D32_SFLOAT => vk::ImageAspectFlags::DEPTH,
-        vk::Format::S8_UINT => vk::ImageAspectFlags::STENCIL,
-        _ => vk::ImageAspectFlags::COLOR,
     }
 }

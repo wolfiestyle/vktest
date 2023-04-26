@@ -1,7 +1,8 @@
 use crate::create::CreateFromInfo;
 use crate::device::{VkBuffer, VulkanDevice};
-use crate::engine::{CmdBufferRing, DrawPayload, SamplerOptions, Shader, Texture, UploadBuffer, VulkanEngine};
-use crate::pipeline::{Pipeline, PipelineMode};
+use crate::engine::{CmdBufferRing, DrawPayload, SamplerOptions, UploadBuffer, VulkanEngine};
+use crate::pipeline::{Pipeline, PipelineMode, Shader};
+use crate::texture::Texture;
 use crate::types::{Cleanup, VulkanResult};
 use crate::vertex::{IndexInput, VertexInput};
 use ash::vk;

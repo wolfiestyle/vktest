@@ -1,6 +1,6 @@
 use crate::create::CreateFromInfo;
 use crate::device::VulkanDevice;
-use crate::engine::{Shader, VulkanEngine};
+use crate::engine::VulkanEngine;
 use crate::swapchain::Swapchain;
 use crate::types::*;
 use crate::vertex::VertexInput;
@@ -335,5 +335,26 @@ impl PipelineMode {
 
     fn blend_enable(self) -> bool {
         matches!(self, Self::Transparent | Self::Overlay)
+    }
+}
+
+#[derive(Debug)]
+pub struct Shader {
+    pub vert: vk::ShaderModule,
+    pub frag: vk::ShaderModule,
+}
+
+impl Shader {
+    pub fn new(device: &VulkanDevice, vert_spv: &[u32], frag_spv: &[u32]) -> VulkanResult<Self> {
+        let vert = vk::ShaderModuleCreateInfo::builder().code(vert_spv).create(device)?;
+        let frag = vk::ShaderModuleCreateInfo::builder().code(frag_spv).create(device)?;
+        Ok(Self { vert, frag })
+    }
+}
+
+impl Cleanup<VulkanDevice> for Shader {
+    unsafe fn cleanup(&mut self, device: &VulkanDevice) {
+        device.destroy_shader_module(self.vert, None);
+        device.destroy_shader_module(self.frag, None);
     }
 }

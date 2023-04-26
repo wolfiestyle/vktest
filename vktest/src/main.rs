@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use structopt::StructOpt;
 use vkengine::gui::{egui, UiRenderer};
-use vkengine::{Baker, CameraController, MeshRenderData, MeshRenderer, SkyboxRenderer, VkError, VulkanEngine, VulkanResult};
+use vkengine::{Baker, CameraController, MeshRenderData, MeshRenderer, SkyboxRenderer, Texture, VkError, VulkanEngine, VulkanResult};
 use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
@@ -101,7 +101,7 @@ fn main() -> VulkanResult<()> {
     let mut controller = CameraController::new(&vk_app.camera);
 
     let mut skybox = SkyboxRenderer::new(&vk_app)?;
-    let skybox_equirect = vk_app.create_dynamicimage_texture(&skybox_img, false, false, Default::default())?;
+    let skybox_equirect = Texture::from_dynamicimage(vk_app.device(), &skybox_img, false, false, Default::default())?;
 
     let mut gui = UiRenderer::new(&event_loop, &vk_app)?;
     let mut show_gui = true;
