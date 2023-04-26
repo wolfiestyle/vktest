@@ -23,6 +23,7 @@ pub struct MeshNode {
     renderer: MeshRenderer<Vertex, u32>,
     slices: Vec<MeshRenderData>,
     name: String,
+    enabled: bool,
 }
 
 fn main() -> VulkanResult<()> {
@@ -70,13 +71,17 @@ fn main() -> VulkanResult<()> {
                         .collect();
                     let renderer = MeshRenderer::new(&vk_app, &mesh.vertices, &mesh.indices, node.transform).unwrap();
                     let name = mesh.name.clone().unwrap_or_else(|| format!("Node {}", node.id.0));
-                    MeshNode { renderer, slices, name }
+                    MeshNode {
+                        renderer,
+                        slices,
+                        name,
+                        enabled: true,
+                    }
                 })
                 .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
 
-    let mut mesh_enabled: Vec<Vec<_>> = scenes.iter().map(|meshes| vec![true; meshes.len()]).collect();
     let mut cur_scene = 0;
 
     let camera_node = gltf
@@ -217,10 +222,10 @@ fn main() -> VulkanResult<()> {
                         });
                         ui.checkbox(&mut light_directional, "Directional");
                         ui.add_space(10.0);
-                        ui.collapsing(format!("{} Meshes", mesh_enabled[cur_scene].len()), |ui| {
+                        ui.collapsing(format!("{} Meshes", scenes[cur_scene].len()), |ui| {
                             egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
-                                for (i, enable) in mesh_enabled[cur_scene].iter_mut().enumerate() {
-                                    ui.add(egui::Checkbox::new(enable, &scenes[cur_scene][i].name));
+                                for node in &mut scenes[cur_scene] {
+                                    ui.add(egui::Checkbox::new(&mut node.enabled, &node.name));
                                 }
                             });
                         });
@@ -271,8 +276,8 @@ fn main() -> VulkanResult<()> {
             thread_pool.scoped(|scope| {
                 let mesh_chunks = objects.chunks_mut(1);
                 let ret_chunks = draw_buffer.chunks_mut(1);
-                for (i, (obj, draw_ret)) in mesh_chunks.zip(ret_chunks).enumerate() {
-                    if mesh_enabled[cur_scene][i] {
+                for (obj, draw_ret) in mesh_chunks.zip(ret_chunks) {
+                    if obj[0].enabled {
                         scope.execute(|| {
                             draw_ret[0] = obj[0].renderer.render(&vk_app, &obj[0].slices, &irr_map, &pref_map, &brdf_lut);
                         });
