@@ -8,18 +8,19 @@ const uint NumSamples = 1024 * 4;
 layout(binding = 0) uniform writeonly image2D outputTex;
 
 vec2 integrateBRDF(float NdotV, float roughness) {
+    float roughSq = roughness * roughness;
     vec3 V = vec3(sqrt(1.0 - NdotV * NdotV), 0.0, NdotV);
     //vec3 N = vec3(0.0, 0.0, 1.0);
     vec2 res = vec2(0.0);
     for (uint i = 0; i < NumSamples; ++i) {
         vec2 Xi = sampleHammersley(i, NumSamples);
-        vec3 H = importanceSampleGGX(Xi, roughness);
+        vec3 H = importanceSampleGGX(Xi, roughSq);
         vec3 L = normalize(reflect(-V, H));
         float NdotL = max(L.z, 0.0);
         float NdotH = max(H.z, 0.0);
         float VdotH = max(dot(V, H), 0.0);
         if (NdotL > 0.0) {
-            float G = smithGGXCorrelated(NdotL, NdotV, roughness);
+            float G = smithGGXCorrelated(NdotL, NdotV, roughSq);
             float G_vis = G * VdotH * NdotL / NdotH;
             float Fc = pow(1.0 - VdotH, 5.0);
             res.x += (1.0 - Fc) * G_vis;

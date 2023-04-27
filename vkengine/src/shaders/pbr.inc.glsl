@@ -2,9 +2,9 @@
 
 const vec3 Fdielectric = vec3(0.04);
 
-float distributionGGX(float NdotH, float roughness) {
-    float a2 = pow(roughness, 4.0);
-    float denom = NdotH * NdotH * (a2 - 1.0) + 1.0;
+float distributionGGX(float NdotH, float roughSq) {
+    float a2 = roughSq * roughSq;
+    float denom = (NdotH * a2 - NdotH) * NdotH + 1.0;
     return a2 / (PI * denom * denom);
 }
 
@@ -20,10 +20,10 @@ float geometrySmith(float NdotL, float NdotV, float roughness) {
     return ggx1 * ggx2;
 }
 
-float smithGGXCorrelated(float NdotL, float NdotV, float roughness) {
-    float a2 = pow(roughness, 4.0);
-    float ggxL = NdotV * sqrt(NdotL * NdotL * (1.0 - a2) + a2);
-    float ggxV = NdotL * sqrt(NdotV * NdotV * (1.0 - a2) + a2);
+float smithGGXCorrelated(float NdotL, float NdotV, float roughSq) {
+    float a2 = roughSq * roughSq;
+    float ggxL = NdotV * sqrt((-NdotL * a2 + NdotL) * NdotL + a2);
+    float ggxV = NdotL * sqrt((-NdotV * a2 + NdotV) * NdotV + a2);
     return 0.5 / (ggxL + ggxV);
 }
 

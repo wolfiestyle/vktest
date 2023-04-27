@@ -49,6 +49,7 @@ vec3 pbr_light(vec3 N, vec3 albedo, float metallic, float roughness, float ao) {
     vec3 R = reflect(-V, N);
     float NdotV = max(dot(N, V), 0.0);
     vec3 F0 = mix(Fdielectric, albedo, metallic);
+    float roughSq = roughness * roughness;
 
     // direct lighting
     vec3 direct = vec3(0.0);
@@ -61,7 +62,7 @@ vec3 pbr_light(vec3 N, vec3 albedo, float metallic, float roughness, float ao) {
 
         float NdotH = max(dot(N, H), 0.0);
         float NdotL = max(dot(N, L), 0.0);
-        float NDF = distributionGGX(NdotH, roughness);
+        float NDF = distributionGGX(NdotH, roughSq);
         float G = geometrySmith(NdotL, NdotV, roughness);
         vec3 F = fresnelSchlick(max(dot(H, V), 0.0), F0);
         vec3 specular = (NDF * G * F) / max(4.0 * NdotV * NdotL, Epsilon);

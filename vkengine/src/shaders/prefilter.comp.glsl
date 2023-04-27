@@ -18,18 +18,19 @@ vec3 computePrefiltered(vec3 N, ivec2 texSize) {
     mat3 TBN = computeTangentBasis(N);
     //vec3 V = N;
     float roughness = float(level) / float(MipLevels - 1);
+    float roughSq = roughness * roughness;
     float saTexel = 4.0 * PI / (texSize.x * texSize.y * 6);
 
     vec3 color = vec3(0.0);
     float total_weight = 0.0;
     for (uint i = 0; i < NumSamples; ++i) {
         vec2 Xi = sampleHammersley(i, NumSamples);
-        vec3 H = TBN * importanceSampleGGX(Xi, roughness);
+        vec3 H = TBN * importanceSampleGGX(Xi, roughSq);
         vec3 L = normalize(reflect(-N, H));
         float NdotL = max(dot(N, L), 0.0);
         float NdotH = max(dot(N, H), 0.0);
         if (NdotL > 0.0) {
-            float pdf = distributionGGX(NdotH, roughness) * 0.25;
+            float pdf = distributionGGX(NdotH, roughSq) * 0.25;
             float saSample = 1.0 / (NumSamples * pdf + Epsilon);
             float mipLevel = roughness != 0.0 ? 0.5 * log2(saSample / saTexel) : 0.0;
             color += textureLod(inputTex, L, mipLevel).rgb * NdotL;
