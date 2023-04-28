@@ -333,6 +333,7 @@ pub struct SkyboxRenderer {
     shader: Shader,
     pipeline: Pipeline,
     cmd_buffers: CmdBufferRing,
+    pub lod: f32,
 }
 
 impl SkyboxRenderer {
@@ -359,7 +360,7 @@ impl SkyboxRenderer {
                 .build()])
             .create(&device)?;
         let push_constants = vk::PushConstantRange::builder()
-            .stage_flags(vk::ShaderStageFlags::VERTEX)
+            .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
             .offset(0)
             .size(size_of::<SkyboxParams>() as _)
             .build();
@@ -380,6 +381,7 @@ impl SkyboxRenderer {
             shader,
             pipeline,
             cmd_buffers,
+            lod: 0.0,
         })
     }
 
@@ -389,6 +391,7 @@ impl SkyboxRenderer {
 
         let params = SkyboxParams {
             viewproj_inv: (engine.projection * engine.camera.get_view_rotation()).inverse(),
+            lod: Vec4::new(self.lod, 0.0, 0.0, 0.0),
         };
         unsafe {
             // background
@@ -412,7 +415,7 @@ impl SkyboxRenderer {
             self.device.cmd_push_constants(
                 cmd_buffer,
                 self.pipeline.layout,
-                vk::ShaderStageFlags::VERTEX,
+                vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
                 0,
                 bytemuck::bytes_of(&params),
             );
@@ -453,4 +456,5 @@ impl Drop for SkyboxRenderer {
 #[derive(Debug, Clone, Copy, Default, Pod, Zeroable)]
 struct SkyboxParams {
     viewproj_inv: Mat4,
+    lod: Vec4,
 }

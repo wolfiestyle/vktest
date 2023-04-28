@@ -127,6 +127,7 @@ fn main() -> VulkanResult<()> {
     let mut light = -vk_app.light;
     let mut light_directional = true;
     let mut fov = vk_app.camera.fov.to_degrees();
+    let mut debug_mode = DebugMode::None;
 
     event_loop.run(move |event, _, control_flow| match event {
         Event::WindowEvent { event, .. } => {
@@ -230,6 +231,13 @@ fn main() -> VulkanResult<()> {
                             });
                         });
                         ui.add_space(10.0);
+                        ui.collapsing("Debug", |ui| {
+                            ui.radio_value(&mut debug_mode, DebugMode::None, "None");
+                            ui.radio_value(&mut debug_mode, DebugMode::ShowIrradiance, "Show irradiance map");
+                            ui.radio_value(&mut debug_mode, DebugMode::ShowPrefilter, "Show prefiltered map");
+                            ui.label("Skybox LOD:");
+                            ui.add(egui::Slider::new(&mut skybox.lod, 0.0..=10.0));
+                        });
                         if ui.button("Exit").clicked() {
                             *control_flow = ControlFlow::Exit;
                         }
@@ -283,7 +291,12 @@ fn main() -> VulkanResult<()> {
                         });
                     }
                 }
-                scope.execute(|| skybox_cmds = skybox.render(&vk_app, &skybox_tex));
+                let cubemap = match debug_mode {
+                    DebugMode::ShowIrradiance => &irr_map,
+                    DebugMode::ShowPrefilter => &pref_map,
+                    _ => &skybox_tex,
+                };
+                scope.execute(|| skybox_cmds = skybox.render(&vk_app, cubemap));
                 scope.execute(|| gui_cmds = gui.draw(&vk_app));
             });
 
@@ -308,4 +321,11 @@ fn main() -> VulkanResult<()> {
         },
         _ => (),
     });
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DebugMode {
+    None,
+    ShowIrradiance,
+    ShowPrefilter,
 }

@@ -1,6 +1,7 @@
 #version 450
 layout(push_constant) uniform PushConstants {
     mat4 viewproj_inv;
+    vec4 lod;
 };
 
 layout(location = 0) out vec3 eyeDirection;
