@@ -5,7 +5,7 @@ authors = ["SnowDerg <slayerbeast@gmail.com>"]
 edition = "2021"
 
 [dependencies]
-gltf = "1.1.0"
+gltf = { version = "1.1.0", features = ["KHR_lights_punctual"] }
 image = "0.24.5"
 urlencoding = "2.1.2"
 base64 = "0.21.0"

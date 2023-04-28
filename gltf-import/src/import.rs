@@ -1,6 +1,6 @@
 use crate::material::{ImageId, Material, MaterialId, Texture, TextureInfo};
 use crate::mesh::{MeshData, MeshId};
-use crate::scene::{Camera, CameraId, Node, NodeId, Scene};
+use crate::scene::{Camera, CameraId, Light, LightId, Node, NodeId, Scene};
 use crate::types::*;
 use crate::uri::Uri;
 use gltf::Document;
@@ -23,6 +23,7 @@ pub struct GltfData {
     pub nodes: Vec<Node>,
     pub scenes: Vec<Scene>,
     pub cameras: Vec<Camera>,
+    pub lights: Vec<Light>,
 }
 
 impl GltfData {
@@ -48,6 +49,11 @@ impl GltfData {
         let nodes = gltf.document.nodes().map(From::from).collect();
         let scenes = gltf.document.scenes().map(From::from).collect();
         let cameras = gltf.document.cameras().map(From::from).collect();
+        let lights = gltf
+            .document
+            .lights()
+            .map(|iter| iter.map(From::from).collect())
+            .unwrap_or_default();
 
         let mut this = Self {
             document: gltf.document,
@@ -59,6 +65,7 @@ impl GltfData {
             nodes,
             scenes,
             cameras,
+            lights,
         };
 
         this.set_node_parents();
@@ -177,6 +184,15 @@ impl ops::Index<CameraId> for GltfData {
     #[inline]
     fn index(&self, id: CameraId) -> &Self::Output {
         &self.cameras[id.0]
+    }
+}
+
+impl ops::Index<LightId> for GltfData {
+    type Output = Light;
+
+    #[inline]
+    fn index(&self, id: LightId) -> &Self::Output {
+        &self.lights[id.0]
     }
 }
 

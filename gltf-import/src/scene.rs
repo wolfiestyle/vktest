@@ -11,6 +11,7 @@ pub struct Node {
     pub local_transform: Affine3A,
     pub mesh: Option<MeshId>,
     pub camera: Option<CameraId>,
+    pub light: Option<LightId>,
     pub children: Vec<NodeId>,
     pub parent: Option<NodeId>,
     pub name: Option<String>,
@@ -32,6 +33,7 @@ impl From<gltf::Node<'_>> for Node {
             local_transform: transform,
             mesh: node.mesh().map(|m| MeshId(m.index())),
             camera: node.camera().map(|c| CameraId(c.index())),
+            light: node.light().map(|l| LightId(l.index())),
             children: node.children().map(|n| NodeId(n.index())).collect(),
             parent: None,
             name: node.name().map(str::to_string),
@@ -171,3 +173,44 @@ impl From<gltf::camera::Projection<'_>> for Projection {
         }
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LightType {
+    Directional,
+    Point,
+    Spot { inner_angle: f32, outer_angle: f32 },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Light {
+    pub color: [f32; 3],
+    pub intensity: f32,
+    pub range: Option<f32>,
+    pub type_: LightType,
+    pub name: Option<String>,
+}
+
+impl From<gltf::khr_lights_punctual::Light<'_>> for Light {
+    fn from(light: gltf::khr_lights_punctual::Light) -> Self {
+        use gltf::khr_lights_punctual::Kind;
+
+        let type_ = match light.kind() {
+            Kind::Directional => LightType::Directional,
+            Kind::Point => LightType::Point,
+            Kind::Spot {
+                inner_cone_angle: inner_angle,
+                outer_cone_angle: outer_angle,
+            } => LightType::Spot { inner_angle, outer_angle },
+        };
+        Self {
+            color: light.color(),
+            intensity: light.intensity(),
+            range: light.range(),
+            type_,
+            name: light.name().map(str::to_string),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct LightId(pub usize);
