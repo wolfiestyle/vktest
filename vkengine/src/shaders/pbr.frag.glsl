@@ -95,7 +95,7 @@ void main() {
     vec3 normal_map = texture(texNormal, frag.uvNormal).rgb * 2.0 - 1.0;
     vec3 emissive = texture(texEmissive, frag.uvEmissive).rgb * material.emissive;
     float occlusion = (texture(texOcclusion, frag.uvOcclusion).r - 1.0) * material.base_pbr.r + 1.0;
-    vec3 normal = normalize(frag.TBN * normal_map * vec3(vec2(material.normal_scale), 1.0));
+    vec3 normal = normalize(frag.TBN * normal_map * vec3(material.normal_scale.xx, 1.0));
     vec3 radiance = pbr_light(normal, albedo.rgb, metalrough.r, metalrough.g, occlusion) + emissive;
     vec3 color = tonemapReinhard(radiance);
     outColor = vec4(color, albedo.a);

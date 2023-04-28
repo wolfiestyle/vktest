@@ -21,8 +21,9 @@ vec3 sampleHemisphere(vec2 u) {
 
 vec3 importanceSampleGGX(vec2 Xi, float roughSq) {
     float phi = 2.0 * PI * Xi.x;
-    float cosTheta = sqrt((1.0 - Xi.y) / ((roughSq * roughSq - 1.0) * Xi.y + 1.0));
-    float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
+    float cosThetaSq = (1.0 - Xi.y) / ((roughSq * roughSq - 1.0) * Xi.y + 1.0);
+    float cosTheta = sqrt(cosThetaSq);
+    float sinTheta = sqrt(1.0 - cosThetaSq);
     return vec3(cos(phi) * sinTheta, sin(phi) * sinTheta, cosTheta);
 }
 
