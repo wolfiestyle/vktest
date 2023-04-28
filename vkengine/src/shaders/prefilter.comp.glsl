@@ -44,7 +44,7 @@ void main() {
     ivec2 img_size = imageSize(outputTex[level]);
     bvec2 cmp = lessThan(gl_GlobalInvocationID.xy, img_size);
     if (cmp.x && cmp.y) {
-        vec3 N = getCubemapDir(gl_GlobalInvocationID.xy / vec2(img_size), gl_GlobalInvocationID.z);
+        vec3 N = getCubemapDir(gl_GlobalInvocationID, img_size);
         vec3 prefiltered = computePrefiltered(N, textureSize(inputTex, 0));
         imageStore(outputTex[level], ivec3(gl_GlobalInvocationID), vec4(prefiltered, 1.0));
     }

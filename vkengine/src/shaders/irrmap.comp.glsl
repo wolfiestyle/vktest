@@ -9,7 +9,7 @@ layout(binding = 0) uniform samplerCube inputTex;
 layout(binding = 1) uniform writeonly imageCube outputTex;
 
 void main() {
-    vec3 N = getCubemapDir(gl_GlobalInvocationID.xy / vec2(imageSize(outputTex)), gl_GlobalInvocationID.z);
+    vec3 N = getCubemapDir(gl_GlobalInvocationID, imageSize(outputTex));
     mat3 TBN = computeTangentBasis(N);
 
     vec3 color = vec3(0.0);
