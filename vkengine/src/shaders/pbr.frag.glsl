@@ -2,8 +2,6 @@
 #include "pbr.inc.glsl"
 #include "tonemap.inc.glsl"
 layout(constant_id = 0) const uint NumLights = 1;
-const int UVbits = 1;
-const uint NumUVs = 1 << UVbits;
 
 struct LightData {
     vec4 pos;
@@ -37,9 +35,13 @@ layout(push_constant) uniform PushConstants {
 
 layout(location = 0) in FragIn {
     vec3 Pos;
-    vec2 TexCoord[NumUVs];
     vec4 Color;
     mat3 TBN;
+    vec2 uvColor;
+    vec2 uvMetalRough;
+    vec2 uvNormal;
+    vec2 uvEmissive;
+    vec2 uvOcclusion;
 } frag;
 
 layout(location = 0) out vec4 outColor;
@@ -88,16 +90,11 @@ vec3 pbr_light(vec3 N, vec3 albedo, float metallic, float roughness, float ao) {
 }
 
 void main() {
-    uint color_uv = bitfieldExtract(material.uv_sets, 0, UVbits);
-    uint metrgh_uv = bitfieldExtract(material.uv_sets, UVbits, UVbits);
-    uint normal_uv = bitfieldExtract(material.uv_sets, UVbits * 2, UVbits);
-    uint emiss_uv = bitfieldExtract(material.uv_sets, UVbits * 3, UVbits);
-    uint occl_uv = bitfieldExtract(material.uv_sets, UVbits * 4, UVbits);
-    vec4 albedo = texture(texColor, frag.TexCoord[color_uv]) * material.base_color * frag.Color;
-    vec2 metalrough = texture(texMetalRough, frag.TexCoord[metrgh_uv]).bg * material.base_pbr.bg;
-    vec3 normal_map = texture(texNormal, frag.TexCoord[normal_uv]).rgb * 2.0 - 1.0;
-    vec3 emissive = texture(texEmissive, frag.TexCoord[emiss_uv]).rgb * material.emissive;
-    float occlusion = (texture(texOcclusion, frag.TexCoord[occl_uv]).r - 1.0) * material.base_pbr.r + 1.0;
+    vec4 albedo = texture(texColor, frag.uvColor) * material.base_color * frag.Color;
+    vec2 metalrough = texture(texMetalRough, frag.uvMetalRough).bg * material.base_pbr.bg;
+    vec3 normal_map = texture(texNormal, frag.uvNormal).rgb * 2.0 - 1.0;
+    vec3 emissive = texture(texEmissive, frag.uvEmissive).rgb * material.emissive;
+    float occlusion = (texture(texOcclusion, frag.uvOcclusion).r - 1.0) * material.base_pbr.r + 1.0;
     vec3 normal = normalize(frag.TBN * normal_map * vec3(vec2(material.normal_scale), 1.0));
     vec3 radiance = pbr_light(normal, albedo.rgb, metalrough.r, metalrough.g, occlusion) + emissive;
     vec3 color = tonemapReinhard(radiance);

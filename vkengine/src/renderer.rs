@@ -76,7 +76,7 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
             ])
             .create(&device)?;
         let push_constants = vk::PushConstantRange {
-            stage_flags: vk::ShaderStageFlags::FRAGMENT,
+            stage_flags: vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
             offset: 0,
             size: size_of::<MaterialData>() as _,
         };
@@ -185,7 +185,7 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
                 self.device.cmd_push_constants(
                     cmd_buffer,
                     self.pipeline.layout,
-                    vk::ShaderStageFlags::FRAGMENT,
+                    vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
                     0,
                     bytemuck::bytes_of(&submesh.material_data),
                 );
