@@ -54,10 +54,9 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
                     .build(),
                 vk::DescriptorSetLayoutBinding::builder()
                     .binding(1)
-                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
                     .descriptor_count(1)
                     .stage_flags(vk::ShaderStageFlags::FRAGMENT)
-                    .immutable_samplers(slice::from_ref(&sampler))
                     .build(),
                 vk::DescriptorSetLayoutBinding::builder()
                     .binding(2)
@@ -68,6 +67,13 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
                     .build(),
                 vk::DescriptorSetLayoutBinding::builder()
                     .binding(3)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                    .immutable_samplers(slice::from_ref(&sampler))
+                    .build(),
+                vk::DescriptorSetLayoutBinding::builder()
+                    .binding(4)
                     .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                     .descriptor_count(1)
                     .stage_flags(vk::ShaderStageFlags::FRAGMENT)
@@ -84,14 +90,6 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
             .vertex_input::<V>()
             .descriptor_layouts(&[push_desc_layout, engine.image_desc_layout])
             .push_constants(slice::from_ref(&push_constants))
-            .spec_constants(
-                &[vk::SpecializationMapEntry {
-                    constant_id: 0,
-                    offset: 0,
-                    size: size_of::<u32>(),
-                }],
-                bytemuck::bytes_of(&NUM_LIGHTS),
-            )
             .render_to_swapchain(&engine.swapchain)
             .build(engine)?;
 
@@ -140,6 +138,7 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
             self.device.cmd_set_viewport(cmd_buffer, 0, &[engine.swapchain.viewport_inv()]);
             self.device.cmd_set_scissor(cmd_buffer, 0, &[engine.swapchain.extent_rect()]);
             let obj_buffer_info = self.obj_uniforms.descriptor(engine);
+            let light_buffer_info = engine.light_buffer.descriptor(engine);
             self.device.pushdesc_fn.cmd_push_descriptor_set(
                 cmd_buffer,
                 vk::PipelineBindPoint::GRAPHICS,
@@ -153,16 +152,21 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
                         .build(),
                     vk::WriteDescriptorSet::builder()
                         .dst_binding(1)
-                        .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                        .image_info(slice::from_ref(&irrmap.info))
+                        .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                        .buffer_info(slice::from_ref(&light_buffer_info))
                         .build(),
                     vk::WriteDescriptorSet::builder()
                         .dst_binding(2)
                         .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                        .image_info(slice::from_ref(&prefmap.info))
+                        .image_info(slice::from_ref(&irrmap.info))
                         .build(),
                     vk::WriteDescriptorSet::builder()
                         .dst_binding(3)
+                        .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                        .image_info(slice::from_ref(&prefmap.info))
+                        .build(),
+                    vk::WriteDescriptorSet::builder()
+                        .dst_binding(4)
                         .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                         .image_info(slice::from_ref(&brdf_lut.info))
                         .build(),
@@ -209,11 +213,8 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
         ObjectUniforms {
             mvp: engine.view_proj * self.model,
             model: self.model.into(),
-            view_pos: engine.camera.position.extend(1.0),
-            lights: [LightData {
-                pos: engine.light,
-                color: Vec3::splat(4.0).extend(0.0),
-            }],
+            view_pos: engine.camera.position,
+            num_lights: engine.lights.len() as _,
         }
     }
 
@@ -222,14 +223,6 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
             .vertex_input::<V>()
             .descriptor_layouts(&[self.push_desc_layout, engine.image_desc_layout])
             .push_constants(slice::from_ref(&self.push_constants))
-            .spec_constants(
-                &[vk::SpecializationMapEntry {
-                    constant_id: 0,
-                    offset: 0,
-                    size: size_of::<u32>(),
-                }],
-                bytemuck::bytes_of(&NUM_LIGHTS),
-            )
             .render_to_swapchain(&engine.swapchain)
             .build(engine)?;
         let old_pipeline = std::mem::replace(&mut self.pipeline, pipeline);
@@ -274,13 +267,44 @@ impl MeshRenderData {
     }
 }
 
-const NUM_LIGHTS: u32 = 1;
-
 #[repr(C)]
-#[derive(Debug, Clone, Copy, Default, Pod, Zeroable)]
-struct LightData {
-    pos: Vec4,
-    color: Vec4,
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+pub struct LightData {
+    pub pos: Vec4,
+    pub color: Vec4,
+}
+
+impl LightData {
+    pub fn point(pos: Vec3, color: Vec3) -> Self {
+        Self {
+            pos: pos.extend(1.0),
+            color: color.extend(1.0),
+        }
+    }
+
+    pub fn directional(dir: Vec3, color: Vec3) -> Self {
+        Self {
+            pos: dir.extend(0.0),
+            color: color.extend(1.0),
+        }
+    }
+
+    pub fn is_directional(&self) -> bool {
+        self.pos.w == 0.0
+    }
+
+    pub fn set_directional(&mut self, directional: bool) {
+        self.pos.w = if directional { 0.0 } else { 1.0 };
+    }
+}
+
+impl Default for LightData {
+    fn default() -> Self {
+        Self {
+            pos: Vec4::W,
+            color: Vec4::ONE,
+        }
+    }
 }
 
 #[repr(C)]
@@ -288,8 +312,8 @@ struct LightData {
 struct ObjectUniforms {
     mvp: Mat4,
     model: Mat4,
-    view_pos: Vec4,
-    lights: [LightData; NUM_LIGHTS as usize],
+    view_pos: Vec3,
+    num_lights: u32,
 }
 
 const UV_BITS: u32 = 1;

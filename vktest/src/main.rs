@@ -124,8 +124,7 @@ fn main() -> VulkanResult<()> {
     let mut fullscreen = false;
     let mut msaa_samples = vk_app.get_msaa_samples();
     let mut vsync = vk_app.is_vsync_on();
-    let mut light = -vk_app.light;
-    let mut light_directional = true;
+    let mut num_lights = vk_app.lights.len();
     let mut fov = vk_app.camera.fov.to_degrees();
     let mut debug_mode = DebugMode::None;
 
@@ -210,18 +209,40 @@ fn main() -> VulkanResult<()> {
                         ui.horizontal(|ui| {
                             ui.label("fov: ");
                             ui.add(egui::Slider::new(&mut fov, 1.0..=120.0));
+                            vk_app.camera.fov = fov.to_radians();
                         });
                         ui.add_space(10.0);
-                        ui.label("Light:");
                         ui.horizontal(|ui| {
-                            ui.label("X");
-                            ui.add(egui::DragValue::new(&mut light.x).speed(0.1));
-                            ui.label("Y");
-                            ui.add(egui::DragValue::new(&mut light.y).speed(0.1));
-                            ui.label("Z");
-                            ui.add(egui::DragValue::new(&mut light.z).speed(0.1));
+                            ui.label("Lights:");
+                            ui.add(egui::DragValue::new(&mut num_lights).clamp_range(0..=vkengine::MAX_LIGHTS - 1));
+                            if num_lights != vk_app.lights.len() {
+                                vk_app.lights.resize_with(num_lights, Default::default);
+                            }
                         });
-                        ui.checkbox(&mut light_directional, "Directional");
+                        egui::ScrollArea::vertical().max_height(500.0).show(ui, |ui| {
+                            for (i, light) in vk_app.lights.iter_mut().enumerate() {
+                                ui.label(format!("Light {i}:"));
+                                ui.horizontal(|ui| {
+                                    ui.label("X");
+                                    ui.add(egui::DragValue::new(&mut light.pos.x).speed(0.1));
+                                    ui.label("Y");
+                                    ui.add(egui::DragValue::new(&mut light.pos.y).speed(0.1));
+                                    ui.label("Z");
+                                    ui.add(egui::DragValue::new(&mut light.pos.z).speed(0.1));
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("R");
+                                    ui.add(egui::DragValue::new(&mut light.color.x).speed(0.1));
+                                    ui.label("G");
+                                    ui.add(egui::DragValue::new(&mut light.color.y).speed(0.1));
+                                    ui.label("B");
+                                    ui.add(egui::DragValue::new(&mut light.color.z).speed(0.1));
+                                });
+                                let mut directional = light.is_directional();
+                                ui.checkbox(&mut directional, "Directional");
+                                light.set_directional(directional);
+                            }
+                        });
                         ui.add_space(10.0);
                         ui.collapsing(format!("{} Meshes", scenes[cur_scene].len()), |ui| {
                             egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
@@ -261,16 +282,6 @@ fn main() -> VulkanResult<()> {
             if vsync != vk_app.is_vsync_on() {
                 vk_app.set_vsync(vsync).unwrap();
             }
-
-            if light_directional {
-                light.w = 0.0;
-                vk_app.light = -light;
-            } else {
-                light.w = 1.0;
-                vk_app.light = light;
-            };
-
-            vk_app.camera.fov = fov.to_radians();
 
             window.request_redraw();
         }

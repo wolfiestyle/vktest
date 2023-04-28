@@ -1,7 +1,6 @@
 #version 450
 #include "pbr.inc.glsl"
 #include "tonemap.inc.glsl"
-layout(constant_id = 0) const uint NumLights = 1;
 
 struct LightData {
     vec4 pos;
@@ -11,13 +10,17 @@ struct LightData {
 layout(set = 0, binding = 0) uniform ObjectUniforms {
     mat4 mvp;
     mat4 model;
-    vec4 view_pos;
-    LightData lights[NumLights];
+    vec3 view_pos;
+    uint num_lights;
 };
 
-layout(set = 0, binding = 1) uniform samplerCube irradianceMap;
-layout(set = 0, binding = 2) uniform samplerCube prefilterMap;
-layout(set = 0, binding = 3) uniform sampler2D BRDF_lut;
+layout(set = 0, binding = 1, std140) readonly buffer LightBuffer {
+    LightData lights[];
+};
+
+layout(set = 0, binding = 2) uniform samplerCube irradianceMap;
+layout(set = 0, binding = 3) uniform samplerCube prefilterMap;
+layout(set = 0, binding = 4) uniform sampler2D BRDF_lut;
 
 layout(set = 1, binding = 0) uniform sampler2D texColor;
 layout(set = 1, binding = 1) uniform sampler2D texMetalRough;
@@ -47,7 +50,7 @@ layout(location = 0) in FragIn {
 layout(location = 0) out vec4 outColor;
 
 vec3 pbr_light(vec3 N, vec3 albedo, float metallic, float roughness, float ao) {
-    vec3 V = normalize(view_pos.xyz - frag.Pos);
+    vec3 V = normalize(view_pos - frag.Pos);
     vec3 R = reflect(-V, N);
     float NdotV = max(dot(N, V), 0.0);
     vec3 F0 = mix(Fdielectric, albedo, metallic);
@@ -55,8 +58,9 @@ vec3 pbr_light(vec3 N, vec3 albedo, float metallic, float roughness, float ao) {
 
     // direct lighting
     vec3 direct = vec3(0.0);
-    for (int i = 0; i < lights.length(); ++i) {
-        vec3 dir = lights[i].pos.xyz - frag.Pos * lights[i].pos.w;
+    for (int i = 0; i < num_lights; ++i) {
+        float type = lights[i].pos.w; // 0 = directional, 1 = point
+        vec3 dir = (2.0 * type - 1.0) * lights[i].pos.xyz - frag.Pos * type;
         vec3 L = normalize(dir);
         vec3 H = normalize(V + L);
         float attenuation = mix(1.0, dot(dir, dir), lights[i].pos.w);

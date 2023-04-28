@@ -1,18 +1,12 @@
 #version 450
-layout(constant_id = 0) const uint NumLights = 1;
 const int UVbits = 1;
 const uint NumUVs = 1 << UVbits;
-
-struct LightData {
-    vec4 pos;
-    vec4 color;
-};
 
 layout(binding = 0) uniform ObjectUniforms {
     mat4 mvp;
     mat4 model;
-    vec4 view_pos;
-    LightData lights[NumLights];
+    vec3 view_pos;
+    uint num_lights;
 };
 
 layout(push_constant) uniform PushConstants {

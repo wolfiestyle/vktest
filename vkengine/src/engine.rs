@@ -2,11 +2,12 @@ use crate::camera::Camera;
 use crate::create::CreateFromInfo;
 use crate::device::{CubeData, ImageData, MappedMemory, VkBuffer, VulkanDevice};
 use crate::instance::DeviceSelection;
+use crate::renderer::LightData;
 use crate::swapchain::Swapchain;
 use crate::texture::Texture;
 use crate::types::*;
 use ash::vk;
-use glam::{Mat4, UVec2, Vec4};
+use glam::{Mat4, UVec2};
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use std::collections::HashMap;
 use std::slice;
@@ -15,6 +16,7 @@ use std::time::{Duration, Instant};
 
 const SWAPCHAIN_IMAGE_COUNT: u32 = 3;
 pub const QUEUE_DEPTH: usize = 2;
+pub const MAX_LIGHTS: usize = 16;
 
 #[derive(Debug)]
 pub struct VulkanEngine {
@@ -38,7 +40,8 @@ pub struct VulkanEngine {
     pub camera: Camera,
     pub projection: Mat4,
     pub view_proj: Mat4,
-    pub light: Vec4,
+    pub lights: Vec<LightData>,
+    pub(crate) light_buffer: UploadBuffer,
 }
 
 impl VulkanEngine {
@@ -113,6 +116,13 @@ impl VulkanEngine {
         let camera = Camera::default();
         let now = Instant::now();
 
+        let light_buffer = UploadBuffer::new(
+            &device,
+            (std::mem::size_of::<LightData>() * MAX_LIGHTS) as _,
+            vk::BufferUsageFlags::STORAGE_BUFFER,
+            "LightData",
+        )?;
+
         let mut this = Self {
             device: device.into(),
             window_size,
@@ -134,7 +144,8 @@ impl VulkanEngine {
             camera,
             projection: Mat4::IDENTITY,
             view_proj: Mat4::IDENTITY,
-            light: Vec4::Y,
+            lights: vec![],
+            light_buffer,
         };
 
         let sampler = this.get_sampler(SamplerOptions {
@@ -493,6 +504,10 @@ impl VulkanEngine {
         let view = self.camera.get_view_transform();
         self.projection = self.camera.get_projection(self.swapchain.aspect());
         self.view_proj = self.projection * view;
+        self.light_buffer[self.current_frame]
+            .map()
+            .unwrap()
+            .write_slice(&self.lights[0..self.lights.len().min(MAX_LIGHTS)], 0);
     }
 
     pub fn submit_draw_commands(&mut self, draw_commands: impl IntoIterator<Item = DrawPayload>) -> VulkanResult<bool> {
@@ -608,6 +623,7 @@ impl Drop for VulkanEngine {
             self.default_normalmap.cleanup(&self.device);
             self.device.destroy_pipeline_cache(self.pipeline_cache, None);
             self.image_desc_layout.cleanup(&self.device);
+            self.light_buffer.cleanup(&self.device);
         }
     }
 }
