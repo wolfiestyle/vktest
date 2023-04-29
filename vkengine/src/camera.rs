@@ -8,7 +8,7 @@ pub struct Camera {
     pub rotation: Quat,
     pub fov: f32,
     pub near: f32,
-    pub far: f32,
+    pub far: Option<f32>,
 }
 
 impl Camera {
@@ -56,7 +56,11 @@ impl Camera {
     }
 
     pub(crate) fn get_projection(&self, aspect: f32) -> Mat4 {
-        Mat4::perspective_rh(self.fov, aspect, self.near, self.far)
+        if let Some(far) = self.far {
+            Mat4::perspective_rh(self.fov, aspect, self.near, far)
+        } else {
+            Mat4::perspective_infinite_rh(self.fov, aspect, self.near)
+        }
     }
 }
 
@@ -68,7 +72,7 @@ impl Default for Camera {
             rotation: Quat::IDENTITY,
             fov: 60.0_f32.to_radians(),
             near: 0.05,
-            far: 1000.0,
+            far: None,
         }
     }
 }
