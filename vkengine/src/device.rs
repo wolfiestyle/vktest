@@ -640,6 +640,7 @@ impl VulkanDevice {
     #[inline]
     pub fn dispose_of(&self, mut obj: impl Cleanup<Self>) {
         unsafe { obj.cleanup(self) };
+        std::mem::forget(obj);
     }
 
     pub fn get_memory_info(&self) -> String {
