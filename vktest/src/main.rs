@@ -98,7 +98,7 @@ fn main() -> VulkanResult<()> {
         }
     } else {
         vk_app.camera.position = [0.0, 1.0, 2.0].into();
-        vk_app.camera.look_at([0.0; 3]);
+        vk_app.camera.look_at([0.0; 3].into());
     }
     let mut controller = CameraController::new(&vk_app.camera);
 
@@ -225,7 +225,11 @@ fn main() -> VulkanResult<()> {
                             ui.label("Z");
                             ui.add(egui::DragValue::new(&mut vk_app.camera.position.z).speed(0.1));
                         });
-                        ui.checkbox(&mut controller.flying, "Flying");
+                        ui.horizontal(|ui| {
+                            ui.label("Roll");
+                            ui.add(egui::DragValue::new(&mut controller.roll));
+                            ui.checkbox(&mut controller.flying, "Flying");
+                        });
                         ui.horizontal(|ui| {
                             ui.label("fov: ");
                             ui.add(egui::Slider::new(&mut fov, 1.0..=120.0));

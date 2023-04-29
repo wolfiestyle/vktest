@@ -12,8 +12,8 @@ pub struct Camera {
 }
 
 impl Camera {
-    pub fn look_at(&mut self, center: impl Into<Vec3>) {
-        let dir = center.into() - self.position;
+    pub fn look_at(&mut self, center: Vec3) {
+        let dir = center - self.position;
         if let Some(dir) = dir.try_normalize() {
             let pitch = (dir.y).asin();
             let yaw = (-dir.x).atan2(-dir.z);
@@ -29,8 +29,8 @@ impl Camera {
         self.position += Vec3::Y * dist;
     }
 
-    pub fn walk_forward(&mut self, dist: f32, ground: impl Into<Vec3>) {
-        self.position += (self.rotation * Vec3::X).cross(ground.into()).normalize() * dist;
+    pub fn walk_forward(&mut self, dist: f32, ground: Vec3) {
+        self.position += (self.rotation * Vec3::X).cross(ground).normalize() * dist;
     }
 
     pub fn walk_right(&mut self, dist: f32) {
@@ -119,9 +119,7 @@ impl CameraController {
         if self.up_speed != 0.0 {
             camera.fly_up(self.up_speed * dt);
         }
-        if self.mouse_look {
-            camera.set_rotation(self.pitch.to_radians(), self.yaw.to_radians(), self.roll.to_radians());
-        }
+        camera.set_rotation(self.pitch.to_radians(), self.yaw.to_radians(), self.roll.to_radians());
     }
 
     #[cfg(feature = "winit")]
