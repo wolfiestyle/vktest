@@ -3,8 +3,9 @@
 #include "tonemap.inc.glsl"
 
 struct LightData {
-    vec4 pos;
-    vec4 color;
+    vec4 pos;   // .w: 0 = directional, 1 = point/spot
+    vec4 color; // .w = spot_offset
+    vec4 spot;  // .w = spot_scale
 };
 
 layout(set = 0, binding = 0) uniform ObjectUniforms {
@@ -59,12 +60,13 @@ vec3 pbr_light(vec3 N, vec3 albedo, float metallic, float roughness, float ao) {
     // direct lighting
     vec3 direct = vec3(0.0);
     for (int i = 0; i < num_lights; ++i) {
-        float type = lights[i].pos.w; // 0 = directional, 1 = point
+        float type = lights[i].pos.w;
         vec3 dir = (2.0 * type - 1.0) * lights[i].pos.xyz - frag.Pos * type;
         vec3 L = normalize(dir);
         vec3 H = normalize(V + L);
-        float attenuation = mix(1.0, dot(dir, dir), lights[i].pos.w);
-        vec3 radiance = lights[i].color.rgb / attenuation;
+        float spot = clamp(dot(lights[i].spot.xyz, -L) * lights[i].spot.w + lights[i].color.w, 0.0, 1.0);
+        float attenuation = 1.0 / mix(1.0, dot(dir, dir), type);
+        vec3 radiance = lights[i].color.rgb * spot * attenuation;
 
         float NdotH = max(dot(N, H), 0.0);
         float NdotL = max(dot(N, L), 0.0);

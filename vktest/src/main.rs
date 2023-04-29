@@ -1,10 +1,12 @@
-use gltf_import::{GltfData, Material, Vertex};
+use gltf_import::{GltfData, LightType, Material, Vertex};
 use std::mem::ManuallyDrop;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use structopt::StructOpt;
 use vkengine::gui::{egui, UiRenderer};
-use vkengine::{Baker, CameraController, MeshRenderData, MeshRenderer, SkyboxRenderer, Texture, VkError, VulkanEngine, VulkanResult};
+use vkengine::{
+    Baker, CameraController, LightData, MeshRenderData, MeshRenderer, SkyboxRenderer, Texture, VkError, VulkanEngine, VulkanResult,
+};
 use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
@@ -100,6 +102,19 @@ fn main() -> VulkanResult<()> {
     }
     let mut controller = CameraController::new(&vk_app.camera);
 
+    let lights = gltf
+        .scenes
+        .iter()
+        .map(|scene| {
+            scene
+                .nodes(&gltf)
+                .filter_map(|node| node.light.map(|light_id| (&gltf[light_id], node)))
+                .map(|(light, node)| LightData::from_gltf(light, node))
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    vk_app.lights = lights[cur_scene].clone();
+
     let mut skybox = SkyboxRenderer::new(&vk_app)?;
     let skybox_equirect = Texture::from_dynamicimage(vk_app.device(), &skybox_img, false, false, Default::default())?;
 
@@ -192,8 +207,13 @@ fn main() -> VulkanResult<()> {
                         egui::ComboBox::from_label("Scene")
                             .selected_text(format!("Scene {cur_scene}"))
                             .show_ui(ui, |ui| {
+                                let mut s = cur_scene;
                                 for i in 0..scenes.len() {
-                                    ui.selectable_value(&mut cur_scene, i, format!("Scene {i}"));
+                                    ui.selectable_value(&mut s, i, format!("Scene {i}"));
+                                }
+                                if s != cur_scene {
+                                    cur_scene = s;
+                                    vk_app.lights = lights[s].clone();
                                 }
                             });
                         ui.label("Camera:");
@@ -238,9 +258,33 @@ fn main() -> VulkanResult<()> {
                                     ui.label("B");
                                     ui.add(egui::DragValue::new(&mut light.color.z).speed(0.1));
                                 });
-                                let mut directional = light.is_directional();
-                                ui.checkbox(&mut directional, "Directional");
-                                light.set_directional(directional);
+                                let is_dir = light.is_directional();
+                                let is_point = light.is_point();
+                                let is_spot = light.is_spot();
+                                if is_spot {
+                                    ui.horizontal(|ui| {
+                                        ui.label("SX");
+                                        ui.add(egui::DragValue::new(&mut light.spot_dir.x).speed(0.1));
+                                        ui.label("SY");
+                                        ui.add(egui::DragValue::new(&mut light.spot_dir.y).speed(0.1));
+                                        ui.label("SZ");
+                                        ui.add(egui::DragValue::new(&mut light.spot_dir.z).speed(0.1));
+                                    });
+                                }
+                                ui.horizontal(|ui| {
+                                    if ui.radio(is_dir, "Dir").clicked() {
+                                        light.set_type(LightType::Directional);
+                                    }
+                                    if ui.radio(is_point, "Point").clicked() {
+                                        light.set_type(LightType::Point);
+                                    }
+                                    if ui.radio(is_spot, "Spot").clicked() {
+                                        light.set_type(LightType::Spot {
+                                            inner_angle: 15.0f32.to_radians(),
+                                            outer_angle: 20.0f32.to_radians(),
+                                        });
+                                    }
+                                });
                             }
                         });
                         ui.add_space(10.0);

@@ -8,6 +8,7 @@ use crate::vertex::{IndexInput, VertexInput};
 use ash::vk;
 use bytemuck_derive::{Pod, Zeroable};
 use glam::{Affine3A, Mat4, Vec3, Vec4};
+use gltf_import::LightType;
 use inline_spirv::include_spirv;
 use std::marker::PhantomData;
 use std::mem::size_of;
@@ -270,22 +271,63 @@ impl MeshRenderData {
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct LightData {
-    pub pos: Vec4,
-    pub color: Vec4,
+    pub pos: Vec4, // .w: 0 = directional, 1 = point/spot
+    pub color: Vec3,
+    pub spot_offset: f32,
+    pub spot_dir: Vec3,
+    pub spot_scale: f32,
 }
 
 impl LightData {
     pub fn point(pos: Vec3, color: Vec3) -> Self {
         Self {
             pos: pos.extend(1.0),
-            color: color.extend(1.0),
+            color,
+            spot_offset: 1.0,
+            spot_dir: Vec3::ZERO,
+            spot_scale: 0.0,
         }
     }
 
     pub fn directional(dir: Vec3, color: Vec3) -> Self {
         Self {
             pos: dir.extend(0.0),
-            color: color.extend(1.0),
+            color,
+            spot_offset: 1.0,
+            spot_dir: Vec3::ZERO,
+            spot_scale: 0.0,
+        }
+    }
+
+    pub fn spot(pos: Vec3, dir: Vec3, color: Vec3, inner_angle: f32, outer_angle: f32) -> Self {
+        let [spot_scale, spot_offset] = Self::calc_spot(inner_angle, outer_angle);
+        Self {
+            pos: pos.extend(1.0),
+            color,
+            spot_offset,
+            spot_dir: dir,
+            spot_scale,
+        }
+    }
+
+    fn calc_spot(inner_angle: f32, outer_angle: f32) -> [f32; 2] {
+        let spot_scale = 1.0 / f32::max(0.001, inner_angle.cos() - outer_angle.cos());
+        let spot_offset = -outer_angle.cos() * spot_scale;
+        [spot_scale, spot_offset]
+    }
+
+    pub fn from_gltf(light: &gltf_import::Light, node: &gltf_import::Node) -> Self {
+        let color = Vec3::from(light.color) * light.intensity;
+        match light.type_ {
+            LightType::Directional => LightData::directional(node.transform.transform_vector3(Vec3::NEG_Z).normalize_or_zero(), color),
+            LightType::Point => LightData::point(node.transform.translation.into(), color),
+            LightType::Spot { inner_angle, outer_angle } => LightData::spot(
+                node.transform.translation.into(),
+                node.transform.transform_vector3(Vec3::NEG_Z).normalize_or_zero(),
+                color,
+                inner_angle,
+                outer_angle,
+            ),
         }
     }
 
@@ -293,8 +335,36 @@ impl LightData {
         self.pos.w == 0.0
     }
 
-    pub fn set_directional(&mut self, directional: bool) {
-        self.pos.w = if directional { 0.0 } else { 1.0 };
+    pub fn is_point(&self) -> bool {
+        self.pos.w != 0.0 && self.spot_scale == 0.0
+    }
+
+    pub fn is_spot(&self) -> bool {
+        self.spot_scale != 0.0
+    }
+
+    pub fn set_type(&mut self, type_: gltf_import::LightType) {
+        match type_ {
+            LightType::Directional => {
+                self.pos.w = 0.0;
+                self.spot_scale = 0.0;
+                self.spot_offset = 1.0;
+            }
+            LightType::Point => {
+                self.pos.w = 1.0;
+                self.spot_scale = 0.0;
+                self.spot_offset = 1.0;
+            }
+            LightType::Spot { inner_angle, outer_angle } => {
+                let [scale, offset] = Self::calc_spot(inner_angle, outer_angle);
+                self.pos.w = 1.0;
+                self.spot_scale = scale;
+                self.spot_offset = offset;
+                if self.spot_dir == Vec3::ZERO {
+                    self.spot_dir = Vec3::NEG_Y;
+                }
+            }
+        }
     }
 }
 
@@ -302,7 +372,10 @@ impl Default for LightData {
     fn default() -> Self {
         Self {
             pos: Vec4::W,
-            color: Vec4::ONE,
+            color: Vec3::ONE,
+            spot_offset: 1.0,
+            spot_dir: Vec3::ZERO,
+            spot_scale: 0.0,
         }
     }
 }
