@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use structopt::StructOpt;
 use vkengine::gui::{egui, UiRenderer};
 use vkengine::{
-    Baker, CameraController, LightData, MeshRenderData, MeshRenderer, SkyboxRenderer, Texture, VkError, VulkanEngine, VulkanResult,
+    Baker, Camera, CameraController, LightData, MeshRenderData, MeshRenderer, SkyboxRenderer, Texture, VkError, VulkanEngine, VulkanResult,
 };
 use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
@@ -92,10 +92,7 @@ fn main() -> VulkanResult<()> {
         .find_map(|scene| scene.nodes(&gltf).find(|&node| node.camera.is_some()));
     if let Some(node) = camera_node {
         let camera = &gltf[node.camera.unwrap()];
-        vk_app.camera.set_transform(node.transform);
-        if let gltf_import::Projection::Perspective { yfov, .. } = camera.projection {
-            vk_app.camera.fov = yfov;
-        }
+        vk_app.camera = Camera::from_gltf(camera, node);
     } else {
         vk_app.camera.position = [0.0, 1.0, 2.0].into();
         vk_app.camera.look_at([0.0; 3].into());

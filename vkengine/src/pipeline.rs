@@ -93,7 +93,7 @@ impl Pipeline {
         let depth_stencil_ci = vk::PipelineDepthStencilStateCreateInfo::builder()
             .depth_test_enable(params.mode.depth_test())
             .depth_write_enable(params.mode.depth_write())
-            .depth_compare_op(params.mode.depth_compare_op())
+            .depth_compare_op(params.mode.depth_compare_op(engine.reverse_depth))
             .depth_bounds_test_enable(false)
             .min_depth_bounds(0.0)
             .max_depth_bounds(1.0);
@@ -318,8 +318,9 @@ impl PipelineMode {
         matches!(self, Self::Opaque)
     }
 
-    fn depth_compare_op(self) -> vk::CompareOp {
+    fn depth_compare_op(self, rev_depth: bool) -> vk::CompareOp {
         match self {
+            Self::Opaque | Self::Transparent if rev_depth => vk::CompareOp::GREATER,
             Self::Opaque | Self::Transparent => vk::CompareOp::LESS,
             Self::Background => vk::CompareOp::EQUAL,
             Self::Overlay => vk::CompareOp::ALWAYS,

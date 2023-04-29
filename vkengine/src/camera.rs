@@ -12,6 +12,17 @@ pub struct Camera {
 }
 
 impl Camera {
+    pub fn from_gltf(camera: &gltf_import::Camera, node: &gltf_import::Node) -> Self {
+        let mut this = Self::default();
+        this.set_transform(node.transform);
+        if let gltf_import::Projection::Perspective { yfov, znear, zfar, .. } = camera.projection {
+            this.fov = yfov;
+            this.near = znear;
+            this.far = zfar;
+        }
+        this
+    }
+
     pub fn look_at(&mut self, center: Vec3) {
         let dir = center - self.position;
         if let Some(dir) = dir.try_normalize() {
@@ -55,8 +66,10 @@ impl Camera {
         Affine3A::from_quat(self.rotation.conjugate())
     }
 
-    pub(crate) fn get_projection(&self, aspect: f32) -> Mat4 {
-        if let Some(far) = self.far {
+    pub(crate) fn get_projection(&self, aspect: f32, reverse_depth: bool) -> Mat4 {
+        if reverse_depth {
+            Mat4::perspective_infinite_reverse_rh(self.fov, aspect, self.near)
+        } else if let Some(far) = self.far {
             Mat4::perspective_rh(self.fov, aspect, self.near, far)
         } else {
             Mat4::perspective_infinite_rh(self.fov, aspect, self.near)

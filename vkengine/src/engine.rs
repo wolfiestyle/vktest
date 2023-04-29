@@ -24,6 +24,7 @@ pub struct VulkanEngine {
     window_size: UVec2,
     window_resized: bool,
     pub(crate) swapchain: Swapchain,
+    pub(crate) reverse_depth: bool,
     main_cmd_buffers: CmdBufferRing,
     frame_state: Vec<FrameState>,
     current_frame: u64,
@@ -54,7 +55,11 @@ impl VulkanEngine {
         let msaa_samples = vk::SampleCountFlags::TYPE_4;
         let window_size = window.window_size().into();
         let swapchain = Swapchain::new(&device, window_size, SWAPCHAIN_IMAGE_COUNT, depth_format, msaa_samples, true)?;
-        eprintln!("color_format: {:?}, depth_format: {depth_format:?}", swapchain.format);
+        let reverse_depth = swapchain.has_float_depth();
+        eprintln!(
+            "color_format: {:?}, depth_format: {depth_format:?}, reverse_depth: {reverse_depth}",
+            swapchain.format
+        );
 
         let main_cmd_buffers = CmdBufferRing::new_with_level(&device, vk::CommandBufferLevel::PRIMARY)?;
         let frame_state = (0..QUEUE_DEPTH).map(|_| FrameState::new(&device)).collect::<Result<Vec<_>, _>>()?;
@@ -128,6 +133,7 @@ impl VulkanEngine {
             window_size,
             window_resized: false,
             swapchain,
+            reverse_depth,
             main_cmd_buffers,
             frame_state,
             current_frame: 0,
@@ -441,7 +447,7 @@ impl VulkanEngine {
         }
 
         let color_attach = self.swapchain.color_attachment(image_idx);
-        let depth_attach = self.swapchain.depth_attachment();
+        let depth_attach = self.swapchain.depth_attachment(self.reverse_depth);
         let render_info = vk::RenderingInfo::builder()
             .flags(vk::RenderingFlags::CONTENTS_SECONDARY_COMMAND_BUFFERS)
             .render_area(self.swapchain.extent_rect())
@@ -502,7 +508,7 @@ impl VulkanEngine {
     pub fn update(&mut self) {
         self.cpu_time_start = Instant::now();
         let view = self.camera.get_view_transform();
-        self.projection = self.camera.get_projection(self.swapchain.aspect());
+        self.projection = self.camera.get_projection(self.swapchain.aspect(), self.reverse_depth);
         self.view_proj = self.projection * view;
         self.light_buffer[self.current_frame]
             .map()

@@ -486,9 +486,10 @@ impl SkyboxRenderer {
         let cmd_buffer = self.cmd_buffers.get_current_buffer(engine)?;
         engine.begin_secondary_draw_commands(cmd_buffer, vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)?;
 
+        let far_depth = if engine.reverse_depth { 0.0 } else { 1.0 };
         let params = SkyboxParams {
             viewproj_inv: (engine.projection * engine.camera.get_view_rotation()).inverse(),
-            lod: Vec4::new(self.lod, 0.0, 0.0, 0.0),
+            params: Vec4::new(self.lod, 0.0, far_depth, 0.0),
         };
         unsafe {
             // background
@@ -553,5 +554,5 @@ impl Drop for SkyboxRenderer {
 #[derive(Debug, Clone, Copy, Default, Pod, Zeroable)]
 struct SkyboxParams {
     viewproj_inv: Mat4,
-    lod: Vec4,
+    params: Vec4,
 }
