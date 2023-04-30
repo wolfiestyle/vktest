@@ -1,5 +1,4 @@
 use gltf_import::{GltfData, LightType, Material, Vertex};
-use std::mem::ManuallyDrop;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use structopt::StructOpt;
@@ -52,7 +51,7 @@ fn main() -> VulkanResult<()> {
 
     let mut vk_app = VulkanEngine::new(&window, "vulkan test", Default::default())?;
 
-    let mut resources = ManuallyDrop::new(vk_app.create_resources_for_model(&gltf).unwrap());
+    let resources = vk_app.create_resources_for_model(&gltf).unwrap();
 
     let mut scenes = gltf
         .scenes
@@ -371,10 +370,6 @@ fn main() -> VulkanResult<()> {
                 prev_frame_count = frame_count;
             }
         }
-        Event::LoopDestroyed => unsafe {
-            vk_app.device().device_wait_idle().unwrap();
-            vk_app.device().dispose_of(ManuallyDrop::take(&mut resources));
-        },
         _ => (),
     });
 }

@@ -345,6 +345,7 @@ impl VulkanEngine {
             });
         }
         Ok(ModelResources {
+            device: self.device.clone(),
             textures,
             desc_pool,
             material_desc,
@@ -870,14 +871,17 @@ impl Default for SamplerOptions {
 }
 
 pub struct ModelResources {
+    device: Arc<VulkanDevice>,
     pub textures: Vec<Texture>,
     pub desc_pool: vk::DescriptorPool,
     pub material_desc: Vec<vk::DescriptorSet>,
 }
 
-impl Cleanup<VulkanDevice> for ModelResources {
-    unsafe fn cleanup(&mut self, device: &VulkanDevice) {
-        self.textures.cleanup(device);
-        device.destroy_descriptor_pool(self.desc_pool, None);
+impl Drop for ModelResources {
+    fn drop(&mut self) {
+        unsafe {
+            self.textures.cleanup(&self.device);
+            self.device.destroy_descriptor_pool(self.desc_pool, None);
+        }
     }
 }
