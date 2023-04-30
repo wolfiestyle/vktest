@@ -31,14 +31,14 @@ fn main() -> VulkanResult<()> {
     let args = Arguments::from_args();
 
     let gltf = GltfData::from_file(args.model.unwrap_or_else(|| "data/model.glb".into())).unwrap();
-    for mesh in &gltf.meshes {
-        println!(
-            "loaded model: vertices={} indices={}, submeshes={}",
-            mesh.vertices.len(),
-            mesh.indices.len(),
-            mesh.submeshes.len()
-        );
-    }
+    println!(
+        "loaded model: meshes: {} images: {}, materials: {} cameras: {}, lights: {}",
+        gltf.meshes.len(),
+        gltf.images.len(),
+        gltf.materials.len(),
+        gltf.cameras.len(),
+        gltf.lights.len(),
+    );
 
     let skybox_img = image::open(args.skybox.unwrap_or_else(|| "data/skybox.exr".into())).unwrap();
 
