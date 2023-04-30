@@ -692,7 +692,7 @@ pub struct UploadBuffer {
 impl UploadBuffer {
     pub fn new(device: &VulkanDevice, size: vk::DeviceSize, usage: vk::BufferUsageFlags, name: &str) -> VulkanResult<Self> {
         let buffers = (0..QUEUE_DEPTH + 1)
-            .map(|_| device.allocate_cpu_buffer(size, usage, name))
+            .map(|_| device.allocate_cpu_buffer(size, usage))
             .collect::<Result<Vec<_>, _>>()?
             .try_into()
             .unwrap();

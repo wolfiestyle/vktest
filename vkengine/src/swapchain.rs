@@ -137,7 +137,6 @@ impl Swapchain {
             vk::ImageCreateFlags::empty(),
             vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSIENT_ATTACHMENT,
             MemoryLocation::GpuOnly,
-            "MSAA image",
         )?;
         let imgview = image.create_view(device, vk::ImageViewType::TYPE_2D)?;
 
@@ -166,7 +165,6 @@ impl Swapchain {
             vk::ImageCreateFlags::empty(),
             vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT | vk::ImageUsageFlags::TRANSIENT_ATTACHMENT,
             MemoryLocation::GpuOnly,
-            "Depth image",
         )?;
 
         let depth_imgview = depth_image.create_view(device, vk::ImageViewType::TYPE_2D)?;

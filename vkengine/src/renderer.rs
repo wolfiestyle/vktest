@@ -94,8 +94,8 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
             .render_to_swapchain(&engine.swapchain)
             .build(engine)?;
 
-        let vertex_buffer = device.create_buffer_from_data(vertices, vk::BufferUsageFlags::VERTEX_BUFFER, "Vertex buffer")?;
-        let index_buffer = device.create_buffer_from_data(indices, vk::BufferUsageFlags::INDEX_BUFFER, "Index buffer")?;
+        let vertex_buffer = device.create_buffer_from_data(vertices, vk::BufferUsageFlags::VERTEX_BUFFER)?;
+        let index_buffer = device.create_buffer_from_data(indices, vk::BufferUsageFlags::INDEX_BUFFER)?;
 
         let cmd_buffers = CmdBufferRing::new(&device)?;
 

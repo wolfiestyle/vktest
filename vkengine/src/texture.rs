@@ -52,7 +52,6 @@ impl Texture {
                 | vk::ImageUsageFlags::TRANSFER_SRC
                 | vk::ImageUsageFlags::TRANSFER_DST,
             gpu_allocator::MemoryLocation::GpuOnly,
-            "Texture image",
         )?;
         let view_type = if flags.contains(vk::ImageCreateFlags::CUBE_COMPATIBLE) {
             vk::ImageViewType::CUBE
