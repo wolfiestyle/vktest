@@ -89,7 +89,7 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
         };
         let pipeline = Pipeline::builder_graphics(&shader)
             .vertex_input::<V>()
-            .descriptor_layouts(&[push_desc_layout, engine.image_desc_layout])
+            .descriptor_layouts(&[push_desc_layout, engine.pbr_desc_layout])
             .push_constants(slice::from_ref(&push_constants))
             .render_to_swapchain(&engine.swapchain)
             .build(engine)?;
@@ -222,7 +222,7 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
     pub fn rebuild_pipeline(&mut self, engine: &VulkanEngine) -> VulkanResult<()> {
         let pipeline = Pipeline::builder_graphics(&self.shader)
             .vertex_input::<V>()
-            .descriptor_layouts(&[self.push_desc_layout, engine.image_desc_layout])
+            .descriptor_layouts(&[self.push_desc_layout, engine.pbr_desc_layout])
             .push_constants(slice::from_ref(&self.push_constants))
             .render_to_swapchain(&engine.swapchain)
             .build(engine)?;

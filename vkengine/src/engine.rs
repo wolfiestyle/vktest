@@ -32,7 +32,7 @@ pub struct VulkanEngine {
     pub(crate) default_texture: Texture,
     pub(crate) default_normalmap: Texture,
     pub(crate) pipeline_cache: vk::PipelineCache,
-    pub image_desc_layout: vk::DescriptorSetLayout,
+    pub pbr_desc_layout: vk::DescriptorSetLayout,
     prev_frame_time: Instant,
     last_frame_time: Instant,
     cpu_time_start: Instant,
@@ -83,41 +83,7 @@ impl VulkanEngine {
 
         let pipeline_cache = vk::PipelineCacheCreateInfo::builder().create(&device)?; //TODO: save/load cache data
 
-        let image_desc_layout = vk::DescriptorSetLayoutCreateInfo::builder()
-            .bindings(&[
-                vk::DescriptorSetLayoutBinding::builder()
-                    .binding(0)
-                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                    .descriptor_count(1)
-                    .stage_flags(vk::ShaderStageFlags::FRAGMENT)
-                    .build(),
-                vk::DescriptorSetLayoutBinding::builder()
-                    .binding(1)
-                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                    .descriptor_count(1)
-                    .stage_flags(vk::ShaderStageFlags::FRAGMENT)
-                    .build(),
-                vk::DescriptorSetLayoutBinding::builder()
-                    .binding(2)
-                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                    .descriptor_count(1)
-                    .stage_flags(vk::ShaderStageFlags::FRAGMENT)
-                    .build(),
-                vk::DescriptorSetLayoutBinding::builder()
-                    .binding(3)
-                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                    .descriptor_count(1)
-                    .stage_flags(vk::ShaderStageFlags::FRAGMENT)
-                    .build(),
-                vk::DescriptorSetLayoutBinding::builder()
-                    .binding(4)
-                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                    .descriptor_count(1)
-                    .stage_flags(vk::ShaderStageFlags::FRAGMENT)
-                    .build(),
-            ])
-            .create(&device)?;
-        device.debug(|d| d.set_object_name(&device, &image_desc_layout, "Image desc layout"));
+        let image_desc_layout = Self::pbr_descriptor_layout(&device)?;
 
         let camera = Camera::default();
         let now = Instant::now();
@@ -142,7 +108,7 @@ impl VulkanEngine {
             default_normalmap,
             samplers: Default::default(),
             pipeline_cache,
-            image_desc_layout,
+            pbr_desc_layout: image_desc_layout,
             prev_frame_time: now,
             last_frame_time: now,
             cpu_time_start: now,
@@ -164,6 +130,50 @@ impl VulkanEngine {
         this.default_normalmap.info.sampler = sampler;
 
         Ok(this)
+    }
+
+    fn pbr_descriptor_layout(device: &VulkanDevice) -> VulkanResult<vk::DescriptorSetLayout> {
+        let desc_layout = vk::DescriptorSetLayoutCreateInfo::builder()
+            .bindings(&[
+                // color
+                vk::DescriptorSetLayoutBinding::builder()
+                    .binding(0)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                    .build(),
+                // metallic roughness
+                vk::DescriptorSetLayoutBinding::builder()
+                    .binding(1)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                    .build(),
+                // normal
+                vk::DescriptorSetLayoutBinding::builder()
+                    .binding(2)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                    .build(),
+                // emissive
+                vk::DescriptorSetLayoutBinding::builder()
+                    .binding(3)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                    .build(),
+                // occlusion
+                vk::DescriptorSetLayoutBinding::builder()
+                    .binding(4)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                    .build(),
+            ])
+            .create(&device)?;
+        device.debug(|d| d.set_object_name(&device, &desc_layout, "PBR desc layout"));
+        Ok(desc_layout)
     }
 
     #[inline]
@@ -312,102 +322,20 @@ impl VulkanEngine {
             .debug(|d| d.set_object_name(&self.device, &desc_pool, "glTF materials pool"));
         let material_desc = vk::DescriptorSetAllocateInfo::builder()
             .descriptor_pool(desc_pool)
-            .set_layouts(&vec![self.image_desc_layout; count as usize])
+            .set_layouts(&vec![self.pbr_desc_layout; count as usize])
             .create(&self.device)?;
 
-        let default_material = material_desc[0];
-        let desc_writes = [
-            vk::WriteDescriptorSet::builder()
-                .dst_set(default_material)
-                .dst_binding(0)
-                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .image_info(slice::from_ref(&self.default_texture.info))
-                .build(),
-            vk::WriteDescriptorSet::builder()
-                .dst_set(default_material)
-                .dst_binding(1)
-                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .image_info(slice::from_ref(&self.default_texture.info))
-                .build(),
-            vk::WriteDescriptorSet::builder()
-                .dst_set(default_material)
-                .dst_binding(2)
-                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .image_info(slice::from_ref(&self.default_normalmap.info))
-                .build(),
-            vk::WriteDescriptorSet::builder()
-                .dst_set(default_material)
-                .dst_binding(3)
-                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .image_info(slice::from_ref(&self.default_texture.info))
-                .build(),
-            vk::WriteDescriptorSet::builder()
-                .dst_set(default_material)
-                .dst_binding(4)
-                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .image_info(slice::from_ref(&self.default_texture.info))
-                .build(),
-        ];
-        unsafe {
-            self.device.update_descriptor_sets(&desc_writes, &[]);
-        }
+        self.write_pbr_descriptor_set(material_desc[0], None, None, None, None, None);
+        self.device
+            .debug(|d| d.set_object_name(&self.device, &material_desc[0], "Descriptor default material"));
 
         for (material, &descriptor) in gltf.materials.iter().zip(material_desc.iter().skip(1)) {
-            let color_tex = material
-                .color_tex
-                .map(|tex| &textures[tex.id].info)
-                .unwrap_or(&self.default_texture.info);
-            let metal_rough_tex = material
-                .metallic_roughness_tex
-                .map(|tex| &textures[tex.id].info)
-                .unwrap_or(&self.default_texture.info);
-            let normal_tex = material
-                .normal_tex
-                .map(|tex| &textures[tex.id].info)
-                .unwrap_or(&self.default_normalmap.info);
-            let emiss_tex = material
-                .emissive_tex
-                .map(|tex| &textures[tex.id].info)
-                .unwrap_or(&self.default_texture.info);
-            let occlusion_tex = material
-                .occlusion_tex
-                .map(|tex| &textures[tex.id].info)
-                .unwrap_or(&self.default_texture.info);
-            let desc_writes = [
-                vk::WriteDescriptorSet::builder()
-                    .dst_set(descriptor)
-                    .dst_binding(0)
-                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                    .image_info(slice::from_ref(color_tex))
-                    .build(),
-                vk::WriteDescriptorSet::builder()
-                    .dst_set(descriptor)
-                    .dst_binding(1)
-                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                    .image_info(slice::from_ref(metal_rough_tex))
-                    .build(),
-                vk::WriteDescriptorSet::builder()
-                    .dst_set(descriptor)
-                    .dst_binding(2)
-                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                    .image_info(slice::from_ref(normal_tex))
-                    .build(),
-                vk::WriteDescriptorSet::builder()
-                    .dst_set(descriptor)
-                    .dst_binding(3)
-                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                    .image_info(slice::from_ref(emiss_tex))
-                    .build(),
-                vk::WriteDescriptorSet::builder()
-                    .dst_set(descriptor)
-                    .dst_binding(4)
-                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                    .image_info(slice::from_ref(occlusion_tex))
-                    .build(),
-            ];
-            unsafe {
-                self.device.update_descriptor_sets(&desc_writes, &[]);
-            }
+            let color = material.color_tex.map(|tex| &textures[tex.id].info);
+            let metal_rough = material.metallic_roughness_tex.map(|tex| &textures[tex.id].info);
+            let normal = material.normal_tex.map(|tex| &textures[tex.id].info);
+            let emissive = material.emissive_tex.map(|tex| &textures[tex.id].info);
+            let occlusion = material.occlusion_tex.map(|tex| &textures[tex.id].info);
+            self.write_pbr_descriptor_set(descriptor, color, metal_rough, normal, emissive, occlusion);
             self.device.debug(|d| {
                 d.set_object_name(
                     &self.device,
@@ -421,6 +349,47 @@ impl VulkanEngine {
             desc_pool,
             material_desc,
         })
+    }
+
+    pub fn write_pbr_descriptor_set(
+        &self, descriptor: vk::DescriptorSet, color: Option<&vk::DescriptorImageInfo>, metal_rough: Option<&vk::DescriptorImageInfo>,
+        normal: Option<&vk::DescriptorImageInfo>, emissive: Option<&vk::DescriptorImageInfo>, occlusion: Option<&vk::DescriptorImageInfo>,
+    ) {
+        let desc_writes = [
+            vk::WriteDescriptorSet::builder()
+                .dst_set(descriptor)
+                .dst_binding(0)
+                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .image_info(slice::from_ref(color.unwrap_or(&self.default_texture.info)))
+                .build(),
+            vk::WriteDescriptorSet::builder()
+                .dst_set(descriptor)
+                .dst_binding(1)
+                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .image_info(slice::from_ref(metal_rough.unwrap_or(&self.default_texture.info)))
+                .build(),
+            vk::WriteDescriptorSet::builder()
+                .dst_set(descriptor)
+                .dst_binding(2)
+                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .image_info(slice::from_ref(normal.unwrap_or(&self.default_normalmap.info)))
+                .build(),
+            vk::WriteDescriptorSet::builder()
+                .dst_set(descriptor)
+                .dst_binding(3)
+                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .image_info(slice::from_ref(emissive.unwrap_or(&self.default_texture.info)))
+                .build(),
+            vk::WriteDescriptorSet::builder()
+                .dst_set(descriptor)
+                .dst_binding(4)
+                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .image_info(slice::from_ref(occlusion.unwrap_or(&self.default_texture.info)))
+                .build(),
+        ];
+        unsafe {
+            self.device.update_descriptor_sets(&desc_writes, &[]);
+        }
     }
 
     fn record_primary_command_buffer(
@@ -638,7 +607,7 @@ impl Drop for VulkanEngine {
             self.default_texture.cleanup(&self.device);
             self.default_normalmap.cleanup(&self.device);
             self.device.destroy_pipeline_cache(self.pipeline_cache, None);
-            self.image_desc_layout.cleanup(&self.device);
+            self.pbr_desc_layout.cleanup(&self.device);
             self.light_buffer.cleanup(&self.device);
         }
     }
