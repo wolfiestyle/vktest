@@ -76,7 +76,7 @@ impl VulkanEngine {
             &device,
             UVec2::ONE,
             vk::Format::R8G8B8A8_UNORM,
-            ImageData::Single(&[128, 128, 255, 0]),
+            ImageData::Single(&[128, 128, 255, 255]),
             vk::Sampler::null(),
             Default::default(),
         )?;
