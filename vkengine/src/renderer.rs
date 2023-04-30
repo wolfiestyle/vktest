@@ -466,7 +466,6 @@ impl SkyboxRenderer {
             .push_constants(slice::from_ref(&push_constants))
             .render_to_swapchain(&engine.swapchain)
             .mode(PipelineMode::Background)
-            .topology(vk::PrimitiveTopology::TRIANGLE_STRIP)
             .build(engine)?;
 
         let cmd_buffers = CmdBufferRing::new(&device)?;
@@ -517,7 +516,7 @@ impl SkyboxRenderer {
                 0,
                 bytemuck::bytes_of(&params),
             );
-            self.device.cmd_draw(cmd_buffer, 4, 1, 0, 0);
+            self.device.cmd_draw(cmd_buffer, 3, 1, 0, 0);
             self.device.debug(|d| d.cmd_end_label(cmd_buffer));
         }
 
@@ -530,7 +529,6 @@ impl SkyboxRenderer {
             .push_constants(slice::from_ref(&self.push_constants))
             .render_to_swapchain(&engine.swapchain)
             .mode(PipelineMode::Background)
-            .topology(vk::PrimitiveTopology::TRIANGLE_STRIP)
             .build(engine)?;
         let old_pipeline = std::mem::replace(&mut self.pipeline, pipeline);
         self.device.dispose_of(old_pipeline);
