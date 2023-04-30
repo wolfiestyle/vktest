@@ -210,11 +210,17 @@ impl UiRenderer {
         let total_vert_size = total_verts * size_of::<Vertex>();
         let total_bytes = total_vert_size + total_idx * size_of::<u32>();
         self.total_vert_size = total_vert_size as _;
-        self.buffers[self.local_frame].ensure_capacity(&self.device, total_bytes as _, false)?;
+        // allocate more buffer space if necessary
+        let buffer = &mut self.buffers[self.local_frame];
+        let resized = buffer.ensure_capacity(&self.device, total_bytes as _, false)?;
+        if resized {
+            self.device
+                .debug(|d| d.set_object_name(&self.device, &buffer.handle, "UiRenderer buffer"))
+        }
         // write vertices and indices on the same buffer
         let mut vert_offset = 0;
         let mut idx_offset = total_vert_size / size_of::<u32>();
-        let mut mem = self.buffers[self.local_frame].map()?;
+        let mut mem = buffer.map()?;
         for prim in &self.primitives {
             match &prim.primitive {
                 Primitive::Mesh(mesh) => {

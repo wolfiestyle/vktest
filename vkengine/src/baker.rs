@@ -194,6 +194,8 @@ impl Baker {
             ..Default::default()
         };
         let mut irrmap = Texture::new_empty(&self.device, params, vk::ImageCreateFlags::CUBE_COMPATIBLE, vk::Sampler::null())?;
+        self.device
+            .debug(|d| d.set_object_name(&self.device, &*irrmap.image, "Irradiance map"));
         let cmd_buffer = self.device.begin_one_time_commands()?;
         irrmap.transition_layout(&self.device, cmd_buffer, vk::ImageLayout::GENERAL);
         unsafe {
@@ -235,6 +237,8 @@ impl Baker {
             ..Default::default()
         };
         let mut prefmap = Texture::new_empty(&self.device, params, vk::ImageCreateFlags::CUBE_COMPATIBLE, vk::Sampler::null())?;
+        self.device
+            .debug(|d| d.set_object_name(&self.device, &*prefmap.image, "Prefiltered map"));
         let cmd_buffer = self.device.begin_one_time_commands()?;
         prefmap.transition_layout(&self.device, cmd_buffer, vk::ImageLayout::GENERAL);
         let mip_infos = (0..PREFILTERED_MIP_LEVELS)
@@ -307,6 +311,7 @@ impl Baker {
             ..Default::default()
         };
         let mut brdf_lut = Texture::new_empty(&self.device, params, vk::ImageCreateFlags::empty(), vk::Sampler::null())?;
+        self.device.debug(|d| d.set_object_name(&self.device, &*brdf_lut.image, "BRDF lut"));
         let cmd_buffer = self.device.begin_one_time_commands()?;
         brdf_lut.transition_layout(&self.device, cmd_buffer, vk::ImageLayout::GENERAL);
         unsafe {
@@ -342,6 +347,8 @@ impl Baker {
             ..Default::default()
         };
         let mut cubemap = Texture::new_empty(&self.device, params, vk::ImageCreateFlags::CUBE_COMPATIBLE, vk::Sampler::null())?;
+        self.device
+            .debug(|d| d.set_object_name(&self.device, &*cubemap.image, "Cubemap image"));
         let cmd_buffer = self.device.begin_one_time_commands()?;
         cubemap.transition_layout(&self.device, cmd_buffer, vk::ImageLayout::GENERAL);
         unsafe {

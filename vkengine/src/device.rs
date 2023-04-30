@@ -21,8 +21,8 @@ pub struct VulkanDevice {
     pub device: ash::Device,
     pub graphics_queue: vk::Queue,
     pub present_queue: vk::Queue,
-    transfer_pool: vk::CommandPool,
-    transfer_fence: vk::Fence,
+    onetime_pool: vk::CommandPool,
+    onetime_fence: vk::Fence,
     pub swapchain_fn: khr::Swapchain,
     pub dynrender_fn: khr::DynamicRendering,
     pub pushdesc_fn: khr::PushDescriptor,
@@ -66,13 +66,18 @@ impl VulkanDevice {
             device,
             graphics_queue,
             present_queue,
-            transfer_pool,
-            transfer_fence,
+            onetime_pool: transfer_pool,
+            onetime_fence: transfer_fence,
             swapchain_fn,
             dynrender_fn,
             pushdesc_fn,
             allocator: ManuallyDrop::new(allocator.into()),
         };
+
+        this.debug(|d| {
+            d.set_object_name(&this, &this.onetime_pool, "One-time command pool");
+            d.set_object_name(&this, &this.onetime_fence, "One-time fence");
+        });
 
         Ok(this)
     }
@@ -84,7 +89,7 @@ impl VulkanDevice {
 
     pub(crate) fn begin_one_time_commands(&self) -> VulkanResult<vk::CommandBuffer> {
         let cmd_buffer = vk::CommandBufferAllocateInfo::builder()
-            .command_pool(self.transfer_pool)
+            .command_pool(self.onetime_pool)
             .level(vk::CommandBufferLevel::PRIMARY)
             .command_buffer_count(1)
             .create(&self.device)?[0];
@@ -104,15 +109,15 @@ impl VulkanDevice {
                 .end_command_buffer(cmd_buffer)
                 .describe_err("Failed to end recording command buffer")?;
             self.device
-                .queue_submit(self.graphics_queue, slice::from_ref(&submit_info), self.transfer_fence)
+                .queue_submit(self.graphics_queue, slice::from_ref(&submit_info), self.onetime_fence)
                 .describe_err("Failed to submit queue")?;
             self.device
-                .wait_for_fences(slice::from_ref(&self.transfer_fence), true, u64::MAX)
+                .wait_for_fences(slice::from_ref(&self.onetime_fence), true, u64::MAX)
                 .describe_err("Failed to wait fence")?;
             self.device
-                .reset_fences(slice::from_ref(&self.transfer_fence))
+                .reset_fences(slice::from_ref(&self.onetime_fence))
                 .describe_err("Failed to reset fence")?;
-            self.device.free_command_buffers(self.transfer_pool, slice::from_ref(&cmd_buffer));
+            self.device.free_command_buffers(self.onetime_pool, slice::from_ref(&cmd_buffer));
         }
         Ok(())
     }
@@ -205,6 +210,13 @@ impl VulkanDevice {
         src_buffer.map()?.write_slice(data, 0);
         self.copy_buffer(&src_buffer, &dst_buffer, 0)?;
 
+        self.debug(|d| {
+            d.set_object_name(
+                self,
+                &dst_buffer.handle,
+                &format!("Buffer {:?}", (dst_buffer.props.location, dst_buffer.props.usage)),
+            )
+        });
         self.dispose_of(src_buffer);
         Ok(dst_buffer)
     }
@@ -532,7 +544,13 @@ impl VulkanDevice {
         self.end_one_time_commands(cmd_buffer)?;
 
         self.dispose_of(src_buffer);
-        self.debug(|d| d.set_object_name(&self.device, &tex_image.handle, &format!("Texture image {params:?}")));
+        self.debug(|d| {
+            d.set_object_name(
+                &self.device,
+                &tex_image.handle,
+                &format!("Image {:?}", (params.width, params.height, params.layers)),
+            )
+        });
 
         Ok(tex_image)
     }
@@ -666,8 +684,8 @@ impl Drop for VulkanDevice {
     fn drop(&mut self) {
         unsafe {
             ManuallyDrop::drop(&mut self.allocator);
-            self.device.destroy_command_pool(self.transfer_pool, None);
-            self.device.destroy_fence(self.transfer_fence, None);
+            self.device.destroy_command_pool(self.onetime_pool, None);
+            self.device.destroy_fence(self.onetime_fence, None);
             self.instance.surface_utils.destroy_surface(self.surface, None);
             self.device.destroy_device(None);
         }
@@ -682,8 +700,8 @@ impl std::fmt::Debug for VulkanDevice {
             .field("dev_info", &self.dev_info)
             .field("graphics_queue", &self.graphics_queue)
             .field("present_queue", &self.present_queue)
-            .field("transfer_pool", &self.transfer_pool)
-            .field("transfer_fence", &self.transfer_fence)
+            .field("transfer_pool", &self.onetime_pool)
+            .field("transfer_fence", &self.onetime_fence)
             .finish_non_exhaustive()
     }
 }
@@ -806,12 +824,14 @@ impl MemoryObject<vk::Buffer, BufferParams> {
         Ok(())
     }
 
-    pub fn ensure_capacity(&mut self, device: &VulkanDevice, size: vk::DeviceSize, preserve_contents: bool) -> VulkanResult<()> {
+    pub fn ensure_capacity(&mut self, device: &VulkanDevice, size: vk::DeviceSize, preserve_contents: bool) -> VulkanResult<bool> {
         if size > self.size {
             let new_size = 1u64 << ((size - 1).ilog2() + 1); // nearest power of two rounded up
             self.resize(device, new_size, preserve_contents)?;
+            Ok(true)
+        } else {
+            Ok(false)
         }
-        Ok(())
     }
 }
 

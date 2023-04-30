@@ -117,6 +117,7 @@ impl VulkanEngine {
                     .build(),
             ])
             .create(&device)?;
+        device.debug(|d| d.set_object_name(&device, &image_desc_layout, "Image desc layout"));
 
         let camera = Camera::default();
         let now = Instant::now();
@@ -307,6 +308,8 @@ impl VulkanEngine {
             .max_sets(count)
             .pool_sizes(&pool_sizes)
             .create(&self.device)?;
+        self.device
+            .debug(|d| d.set_object_name(&self.device, &desc_pool, "glTF materials pool"));
         let material_desc = vk::DescriptorSetAllocateInfo::builder()
             .descriptor_pool(desc_pool)
             .set_layouts(&vec![self.image_desc_layout; count as usize])
@@ -405,6 +408,13 @@ impl VulkanEngine {
             unsafe {
                 self.device.update_descriptor_sets(&desc_writes, &[]);
             }
+            self.device.debug(|d| {
+                d.set_object_name(
+                    &self.device,
+                    &descriptor,
+                    &format!("Descriptor material {}", material.name.as_deref().unwrap_or("")),
+                )
+            });
         }
         Ok(ModelResources {
             textures,
@@ -651,15 +661,17 @@ impl CmdBufferRing {
             .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
             .queue_family_index(device.dev_info.graphics_idx)
             .create(device)?;
+        device.debug(|d| d.set_object_name(device, &pool, "CmdBufferRing pool"));
         // we use N + 1 command buffers so we can write on them right away without waiting for the previous frame
         let buffers = vk::CommandBufferAllocateInfo::builder()
             .command_pool(pool)
             .level(level)
             .command_buffer_count(QUEUE_DEPTH as u32 + 1)
-            .create(device)?
-            .try_into()
-            .unwrap();
-        Ok(Self { pool, buffers })
+            .create(device)?;
+        Ok(Self {
+            pool,
+            buffers: buffers.try_into().unwrap(),
+        })
     }
 
     pub fn get_current_buffer(&self, engine: &VulkanEngine) -> VulkanResult<vk::CommandBuffer> {
