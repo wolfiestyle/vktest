@@ -37,7 +37,7 @@ impl VulkanDevice {
         let instance = VulkanInstance::new(window, app_name)?;
         let surface = instance.create_surface(window)?;
         let dev_info = instance.pick_physical_device(surface, selection)?;
-        eprintln!("Selected device: {:?}", dev_info.name);
+        eprintln!("Selected device: {}\nDriver: {}", dev_info.name, dev_info.driver);
         let device = instance.create_logical_device(&dev_info)?;
         let graphics_queue = unsafe { device.get_device_queue(dev_info.graphics_idx, 0) };
         let present_queue = unsafe { device.get_device_queue(dev_info.present_idx, 0) };

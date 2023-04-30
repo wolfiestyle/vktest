@@ -165,10 +165,18 @@ impl VulkanInstance {
 
     fn query_device_feature_support(&self, phys_dev: vk::PhysicalDevice, surface: vk::SurfaceKHR) -> VulkanResult<DeviceInfo> {
         // device info
-        let properties = unsafe { self.instance.get_physical_device_properties(phys_dev) };
-        let dev_type = properties.device_type.into();
-        let name = vk_to_cstr(&properties.device_name).to_str().unwrap_or("unknown").to_owned();
-        let msaa_support = properties.limits.framebuffer_color_sample_counts & properties.limits.framebuffer_depth_sample_counts;
+        let mut driver_props = vk::PhysicalDeviceDriverProperties::default();
+        let mut props = vk::PhysicalDeviceProperties2::builder().push_next(&mut driver_props).build();
+        unsafe { self.instance.get_physical_device_properties2(phys_dev, &mut props) };
+        let dev_type = props.properties.device_type.into();
+        let name = vk_to_cstr(&props.properties.device_name).to_str().unwrap_or("unknown").to_owned();
+        let driver = [
+            vk_to_cstr(&driver_props.driver_name).to_str().unwrap_or("unknown"),
+            vk_to_cstr(&driver_props.driver_info).to_str().unwrap_or(""),
+        ]
+        .join(" ");
+        let limits = &props.properties.limits;
+        let msaa_support = limits.framebuffer_color_sample_counts & limits.framebuffer_depth_sample_counts;
 
         // features
         let mut tl_sem_feats = vk::PhysicalDeviceTimelineSemaphoreFeatures::default();
@@ -231,13 +239,14 @@ impl VulkanInstance {
             phys_dev,
             dev_type,
             name,
+            driver,
             graphics_idx: graphics_idx.unwrap(),
             present_idx: present_idx.unwrap(),
             unique_families,
             extensions,
             msaa_support,
-            max_aniso: properties.limits.max_sampler_anisotropy,
-            timestamp_period: properties.limits.timestamp_period,
+            max_aniso: limits.max_sampler_anisotropy,
+            timestamp_period: limits.timestamp_period,
         })
     }
 
@@ -356,6 +365,7 @@ impl std::fmt::Debug for VulkanInstance {
 pub struct DeviceInfo {
     pub phys_dev: vk::PhysicalDevice,
     pub name: String,
+    pub driver: String,
     pub dev_type: DeviceType,
     pub graphics_idx: u32,
     pub present_idx: u32,
