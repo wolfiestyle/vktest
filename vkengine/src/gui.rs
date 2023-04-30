@@ -210,17 +210,7 @@ impl UiRenderer {
         let total_vert_size = total_verts * size_of::<Vertex>();
         let total_bytes = total_vert_size + total_idx * size_of::<u32>();
         self.total_vert_size = total_vert_size as _;
-        // allocate nearest power of two sized buffer if necessary
-        if total_bytes as u64 > self.buffers[self.local_frame].size() {
-            let new_size = 1u64 << ((total_bytes - 1).ilog2() + 1);
-            let new_buffer = self.device.allocate_cpu_buffer(
-                new_size,
-                vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::INDEX_BUFFER,
-                "UiRenderer buffer",
-            )?;
-            let drop_buffer = std::mem::replace(&mut self.buffers[self.local_frame], new_buffer);
-            self.device.dispose_of(drop_buffer);
-        }
+        self.buffers[self.local_frame].ensure_capacity(&self.device, total_bytes as _, false)?;
         // write vertices and indices on the same buffer
         let mut vert_offset = 0;
         let mut idx_offset = total_vert_size / size_of::<u32>();

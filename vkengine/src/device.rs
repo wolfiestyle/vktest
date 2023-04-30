@@ -117,12 +117,10 @@ impl VulkanDevice {
         Ok(())
     }
 
-    fn allocate_buffer(
-        &self, size: vk::DeviceSize, buf_usage: vk::BufferUsageFlags, location: MemoryLocation, name: &str,
-    ) -> VulkanResult<MemoryObject<vk::Buffer, MemoryLocation>> {
+    fn allocate_buffer(&self, size: vk::DeviceSize, params: BufferParams, name: &str) -> VulkanResult<VkBuffer> {
         let buffer_ci = vk::BufferCreateInfo::builder()
             .size(size)
-            .usage(buf_usage)
+            .usage(params.usage)
             .sharing_mode(vk::SharingMode::EXCLUSIVE);
 
         let buffer = unsafe {
@@ -145,7 +143,7 @@ impl VulkanDevice {
         let allocation = self.allocator.lock().unwrap().allocate(&AllocationCreateDesc {
             name,
             requirements,
-            location,
+            location: params.location,
             linear: true,
             allocation_scheme,
         })?;
@@ -160,18 +158,26 @@ impl VulkanDevice {
             handle: buffer,
             memory: ManuallyDrop::new(allocation),
             size,
-            props: location,
+            props: params,
         })
     }
 
     #[inline]
-    pub fn allocate_cpu_buffer(&self, size: vk::DeviceSize, buf_usage: vk::BufferUsageFlags, name: &str) -> VulkanResult<VkBuffer> {
-        self.allocate_buffer(size, buf_usage, MemoryLocation::CpuToGpu, name)
+    pub fn allocate_cpu_buffer(&self, size: vk::DeviceSize, usage: vk::BufferUsageFlags, name: &str) -> VulkanResult<VkBuffer> {
+        let params = BufferParams {
+            usage,
+            location: MemoryLocation::CpuToGpu,
+        };
+        self.allocate_buffer(size, params, name)
     }
 
     #[inline]
-    pub fn allocate_gpu_buffer(&self, size: vk::DeviceSize, buf_usage: vk::BufferUsageFlags, name: &str) -> VulkanResult<VkBuffer> {
-        self.allocate_buffer(size, buf_usage, MemoryLocation::GpuOnly, name)
+    pub fn allocate_gpu_buffer(&self, size: vk::DeviceSize, usage: vk::BufferUsageFlags, name: &str) -> VulkanResult<VkBuffer> {
+        let params = BufferParams {
+            usage,
+            location: MemoryLocation::GpuOnly,
+        };
+        self.allocate_buffer(size, params, name)
     }
 
     pub fn copy_buffer(&self, src_buffer: &VkBuffer, dst_buffer: &VkBuffer, dst_offset: u64) -> VulkanResult<()> {
@@ -707,7 +713,7 @@ impl Cleanup<VulkanDevice> for vk::ImageView {
     }
 }
 
-pub type VkBuffer = MemoryObject<vk::Buffer, MemoryLocation>;
+pub type VkBuffer = MemoryObject<vk::Buffer, BufferParams>;
 pub type VkImage = MemoryObject<vk::Image, ImageParams>;
 
 #[derive(Debug)]
@@ -775,6 +781,38 @@ impl<P> MemoryObject<vk::Buffer, P> {
             offset,
             range,
         }
+    }
+}
+
+impl MemoryObject<vk::Buffer, BufferParams> {
+    pub fn resize(&mut self, device: &VulkanDevice, new_size: vk::DeviceSize, preserve_contents: bool) -> VulkanResult<()> {
+        if preserve_contents {
+            self.props.usage |= vk::BufferUsageFlags::TRANSFER_DST;
+        }
+        let new_buffer = device.allocate_buffer(new_size, self.props, "Buffer")?;
+        if preserve_contents {
+            let cmd_buffer = device.begin_one_time_commands()?;
+            let copy_region = vk::BufferCopy {
+                src_offset: 0,
+                dst_offset: 0,
+                size: self.size.min(new_buffer.size),
+            };
+            unsafe {
+                device.cmd_copy_buffer(cmd_buffer, self.handle, *new_buffer, slice::from_ref(&copy_region));
+            }
+            device.end_one_time_commands(cmd_buffer)?;
+        }
+        let old_buffer = std::mem::replace(self, new_buffer);
+        device.dispose_of(old_buffer);
+        Ok(())
+    }
+
+    pub fn ensure_capacity(&mut self, device: &VulkanDevice, size: vk::DeviceSize, preserve_contents: bool) -> VulkanResult<()> {
+        if size > self.size {
+            let new_size = 1u64 << ((size - 1).ilog2() + 1); // nearest power of two rounded up
+            self.resize(device, new_size, preserve_contents)?;
+        }
+        Ok(())
     }
 }
 
@@ -937,6 +975,12 @@ impl<'a> ImageData<'a> {
             }
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BufferParams {
+    pub usage: vk::BufferUsageFlags,
+    pub location: MemoryLocation,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
