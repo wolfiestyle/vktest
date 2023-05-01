@@ -271,42 +271,42 @@ impl MeshRenderData {
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct LightData {
-    pub pos: Vec4, // .w: 0 = directional, 1 = point/spot
+    pub pos: Vec3,
+    pub type_: f32, // 0 = directional, 1 = point/spot
+    pub direction: Vec3,
+    pub spot_scale: f32,
     pub color: Vec3,
     pub spot_offset: f32,
-    pub spot_dir: Vec3,
-    pub spot_scale: f32,
 }
 
 impl LightData {
     pub fn point(pos: Vec3, color: Vec3) -> Self {
         Self {
-            pos: pos.extend(1.0),
+            pos,
+            type_: 1.0,
             color,
-            spot_offset: 1.0,
-            spot_dir: Vec3::ZERO,
-            spot_scale: 0.0,
+            ..Default::default()
         }
     }
 
-    pub fn directional(dir: Vec3, color: Vec3) -> Self {
+    pub fn directional(direction: Vec3, color: Vec3) -> Self {
         Self {
-            pos: dir.extend(0.0),
+            type_: 0.0,
+            direction,
             color,
-            spot_offset: 1.0,
-            spot_dir: Vec3::ZERO,
-            spot_scale: 0.0,
+            ..Default::default()
         }
     }
 
-    pub fn spot(pos: Vec3, dir: Vec3, color: Vec3, inner_angle: f32, outer_angle: f32) -> Self {
+    pub fn spot(pos: Vec3, direction: Vec3, color: Vec3, inner_angle: f32, outer_angle: f32) -> Self {
         let [spot_scale, spot_offset] = Self::calc_spot(inner_angle, outer_angle);
         Self {
-            pos: pos.extend(1.0),
+            pos,
+            type_: 1.0,
+            direction,
+            spot_scale,
             color,
             spot_offset,
-            spot_dir: dir,
-            spot_scale,
         }
     }
 
@@ -317,26 +317,34 @@ impl LightData {
     }
 
     pub fn from_gltf(light: &gltf_import::Light, node: &gltf_import::Node) -> Self {
+        let pos = Vec3::from(node.transform.translation);
+        let direction = node.transform.transform_vector3(Vec3::NEG_Z).normalize_or_zero();
         let color = Vec3::from(light.color) * light.intensity;
         match light.type_ {
-            LightType::Directional => LightData::directional(node.transform.transform_vector3(Vec3::NEG_Z).normalize_or_zero(), color),
-            LightType::Point => LightData::point(node.transform.translation.into(), color),
-            LightType::Spot { inner_angle, outer_angle } => LightData::spot(
-                node.transform.translation.into(),
-                node.transform.transform_vector3(Vec3::NEG_Z).normalize_or_zero(),
+            LightType::Directional => LightData {
+                pos,
+                type_: 0.0,
+                direction,
                 color,
-                inner_angle,
-                outer_angle,
-            ),
+                ..Default::default()
+            },
+            LightType::Point => LightData {
+                pos,
+                type_: 1.0,
+                direction,
+                color,
+                ..Default::default()
+            },
+            LightType::Spot { inner_angle, outer_angle } => LightData::spot(pos, direction, color, inner_angle, outer_angle),
         }
     }
 
     pub fn is_directional(&self) -> bool {
-        self.pos.w == 0.0
+        self.type_ == 0.0
     }
 
     pub fn is_point(&self) -> bool {
-        self.pos.w != 0.0 && self.spot_scale == 0.0
+        self.type_ != 0.0 && self.spot_scale == 0.0
     }
 
     pub fn is_spot(&self) -> bool {
@@ -346,22 +354,25 @@ impl LightData {
     pub fn set_type(&mut self, type_: gltf_import::LightType) {
         match type_ {
             LightType::Directional => {
-                self.pos.w = 0.0;
+                self.type_ = 0.0;
                 self.spot_scale = 0.0;
                 self.spot_offset = 1.0;
+                if self.direction == Vec3::ZERO {
+                    self.direction = Vec3::NEG_Y;
+                }
             }
             LightType::Point => {
-                self.pos.w = 1.0;
+                self.type_ = 1.0;
                 self.spot_scale = 0.0;
                 self.spot_offset = 1.0;
             }
             LightType::Spot { inner_angle, outer_angle } => {
                 let [scale, offset] = Self::calc_spot(inner_angle, outer_angle);
-                self.pos.w = 1.0;
+                self.type_ = 1.0;
                 self.spot_scale = scale;
                 self.spot_offset = offset;
-                if self.spot_dir == Vec3::ZERO {
-                    self.spot_dir = Vec3::NEG_Y;
+                if self.direction == Vec3::ZERO {
+                    self.direction = Vec3::NEG_Y;
                 }
             }
         }
@@ -371,11 +382,12 @@ impl LightData {
 impl Default for LightData {
     fn default() -> Self {
         Self {
-            pos: Vec4::W,
+            pos: Vec3::ZERO,
+            type_: 1.0,
+            direction: Vec3::NEG_Y,
+            spot_scale: 0.0,
             color: Vec3::ONE,
             spot_offset: 1.0,
-            spot_dir: Vec3::ZERO,
-            spot_scale: 0.0,
         }
     }
 }

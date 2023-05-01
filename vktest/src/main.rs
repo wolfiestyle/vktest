@@ -241,15 +241,30 @@ fn main() -> VulkanResult<()> {
                         });
                         egui::ScrollArea::vertical().max_height(500.0).show(ui, |ui| {
                             for (i, light) in vk_app.lights.iter_mut().enumerate() {
+                                let is_dir = light.is_directional();
+                                let is_point = light.is_point();
+                                let is_spot = light.is_spot();
                                 ui.label(format!("Light {i}:"));
-                                ui.horizontal(|ui| {
-                                    ui.label("X");
-                                    ui.add(egui::DragValue::new(&mut light.pos.x).speed(0.1));
-                                    ui.label("Y");
-                                    ui.add(egui::DragValue::new(&mut light.pos.y).speed(0.1));
-                                    ui.label("Z");
-                                    ui.add(egui::DragValue::new(&mut light.pos.z).speed(0.1));
-                                });
+                                if !is_dir {
+                                    ui.horizontal(|ui| {
+                                        ui.label("X");
+                                        ui.add(egui::DragValue::new(&mut light.pos.x).speed(0.1));
+                                        ui.label("Y");
+                                        ui.add(egui::DragValue::new(&mut light.pos.y).speed(0.1));
+                                        ui.label("Z");
+                                        ui.add(egui::DragValue::new(&mut light.pos.z).speed(0.1));
+                                    });
+                                }
+                                if !is_point {
+                                    ui.horizontal(|ui| {
+                                        ui.label("DX");
+                                        ui.add(egui::DragValue::new(&mut light.direction.x).speed(0.1));
+                                        ui.label("DY");
+                                        ui.add(egui::DragValue::new(&mut light.direction.y).speed(0.1));
+                                        ui.label("DZ");
+                                        ui.add(egui::DragValue::new(&mut light.direction.z).speed(0.1));
+                                    });
+                                }
                                 ui.horizontal(|ui| {
                                     ui.label("R");
                                     ui.add(egui::DragValue::new(&mut light.color.x).speed(0.1));
@@ -258,19 +273,6 @@ fn main() -> VulkanResult<()> {
                                     ui.label("B");
                                     ui.add(egui::DragValue::new(&mut light.color.z).speed(0.1));
                                 });
-                                let is_dir = light.is_directional();
-                                let is_point = light.is_point();
-                                let is_spot = light.is_spot();
-                                if is_spot {
-                                    ui.horizontal(|ui| {
-                                        ui.label("SX");
-                                        ui.add(egui::DragValue::new(&mut light.spot_dir.x).speed(0.1));
-                                        ui.label("SY");
-                                        ui.add(egui::DragValue::new(&mut light.spot_dir.y).speed(0.1));
-                                        ui.label("SZ");
-                                        ui.add(egui::DragValue::new(&mut light.spot_dir.z).speed(0.1));
-                                    });
-                                }
                                 ui.horizontal(|ui| {
                                     if ui.radio(is_dir, "Dir").clicked() {
                                         light.set_type(LightType::Directional);

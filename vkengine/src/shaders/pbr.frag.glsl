@@ -4,8 +4,8 @@
 
 struct LightData {
     vec4 pos;   // .w: 0 = directional, 1 = point/spot
+    vec4 dir;   // .w = spot_scale
     vec4 color; // .w = spot_offset
-    vec4 spot;  // .w = spot_scale
 };
 
 layout(set = 0, binding = 0) uniform ObjectUniforms {
@@ -50,7 +50,16 @@ layout(location = 0) in FragIn {
 
 layout(location = 0) out vec4 outColor;
 
-vec3 pbr_light(vec3 N, vec3 albedo, float metallic, float roughness, float ao) {
+void decodeLight(LightData light, out vec3 L, out vec3 radiance) {
+    float type = light.pos.w;
+    vec3 dir = mix(-light.dir.xyz, light.pos.xyz - frag.Pos, type);
+    L = normalize(dir);
+    float spot = clamp(dot(light.dir.xyz, -L) * light.dir.w + light.color.w, 0.0, 1.0);
+    float attenuation = 1.0 / mix(1.0, dot(dir, dir), type);
+    radiance = light.color.rgb * spot * attenuation;
+}
+
+vec3 pbrLight(vec3 N, vec3 albedo, float metallic, float roughness, float ao) {
     vec3 V = normalize(view_pos - frag.Pos);
     vec3 R = reflect(-V, N);
     float NdotV = max(dot(N, V), 0.0);
@@ -60,13 +69,9 @@ vec3 pbr_light(vec3 N, vec3 albedo, float metallic, float roughness, float ao) {
     // direct lighting
     vec3 direct = vec3(0.0);
     for (int i = 0; i < num_lights; ++i) {
-        float type = lights[i].pos.w;
-        vec3 dir = (2.0 * type - 1.0) * lights[i].pos.xyz - frag.Pos * type;
-        vec3 L = normalize(dir);
+        vec3 L, radiance;
+        decodeLight(lights[i], L, radiance);
         vec3 H = normalize(V + L);
-        float spot = clamp(dot(lights[i].spot.xyz, -L) * lights[i].spot.w + lights[i].color.w, 0.0, 1.0);
-        float attenuation = 1.0 / mix(1.0, dot(dir, dir), type);
-        vec3 radiance = lights[i].color.rgb * spot * attenuation;
 
         float NdotH = max(dot(N, H), 0.0);
         float NdotL = max(dot(N, L), 0.0);
@@ -102,7 +107,7 @@ void main() {
     vec3 emissive = texture(texEmissive, frag.uvEmissive).rgb * material.emissive;
     float occlusion = (texture(texOcclusion, frag.uvOcclusion).r - 1.0) * material.base_pbr.r + 1.0;
     vec3 normal = normalize(frag.TBN * normal_map * vec3(material.normal_scale.xx, 1.0));
-    vec3 radiance = pbr_light(normal, albedo.rgb, metalrough.r, metalrough.g, occlusion) + emissive;
+    vec3 radiance = pbrLight(normal, albedo.rgb, metalrough.r, metalrough.g, occlusion) + emissive;
     vec3 color = tonemapReinhard(radiance);
     outColor = vec4(color, albedo.a);
 }
