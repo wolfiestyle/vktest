@@ -19,7 +19,7 @@ vec3 computePrefiltered(vec3 N, ivec2 texSize) {
     //vec3 V = N;
     float roughness = float(level) / float(MipLevels - 1);
     float roughSq = roughness * roughness;
-    float saTexel = 4.0 * PI / (texSize.x * texSize.y * 6);
+    float saTexel = TwoPI / (texSize.x * texSize.y * 3);
 
     vec3 color = vec3(0.0);
     float total_weight = 0.0;

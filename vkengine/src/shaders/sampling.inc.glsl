@@ -13,27 +13,23 @@ vec2 sampleHammersley(uint i, uint NumSamples) {
     return vec2(float(i) / float(NumSamples), radicalInverse_VdC(i));
 }
 
-vec3 sampleHemisphere(vec2 u) {
-    float phi = 2.0 * PI * u.y;
-    float u1p = sqrt(max(1.0 - u.x * u.x, 0.0));
-    return vec3(cos(phi) * u1p, sin(phi) * u1p, u.x);
+vec3 sampleHemisphere(vec2 Xi) {
+    float phi = TwoPI * Xi.y;
+    float sinTheta = sqrt(max(1.0 - Xi.x * Xi.x, 0.0));
+    return vec3(cos(phi) * sinTheta, sin(phi) * sinTheta, Xi.x);
 }
 
 vec3 importanceSampleGGX(vec2 Xi, float roughSq) {
-    float phi = 2.0 * PI * Xi.x;
-    float cosThetaSq = (1.0 - Xi.y) / ((roughSq * roughSq - 1.0) * Xi.y + 1.0);
+    float phi = TwoPI * Xi.x;
+    float cosThetaSq = max((1.0 - Xi.y) / ((roughSq * roughSq - 1.0) * Xi.y + 1.0), 0.0);
     float cosTheta = sqrt(cosThetaSq);
     float sinTheta = sqrt(1.0 - cosThetaSq);
     return vec3(cos(phi) * sinTheta, sin(phi) * sinTheta, cosTheta);
 }
 
 mat3 computeTangentBasis(vec3 N) {
-    vec3 B = vec3(0.0, 1.0, 0.0);
-    float NdotUp = dot(N, vec3(0.0, 1.0, 0.0));
-    if (1.0 - abs(NdotUp) <= Epsilon) {
-        B = NdotUp > 0.0 ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 0.0, -1.0);
-    }
-    vec3 T = normalize(cross(B, N));
-    B = cross(N, T);
+    vec3 up = abs(N.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+    vec3 T = normalize(cross(up, N));
+    vec3 B = cross(N, T);
     return mat3(T, B, N);
 }

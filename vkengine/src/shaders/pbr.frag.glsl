@@ -62,7 +62,7 @@ void decodeLight(LightData light, out vec3 L, out vec3 radiance) {
 vec3 pbrLight(vec3 N, vec3 albedo, float metallic, float roughness, float ao) {
     vec3 V = normalize(view_pos - frag.Pos);
     vec3 R = reflect(-V, N);
-    float NdotV = max(dot(N, V), 0.0);
+    float NdotV = max(dot(N, V), Epsilon);
     vec3 F0 = mix(Fdielectric, albedo, metallic);
     float roughSq = roughness * roughness;
 
@@ -73,15 +73,15 @@ vec3 pbrLight(vec3 N, vec3 albedo, float metallic, float roughness, float ao) {
         decodeLight(lights[i], L, radiance);
         vec3 H = normalize(V + L);
 
-        float NdotH = max(dot(N, H), 0.0);
-        float NdotL = max(dot(N, L), 0.0);
+        float NdotH = max(dot(N, H), Epsilon);
+        float NdotL = max(dot(N, L), Epsilon);
         float NDF = distributionGGX(NdotH, roughSq);
-        float G = geometrySmith(NdotL, NdotV, roughness);
+        float G = geometrySmith(NdotL, NdotV, roughSq);
         vec3 F = fresnelSchlick(max(dot(H, V), 0.0), F0);
-        vec3 specular = (NDF * G * F) / max(4.0 * NdotV * NdotL, Epsilon);
+        vec3 specular = (NDF * G * F) / (4.0 * NdotV * NdotL);
 
         vec3 kD = mix(vec3(1.0) - F, vec3(0.0), metallic);
-        vec3 diffuse = kD * albedo / PI;
+        vec3 diffuse = kD * albedo * InvPI;
         direct += (diffuse + specular) * radiance * NdotL;
     }
 
@@ -97,7 +97,7 @@ vec3 pbrLight(vec3 N, vec3 albedo, float metallic, float roughness, float ao) {
     vec3 iblSpec = radiance * (kS * envBRDF.x + envBRDF.y);
     vec3 ambient = iblDiffuse * ao + iblSpec;
 
-    return ambient + direct;
+    return direct + ambient;
 }
 
 void main() {

@@ -20,18 +20,18 @@ vec2 integrateBRDF(float NdotV, float roughness) {
         float NdotH = max(H.z, 0.0);
         float VdotH = max(dot(V, H), 0.0);
         if (NdotL > 0.0) {
-            float G = smithGGXCorrelated(NdotL, NdotV, roughSq);
-            float G_vis = G * VdotH * NdotL / NdotH;
+            float G = geometrySmith(NdotL, NdotV, roughSq);
+            float G_vis = G * VdotH / (NdotH * NdotV);
             float Fc = pow(1.0 - VdotH, 5.0);
             res.x += (1.0 - Fc) * G_vis;
             res.y += Fc * G_vis;
         }
     }
-    return 4.0 * res / float(NumSamples);
+    return res / float(NumSamples);
 }
 
 void main() {
     vec2 coord = gl_GlobalInvocationID.xy / vec2(imageSize(outputTex) - 1);
-    vec2 value = integrateBRDF(max(coord.x, 0.0001), coord.y);
+    vec2 value = integrateBRDF(max(coord.x, 1.0 / 1024.0), coord.y);
     imageStore(outputTex, ivec2(gl_GlobalInvocationID.xy), vec4(value, 0.0, 0.0));
 }
