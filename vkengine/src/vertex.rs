@@ -1,11 +1,12 @@
 use ash::vk;
 use memoffset::{offset_of, offset_of_tuple};
 
-#[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub struct Norm<T>(pub T);
-
 pub trait TypeFormat: Copy {
+    const VK_FORMAT: vk::Format;
+    const VK_WIDTH: u32;
+}
+
+pub trait TypeFormatNorm: Copy {
     const VK_FORMAT: vk::Format;
     const VK_WIDTH: u32;
 }
@@ -13,6 +14,12 @@ pub trait TypeFormat: Copy {
 macro_rules! impl_format {
     ($type:ty, $width:expr, $val:expr) => {
         impl TypeFormat for $type {
+            const VK_FORMAT: vk::Format = $val;
+            const VK_WIDTH: u32 = $width;
+        }
+    };
+    (norm $type:ty, $width:expr, $val:expr) => {
+        impl TypeFormatNorm for $type {
             const VK_FORMAT: vk::Format = $val;
             const VK_WIDTH: u32 = $width;
         }
@@ -61,34 +68,34 @@ impl_format!([i32; 2], 1, vk::Format::R32G32_SINT);
 impl_format!([i32; 3], 1, vk::Format::R32G32B32_SINT);
 impl_format!([i32; 4], 1, vk::Format::R32G32B32A32_SINT);
 
-impl_format!(Norm<u8>, 1, vk::Format::R8_UNORM);
-impl_format!(Norm<[u8; 1]>, 1, vk::Format::R8_UNORM);
-impl_format!(Norm<[u8; 2]>, 1, vk::Format::R8G8_UNORM);
-impl_format!(Norm<[u8; 3]>, 1, vk::Format::R8G8B8_UNORM);
-impl_format!(Norm<[u8; 4]>, 1, vk::Format::R8G8B8A8_UNORM);
+impl_format!(norm u8, 1, vk::Format::R8_UNORM);
+impl_format!(norm [u8; 1], 1, vk::Format::R8_UNORM);
+impl_format!(norm [u8; 2], 1, vk::Format::R8G8_UNORM);
+impl_format!(norm [u8; 3], 1, vk::Format::R8G8B8_UNORM);
+impl_format!(norm [u8; 4], 1, vk::Format::R8G8B8A8_UNORM);
 
-impl_format!(Norm<u16>, 1, vk::Format::R16_UNORM);
-impl_format!(Norm<[u16; 1]>, 1, vk::Format::R16_UNORM);
-impl_format!(Norm<[u16; 2]>, 1, vk::Format::R16G16_UNORM);
-impl_format!(Norm<[u16; 3]>, 1, vk::Format::R16G16B16_UNORM);
-impl_format!(Norm<[u16; 4]>, 1, vk::Format::R16G16B16A16_UNORM);
+impl_format!(norm u16, 1, vk::Format::R16_UNORM);
+impl_format!(norm [u16; 1], 1, vk::Format::R16_UNORM);
+impl_format!(norm [u16; 2], 1, vk::Format::R16G16_UNORM);
+impl_format!(norm [u16; 3], 1, vk::Format::R16G16B16_UNORM);
+impl_format!(norm [u16; 4], 1, vk::Format::R16G16B16A16_UNORM);
 
-impl_format!(Norm<i8>, 1, vk::Format::R8_SNORM);
-impl_format!(Norm<[i8; 1]>, 1, vk::Format::R8_SNORM);
-impl_format!(Norm<[i8; 2]>, 1, vk::Format::R8G8_SNORM);
-impl_format!(Norm<[i8; 3]>, 1, vk::Format::R8G8B8_SNORM);
-impl_format!(Norm<[i8; 4]>, 1, vk::Format::R8G8B8A8_SNORM);
+impl_format!(norm i8, 1, vk::Format::R8_SNORM);
+impl_format!(norm [i8; 1], 1, vk::Format::R8_SNORM);
+impl_format!(norm [i8; 2], 1, vk::Format::R8G8_SNORM);
+impl_format!(norm [i8; 3], 1, vk::Format::R8G8B8_SNORM);
+impl_format!(norm [i8; 4], 1, vk::Format::R8G8B8A8_SNORM);
 
-impl_format!(Norm<i16>, 1, vk::Format::R16_SNORM);
-impl_format!(Norm<[i16; 1]>, 1, vk::Format::R16_SNORM);
-impl_format!(Norm<[i16; 2]>, 1, vk::Format::R16G16_SNORM);
-impl_format!(Norm<[i16; 3]>, 1, vk::Format::R16G16B16_SNORM);
-impl_format!(Norm<[i16; 4]>, 1, vk::Format::R16G16B16A16_SNORM);
+impl_format!(norm i16, 1, vk::Format::R16_SNORM);
+impl_format!(norm [i16; 1], 1, vk::Format::R16_SNORM);
+impl_format!(norm [i16; 2], 1, vk::Format::R16G16_SNORM);
+impl_format!(norm [i16; 3], 1, vk::Format::R16G16B16_SNORM);
+impl_format!(norm [i16; 4], 1, vk::Format::R16G16B16A16_SNORM);
 
 #[cfg(feature = "egui")]
 impl_format!(egui::Pos2, 1, vk::Format::R32G32_SFLOAT);
 #[cfg(feature = "egui")]
-impl_format!(egui::Color32, 1, vk::Format::R8G8B8A8_UNORM);
+impl_format!(norm egui::Color32, 1, vk::Format::R8G8B8A8_UNORM);
 
 pub trait IndexInput: Copy {
     const VK_INDEX_TYPE: vk::IndexType;
@@ -133,7 +140,7 @@ macro_rules! impl_vertex {
         }
     };
 
-    (struct $name:ty : $($field:ident),+) => {
+    (struct $name:ty : $($field:ident $($option:ident)?),+) => {
         impl VertexInput for $name {
             impl_vertex!(@binding_desc);
 
@@ -141,7 +148,7 @@ macro_rules! impl_vertex {
             fn attr_desc(binding: u32) -> Vec<vk::VertexInputAttributeDescription> {
                 let mut i = 0;
                 vec![$({
-                    let (format, width) = Self::lens_format(|v| &v.$field);
+                    let (format, width) = impl_vertex!(@get_format $field $($option)?);
                     let location = i;
                     i += width;
                     vk::VertexInputAttributeDescription {
@@ -153,6 +160,14 @@ macro_rules! impl_vertex {
                 }),+]
             }
         }
+    };
+
+    (@get_format $field:ident) => {
+        Self::lens_format(|v| &v.$field)
+    };
+
+    (@get_format $field:ident norm) => {
+        Self::lens_format_norm(|v| &v.$field)
     };
 
     (@binding_desc) => {
@@ -174,13 +189,18 @@ impl_vertex!(tuple: A 0, B 1, C 2, D 3, E 4);
 impl_vertex!(tuple: A 0, B 1, C 2, D 3, E 4, F 5);
 
 #[cfg(feature = "egui")]
-impl_vertex!(struct egui::epaint::Vertex: pos, uv, color);
+impl_vertex!(struct egui::epaint::Vertex: pos, uv, color norm);
 
 impl_vertex!(struct gltf_import::Vertex: position, normal, tangent, texcoord0, texcoord1, color);
 
 trait LensFormat {
     #[inline(always)]
     fn lens_format<T: TypeFormat, F: for<'a> FnOnce(&'a Self) -> &'a T>(_: F) -> (vk::Format, u32) {
+        (T::VK_FORMAT, T::VK_WIDTH)
+    }
+
+    #[inline(always)]
+    fn lens_format_norm<T: TypeFormatNorm, F: for<'a> FnOnce(&'a Self) -> &'a T>(_: F) -> (vk::Format, u32) {
         (T::VK_FORMAT, T::VK_WIDTH)
     }
 }
