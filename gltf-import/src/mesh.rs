@@ -19,11 +19,11 @@ pub struct VertexAttribs {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Vertex {
     pub position: [f32; 3],
-    pub normal: [f32; 3],
-    pub tangent: [f32; 4],
+    pub normal: [i16; 4],
+    pub tangent: [i16; 4],
     pub texcoord0: [f32; 2],
     pub texcoord1: [f32; 2],
-    pub color: [f32; 4],
+    pub color: [u8; 4],
 }
 
 impl Vertex {
@@ -35,11 +35,11 @@ impl Default for Vertex {
     fn default() -> Self {
         Vertex {
             position: [0.0; 3],
-            normal: [0.0; 3],
-            tangent: [0.0; 4],
+            normal: [0; 4],
+            tangent: [0; 4],
             texcoord0: [0.0; 2],
             texcoord1: [0.0; 2],
-            color: [1.0; 4],
+            color: [u8::MAX; 4],
         }
     }
 }
@@ -176,12 +176,12 @@ impl MeshData {
         }
         if let Some(iter) = reader.read_normals() {
             for (normal, i) in iter.zip(self.vert_offset..) {
-                self.vertices[i].normal = normal;
+                self.vertices[i].normal = arr_extend(normal.map(f32_to_i16norm), 0);
             }
         }
         if let Some(iter) = reader.read_tangents() {
             for (tangent, i) in iter.zip(self.vert_offset..) {
-                self.vertices[i].tangent = tangent;
+                self.vertices[i].tangent = tangent.map(f32_to_i16norm);
             }
         }
         for set in 0..attribs.texcoord.max(Vertex::NUM_UVS) {
@@ -197,7 +197,7 @@ impl MeshData {
         }
         for set in 0..attribs.color.max(Vertex::NUM_COLORS) {
             if let Some(iter) = reader.read_colors(set) {
-                for (color, i) in iter.into_rgba_f32().zip(self.vert_offset..) {
+                for (color, i) in iter.into_rgba_u8().zip(self.vert_offset..) {
                     if set == 0 {
                         self.vertices[i].color = color;
                     }
@@ -237,7 +237,8 @@ impl Geometry for GeomWrapper<'_> {
     }
 
     fn normal(&self, face: usize, vert: usize) -> [f32; 3] {
-        self.vertices[self.indices[face * 3 + vert] as usize].normal
+        let normal = self.vertices[self.indices[face * 3 + vert] as usize].normal;
+        arr_truncate(normal).map(i16norm_to_f32)
     }
 
     fn tex_coord(&self, face: usize, vert: usize) -> [f32; 2] {
@@ -245,7 +246,7 @@ impl Geometry for GeomWrapper<'_> {
     }
 
     fn set_tangent_encoded(&mut self, tangent: [f32; 4], face: usize, vert: usize) {
-        self.vertices[self.indices[face * 3 + vert] as usize].tangent = tangent;
+        self.vertices[self.indices[face * 3 + vert] as usize].tangent = tangent.map(f32_to_i16norm);
     }
 }
 
@@ -265,7 +266,26 @@ impl GeomWrapper<'_> {
             normals[ic] += normal;
         }
         for (i, normal) in normals.iter().enumerate() {
-            self.vertices[i + self.vert_offset].normal = normal.normalize_or_zero().to_array();
+            let normalized = normal.normalize_or_zero().to_array();
+            self.vertices[i + self.vert_offset].normal = arr_extend(normalized.map(f32_to_i16norm), 0);
         }
     }
+}
+
+const I16_MAX_F: f32 = i16::MAX as f32;
+
+fn f32_to_i16norm(n: f32) -> i16 {
+    (n * I16_MAX_F) as i16
+}
+
+fn i16norm_to_f32(n: i16) -> f32 {
+    n as f32 / I16_MAX_F
+}
+
+fn arr_extend<T>([x, y, z]: [T; 3], w: T) -> [T; 4] {
+    [x, y, z, w]
+}
+
+fn arr_truncate<T>([x, y, z, _]: [T; 4]) -> [T; 3] {
+    [x, y, z]
 }
