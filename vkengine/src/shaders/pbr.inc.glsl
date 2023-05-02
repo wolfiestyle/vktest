@@ -27,3 +27,10 @@ vec3 fresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness) {
     vec3 Fr = max(vec3(1.0 - roughness), F0) - F0;
     return F0 + Fr * pow(1.0 - cosTheta, 5.0);
 }
+
+vec3 multiScatterIBL(vec2 Fab, vec3 FssEss, vec3 F0) {
+    float Ess = Fab.x + Fab.y;
+    float Ems = 1.0 - Ess;
+    vec3 Favg = F0 + (1.0 - F0) / 21.0;
+    return FssEss * Favg * Ems / (1.0 - Ems * Favg);
+}

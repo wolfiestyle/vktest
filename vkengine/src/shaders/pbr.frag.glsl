@@ -86,15 +86,18 @@ vec3 pbrLight(vec3 N, vec3 albedo, float metallic, float roughness, float ao) {
     }
 
     // IBL
-    vec3 kS = fresnelSchlickRoughness(NdotV, F0, roughness);
-    vec3 kD = mix(1.0 - kS, vec3(0.0), metallic);
-    vec3 irradiance = texture(irradianceMap, N).rgb;
-    vec3 iblDiffuse = kD * irradiance * albedo;
-
     int maxLod = textureQueryLevels(prefilterMap) - 1;
     vec3 radiance = textureLod(prefilterMap, R, roughness * maxLod).rgb;
+    vec3 irradiance = texture(irradianceMap, N).rgb;
     vec2 envBRDF = texture(BRDF_lut, vec2(NdotV, roughness)).rg;
-    vec3 iblSpec = radiance * (kS * envBRDF.x + envBRDF.y);
+
+    vec3 kS = fresnelSchlickRoughness(NdotV, F0, roughness);
+    vec3 FssEss = kS * envBRDF.x + envBRDF.y;
+    vec3 FmsEms = multiScatterIBL(envBRDF, FssEss, F0);
+
+    vec3 Edss = mix(1.0 - FssEss - FmsEms, vec3(0.0), metallic);
+    vec3 iblDiffuse = irradiance * (albedo * Edss + FmsEms);
+    vec3 iblSpec = radiance * FssEss;
     vec3 ambient = iblDiffuse * ao + iblSpec;
 
     return direct + ambient;
