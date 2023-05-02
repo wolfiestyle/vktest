@@ -31,8 +31,7 @@ layout(set = 1, binding = 4) uniform sampler2D texOcclusion;
 
 layout(push_constant) uniform PushConstants {
     vec4 base_color;
-    vec3 base_pbr;
-    float normal_scale;
+    vec4 base_pbr; // .w = normal_scale
     vec3 emissive;
     uint uv_sets;
 } material;
@@ -40,7 +39,8 @@ layout(push_constant) uniform PushConstants {
 layout(location = 0) in FragIn {
     vec3 Pos;
     vec4 Color;
-    mat3 TBN;
+    vec3 Normal;
+    vec4 Tangent;
     vec2 uvColor;
     vec2 uvMetalRough;
     vec2 uvNormal;
@@ -106,10 +106,14 @@ vec3 pbrLight(vec3 N, vec3 albedo, float metallic, float roughness, float ao) {
 void main() {
     vec4 albedo = texture(texColor, frag.uvColor) * material.base_color * frag.Color;
     vec2 metalrough = texture(texMetalRough, frag.uvMetalRough).bg * material.base_pbr.bg;
-    vec3 normal_map = texture(texNormal, frag.uvNormal).rgb * 2.0 - 1.0;
+    vec3 normal_map = normalize(texture(texNormal, frag.uvNormal).rgb * 2.0 - 1.0);
     vec3 emissive = texture(texEmissive, frag.uvEmissive).rgb * material.emissive;
     float occlusion = (texture(texOcclusion, frag.uvOcclusion).r - 1.0) * material.base_pbr.r + 1.0;
-    vec3 normal = normalize(frag.TBN * normal_map * vec3(material.normal_scale.xx, 1.0));
+    vec3 N = normalize(frag.Normal);
+    vec3 T = normalize(frag.Tangent.xyz);
+    T = normalize(T - dot(T, N) * N); // Gram-Schmidt process
+    vec3 B = cross(N, T) * frag.Tangent.w;
+    vec3 normal = normalize(mat3(T, B, N) * normal_map * vec3(material.base_pbr.ww, 1.0));
     vec3 radiance = pbrLight(normal, albedo.rgb, metalrough.r, metalrough.g, occlusion) + emissive;
     vec3 color = tonemapReinhard(radiance);
     outColor = vec4(color, albedo.a);

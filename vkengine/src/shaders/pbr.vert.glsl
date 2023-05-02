@@ -11,8 +11,7 @@ layout(binding = 0) uniform ObjectUniforms {
 
 layout(push_constant) uniform PushConstants {
     vec4 base_color;
-    vec3 base_pbr;
-    float normal_scale;
+    vec4 base_pbr;
     vec3 emissive;
     uint uv_sets;
 } material;
@@ -26,7 +25,8 @@ layout(location = 5) in vec4 inColor;
 layout(location = 0) out FragOut {
     vec3 Pos;
     vec4 Color;
-    mat3 TBN;
+    vec3 Normal;
+    vec4 Tangent;
     vec2 uvColor;
     vec2 uvMetalRough;
     vec2 uvNormal;
@@ -38,11 +38,8 @@ void main() {
     gl_Position = mvp * vec4(inPosition, 1.0);
     frag.Pos = (model * vec4(inPosition, 1.0)).xyz;
     frag.Color = inColor;
-    vec3 bitangent = cross(inNormal, inTangent.xyz) * inTangent.w;
-    vec3 t = normalize((model * vec4(inTangent.xyz, 0.0)).xyz);
-    vec3 b = normalize((model * vec4(bitangent, 0.0)).xyz);
-    vec3 n = normalize((model * vec4(inNormal, 0.0)).xyz);
-    frag.TBN = mat3(t, b, n);
+    frag.Normal = normalize((model * vec4(inNormal, 0.0)).xyz);
+    frag.Tangent = vec4(normalize((model * vec4(inTangent.xyz, 0.0)).xyz), inTangent.w);
     uint color_uvset = bitfieldExtract(material.uv_sets, 0, UVbits);
     uint metrgh_uvset = bitfieldExtract(material.uv_sets, UVbits, UVbits);
     uint normal_uvset = bitfieldExtract(material.uv_sets, UVbits * 2, UVbits);
