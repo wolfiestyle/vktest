@@ -1,7 +1,7 @@
 use crate::import::BufferData;
 use crate::material::MaterialId;
 use bevy_mikktspace::{generate_tangents, Geometry};
-use glam::Vec3A;
+use glam::{Vec3, Vec3A};
 use gltf::mesh::Mode;
 use gltf::Semantic;
 use std::ops::Range;
@@ -197,9 +197,9 @@ impl MeshData {
         }
         for set in 0..attribs.color.max(Vertex::NUM_COLORS) {
             if let Some(iter) = reader.read_colors(set) {
-                for (color, i) in iter.into_rgba_u8().zip(self.vert_offset..) {
+                for (color, i) in iter.into_rgba_f32().zip(self.vert_offset..) {
                     if set == 0 {
-                        self.vertices[i].color = color;
+                        self.vertices[i].color = linear_to_srgb_approx(color);
                     }
                 }
             }
@@ -273,6 +273,7 @@ impl GeomWrapper<'_> {
 }
 
 const I16_MAX_F: f32 = i16::MAX as f32;
+const U8_MAX_F: f32 = u8::MAX as f32;
 
 fn f32_to_i16norm(n: f32) -> i16 {
     (n * I16_MAX_F) as i16
@@ -288,4 +289,10 @@ fn arr_extend<T>([x, y, z]: [T; 3], w: T) -> [T; 4] {
 
 fn arr_truncate<T>([x, y, z, _]: [T; 4]) -> [T; 3] {
     [x, y, z]
+}
+
+fn linear_to_srgb_approx([x, y, z, a]: [f32; 4]) -> [u8; 4] {
+    let color = Vec3 { x, y, z };
+    let srgb = color.powf(1.0 / 2.2).extend(a) * U8_MAX_F;
+    srgb.to_array().map(|n| n as u8)
 }

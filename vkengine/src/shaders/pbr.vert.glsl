@@ -37,7 +37,7 @@ layout(location = 0) out FragOut {
 void main() {
     gl_Position = mvp * vec4(inPosition, 1.0);
     frag.Pos = (model * vec4(inPosition, 1.0)).xyz;
-    frag.Color = inColor;
+    frag.Color = vec4(pow(inColor.rgb, vec3(2.2)), inColor.a);
     frag.Normal = normalize((model * vec4(inNormal, 0.0)).xyz);
     frag.Tangent = vec4(normalize((model * vec4(inTangent.xyz, 0.0)).xyz), inTangent.w);
     uint color_uvset = bitfieldExtract(material.uv_sets, 0, UVbits);
