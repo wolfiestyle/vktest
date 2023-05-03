@@ -319,23 +319,25 @@ impl LightData {
     pub fn from_gltf(light: &gltf_import::Light, node: &gltf_import::Node) -> Self {
         let pos = Vec3::from(node.transform.translation);
         let direction = node.transform.transform_vector3(Vec3::NEG_Z).normalize_or_zero();
-        let color = Vec3::from(light.color) * light.intensity;
+        let color = Vec3::from(light.color);
         match light.type_ {
             LightType::Directional => LightData {
                 pos,
                 type_: 0.0,
                 direction,
-                color,
+                color: color * (light.intensity / 683.0), //FIXME: need physical units (blender sets a light with intensity 1 to this value)
                 ..Default::default()
             },
             LightType::Point => LightData {
                 pos,
                 type_: 1.0,
                 direction,
-                color,
+                color: color * light.intensity,
                 ..Default::default()
             },
-            LightType::Spot { inner_angle, outer_angle } => LightData::spot(pos, direction, color, inner_angle, outer_angle),
+            LightType::Spot { inner_angle, outer_angle } => {
+                LightData::spot(pos, direction, color * light.intensity, inner_angle, outer_angle)
+            }
         }
     }
 
