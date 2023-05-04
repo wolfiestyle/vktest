@@ -80,78 +80,89 @@ pub struct MeshData {
 
 impl MeshData {
     pub(crate) fn import_meshes(document: &gltf::Document, buffers: &[BufferData]) -> Vec<Self> {
-        document
-            .meshes()
-            .map(|mesh| {
-                let mut data = MeshData {
-                    name: mesh.name().map(str::to_string),
-                    ..Default::default()
-                };
-                for prim in mesh.primitives() {
-                    data.read_primitive(buffers, &prim);
-                }
-                data
-            })
-            .collect()
+        std::thread::scope(|scope| {
+            let threads: Vec<_> = document
+                .meshes()
+                .map(|mesh| {
+                    mesh.primitives()
+                        .map(|prim| scope.spawn(|| PrimData::read_primitive(buffers, prim)))
+                        .collect::<Vec<_>>()
+                })
+                .collect();
+
+            threads
+                .into_iter()
+                .zip(document.meshes())
+                .map(|(prim_jhs, mesh)| {
+                    let prims = prim_jhs.into_iter().map(|jh| jh.join().unwrap());
+                    let mut data = MeshData {
+                        name: mesh.name().map(str::to_string),
+                        ..Default::default()
+                    };
+                    for primdata in prims {
+                        data.append_primitives(primdata);
+                    }
+                    data
+                })
+                .collect()
+        })
     }
 
-    fn begin_primitives(&mut self, vert_count: usize, index_count: Option<usize>, mode: Mode, material: Option<MaterialId>) {
+    fn append_primitives(&mut self, prims: PrimData) {
+        let vertex_count = prims.positions.len() as u32;
+        let index_count = prims.indices.len() as u32;
         let vert_offset = self.vertices.len();
-        self.vertices.resize_with(vert_offset + vert_count, Default::default);
-        self.vert_offset = vert_offset;
         let idx_offset = self.indices.len();
-        if let Some(idx_count) = index_count {
-            self.indices.resize_with(idx_offset + idx_count, Default::default);
-            self.submeshes.push(Submesh {
-                index_offset: idx_offset as u32,
-                index_count: idx_count as u32,
-                vertex_offset: vert_offset as u32,
-                vertex_count: vert_count as u32,
-                mode,
-                material,
+
+        let verts = prims
+            .positions
+            .into_iter()
+            .zip(prims.normals)
+            .zip(prims.tangents)
+            .zip(prims.texcoords0)
+            .zip(prims.texcoords1)
+            .zip(prims.colors)
+            .map(|(((((position, normal), tangent), texcoord0), texcoord1), color)| Vertex {
+                position,
+                normal: arr_extend(normal.map(f32_to_i16norm), 0),
+                tangent: tangent.map(f32_to_i16norm),
+                texcoord0,
+                texcoord1,
+                color,
             });
-        } else {
-            self.indices.extend(0..vert_count as u32);
-            self.submeshes.push(Submesh {
-                index_offset: idx_offset as u32,
-                index_count: vert_count as u32,
-                vertex_offset: vert_offset as u32,
-                vertex_count: vert_count as u32,
-                mode,
-                material,
-            });
-        }
+        self.vertices.extend(verts);
+        self.indices.extend(prims.indices);
+        self.vert_offset = vert_offset;
         self.idx_offset = idx_offset;
-    }
 
-    fn end_primitives(&mut self, attribs: VertexAttribs) {
-        if let Some(subm) = self.submeshes.last() {
-            if subm.mode != Mode::Triangles {
-                eprintln!("normal/tangent generation is only supported for triangles (got {:?})", subm.mode);
-                return;
-            }
-            let mut wrapper = GeomWrapper {
-                vertices: &mut self.vertices,
-                indices: &self.indices[subm.index_range()],
-                vert_offset: subm.vertex_offset as usize,
-                vert_count: subm.vertex_count as usize,
-            };
-            if !attribs.normal {
-                eprintln!("Generating normals for {} faces", wrapper.num_faces());
-                wrapper.generate_normals();
-            }
-            if !attribs.tangent {
-                if attribs.texcoord == 0 {
-                    eprintln!("Mesh has missing texcoords, can't generate tangents");
-                    return;
-                }
-                eprintln!("Generating tangents for {} faces", wrapper.num_faces());
-                generate_tangents(&mut wrapper);
-            }
-        }
+        self.submeshes.push(Submesh {
+            index_offset: idx_offset as u32,
+            index_count,
+            vertex_offset: vert_offset as u32,
+            vertex_count,
+            mode: prims.mode,
+            material: prims.material,
+        });
     }
+}
 
-    fn read_primitive(&mut self, buffers: &[BufferData], prim: &gltf::mesh::Primitive) {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MeshId(pub usize);
+
+struct PrimData {
+    mode: Mode,
+    material: Option<MaterialId>,
+    positions: Vec<[f32; 3]>,
+    normals: Vec<[f32; 3]>,
+    tangents: Vec<[f32; 4]>,
+    texcoords0: Vec<[f32; 2]>,
+    texcoords1: Vec<[f32; 2]>,
+    colors: Vec<[u8; 4]>,
+    indices: Vec<u32>,
+}
+
+impl PrimData {
+    fn read_primitive(buffers: &[BufferData], prim: gltf::mesh::Primitive) -> Self {
         let mut attribs = VertexAttribs::default();
         let mut vert_count = 0;
         for (semantic, accessor) in prim.attributes() {
@@ -165,65 +176,84 @@ impl MeshData {
             }
             vert_count = vert_count.max(accessor.count());
         }
-        let idx_count = prim.indices().map(|acc| acc.count());
-        self.begin_primitives(vert_count, idx_count, prim.mode(), prim.material().index().map(MaterialId));
+        let mode = prim.mode();
+        let material = prim.material().index().map(MaterialId);
 
         let reader = prim.reader(|buffer| buffers.get(buffer.index()).map(|buf| buf.data.as_slice()));
-        if let Some(iter) = reader.read_positions() {
-            for (pos, i) in iter.zip(self.vert_offset..) {
-                self.vertices[i].position = pos;
+
+        let indices: Vec<_> = if let Some(iter) = reader.read_indices() {
+            iter.into_u32().collect()
+        } else {
+            (0..vert_count as u32).collect()
+        };
+        let positions = if let Some(iter) = reader.read_positions() {
+            iter.collect()
+        } else {
+            vec![[0.0; 3]; vert_count]
+        };
+        let normals = if let Some(iter) = reader.read_normals() {
+            iter.collect()
+        } else if mode == Mode::Triangles {
+            eprintln!("Generating normals for {vert_count} vertices");
+            generate_normals(&positions, &indices)
+        } else {
+            eprintln!("Can't generate normals for {mode:?}");
+            vec![[0.0; 3]; vert_count]
+        };
+        let texcoords0 = if let Some(iter) = reader.read_tex_coords(0) {
+            iter.into_f32().collect()
+        } else {
+            vec![[0.0; 2]; vert_count]
+        };
+        let texcoords1 = if let Some(iter) = reader.read_tex_coords(1) {
+            iter.into_f32().collect()
+        } else {
+            vec![[0.0; 2]; vert_count]
+        };
+        let tangents = if let Some(iter) = reader.read_tangents() {
+            iter.collect()
+        } else {
+            vec![[0.0; 4]; vert_count]
+        };
+        let colors = if let Some(iter) = reader.read_colors(0) {
+            iter.into_rgba_f32().map(linear_to_srgb_approx).collect()
+        } else {
+            vec![[u8::MAX; 4]; vert_count]
+        };
+
+        let mut primdata = Self {
+            mode,
+            material,
+            positions,
+            normals,
+            tangents,
+            texcoords0,
+            texcoords1,
+            colors,
+            indices,
+        };
+
+        if mode == Mode::Triangles && !attribs.tangent {
+            if attribs.texcoord > 0 {
+                eprintln!("Generating MikkTSpace tangents for {vert_count} vertices");
+                generate_tangents(&mut primdata);
+            } else {
+                eprintln!("Generating improvised tangents for {vert_count} vertices");
+                primdata.generate_tangents_fallback();
             }
         }
-        if let Some(iter) = reader.read_normals() {
-            for (normal, i) in iter.zip(self.vert_offset..) {
-                self.vertices[i].normal = arr_extend(normal.map(f32_to_i16norm), 0);
-            }
+        primdata
+    }
+
+    fn generate_tangents_fallback(&mut self) {
+        for (i, normal) in self.normals.iter().copied().map(Vec3::from_array).enumerate() {
+            let up = if normal.z.abs() < 0.999 { Vec3::Z } else { Vec3::X };
+            self.tangents[i] = up.cross(normal).normalize_or_zero().extend(1.0).to_array();
         }
-        if let Some(iter) = reader.read_tangents() {
-            for (tangent, i) in iter.zip(self.vert_offset..) {
-                self.vertices[i].tangent = tangent.map(f32_to_i16norm);
-            }
-        }
-        for set in 0..attribs.texcoord.max(Vertex::NUM_UVS) {
-            if let Some(iter) = reader.read_tex_coords(set) {
-                for (texc, i) in iter.into_f32().zip(self.vert_offset..) {
-                    match set {
-                        0 => self.vertices[i].texcoord0 = texc,
-                        1 => self.vertices[i].texcoord1 = texc,
-                        _ => (),
-                    }
-                }
-            }
-        }
-        for set in 0..attribs.color.max(Vertex::NUM_COLORS) {
-            if let Some(iter) = reader.read_colors(set) {
-                for (color, i) in iter.into_rgba_f32().zip(self.vert_offset..) {
-                    if set == 0 {
-                        self.vertices[i].color = linear_to_srgb_approx(color);
-                    }
-                }
-            }
-        }
-        if let Some(iter) = reader.read_indices() {
-            for (index, i) in iter.into_u32().zip(self.idx_offset..) {
-                self.indices[i] = index;
-            }
-        }
-        self.end_primitives(attribs);
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct MeshId(pub usize);
-
-struct GeomWrapper<'a> {
-    vertices: &'a mut [Vertex],
-    indices: &'a [u32],
-    vert_offset: usize,
-    vert_count: usize,
-}
-
-impl Geometry for GeomWrapper<'_> {
+impl Geometry for PrimData {
     fn num_faces(&self) -> usize {
         self.indices.len() / 3
     }
@@ -233,43 +263,37 @@ impl Geometry for GeomWrapper<'_> {
     }
 
     fn position(&self, face: usize, vert: usize) -> [f32; 3] {
-        self.vertices[self.indices[face * 3 + vert] as usize].position
+        self.positions[self.indices[face * 3 + vert] as usize]
     }
 
     fn normal(&self, face: usize, vert: usize) -> [f32; 3] {
-        let normal = self.vertices[self.indices[face * 3 + vert] as usize].normal;
-        arr_truncate(normal).map(i16norm_to_f32)
+        self.normals[self.indices[face * 3 + vert] as usize]
     }
 
     fn tex_coord(&self, face: usize, vert: usize) -> [f32; 2] {
-        self.vertices[self.indices[face * 3 + vert] as usize].texcoord0
+        self.texcoords0[self.indices[face * 3 + vert] as usize]
     }
 
     fn set_tangent_encoded(&mut self, tangent: [f32; 4], face: usize, vert: usize) {
-        self.vertices[self.indices[face * 3 + vert] as usize].tangent = tangent.map(f32_to_i16norm);
+        self.tangents[self.indices[face * 3 + vert] as usize] = tangent;
     }
 }
 
-impl GeomWrapper<'_> {
-    fn generate_normals(&mut self) {
-        let mut normals = vec![Vec3A::ZERO; self.vert_count];
-        for i in (0..self.indices.len()).step_by(3) {
-            let ia = self.indices[i] as usize;
-            let ib = self.indices[i + 1] as usize;
-            let ic = self.indices[i + 2] as usize;
-            let posa = Vec3A::from_array(self.vertices[ia + self.vert_offset].position);
-            let posb = Vec3A::from_array(self.vertices[ib + self.vert_offset].position);
-            let posc = Vec3A::from_array(self.vertices[ic + self.vert_offset].position);
-            let normal = (posb - posa).cross(posc - posa);
-            normals[ia] += normal;
-            normals[ib] += normal;
-            normals[ic] += normal;
-        }
-        for (i, normal) in normals.iter().enumerate() {
-            let normalized = normal.normalize_or_zero().to_array();
-            self.vertices[i + self.vert_offset].normal = arr_extend(normalized.map(f32_to_i16norm), 0);
-        }
+fn generate_normals(positions: &[[f32; 3]], indices: &[u32]) -> Vec<[f32; 3]> {
+    let mut normals = vec![Vec3A::ZERO; positions.len()];
+    for i in (0..indices.len()).step_by(3) {
+        let ia = indices[i] as usize;
+        let ib = indices[i + 1] as usize;
+        let ic = indices[i + 2] as usize;
+        let posa = Vec3A::from_array(positions[ia]);
+        let posb = Vec3A::from_array(positions[ib]);
+        let posc = Vec3A::from_array(positions[ic]);
+        let normal = (posb - posa).cross(posc - posa);
+        normals[ia] += normal;
+        normals[ib] += normal;
+        normals[ic] += normal;
     }
+    normals.into_iter().map(|vec| vec.normalize_or_zero().to_array()).collect()
 }
 
 const I16_MAX_F: f32 = i16::MAX as f32;
@@ -279,16 +303,8 @@ fn f32_to_i16norm(n: f32) -> i16 {
     (n * I16_MAX_F) as i16
 }
 
-fn i16norm_to_f32(n: i16) -> f32 {
-    n as f32 / I16_MAX_F
-}
-
 fn arr_extend<T>([x, y, z]: [T; 3], w: T) -> [T; 4] {
     [x, y, z, w]
-}
-
-fn arr_truncate<T>([x, y, z, _]: [T; 4]) -> [T; 3] {
-    [x, y, z]
 }
 
 fn linear_to_srgb_approx([x, y, z, a]: [f32; 4]) -> [u8; 4] {
