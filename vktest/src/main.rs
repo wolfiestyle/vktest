@@ -62,12 +62,12 @@ fn main() -> VulkanResult<()> {
                 .filter_map(|node| node.mesh.map(|mesh_id| (&gltf[mesh_id], node)))
                 .map(|(mesh, node)| {
                     let slices: Vec<_> = mesh
-                        .submeshes
+                        .primitives
                         .iter()
-                        .map(|submesh| {
-                            let material = submesh.material.map(|mat| &gltf[mat]).unwrap_or(&Material::DEFAULT);
-                            let desc_id = submesh.material.map(|mat| mat.0 + 1).unwrap_or_default();
-                            MeshRenderData::from_gltf(submesh, material, resources.material_desc[desc_id])
+                        .map(|prims| {
+                            let material = prims.material.map(|mat| &gltf[mat]).unwrap_or(&Material::DEFAULT);
+                            let desc_id = prims.material.map(|mat| mat.0 + 1).unwrap_or_default();
+                            MeshRenderData::from_gltf(prims, material, resources.material_desc[desc_id])
                         })
                         .collect();
                     let renderer = MeshRenderer::new(&vk_app, &mesh.vertices, &mesh.indices, node.transform).unwrap();

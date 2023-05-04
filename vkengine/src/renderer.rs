@@ -257,11 +257,11 @@ pub struct MeshRenderData {
 }
 
 impl MeshRenderData {
-    pub fn from_gltf(submesh: &gltf_import::Submesh, material: &gltf_import::Material, descriptor: vk::DescriptorSet) -> Self {
+    pub fn from_gltf(prims: &gltf_import::Primitives, material: &gltf_import::Material, descriptor: vk::DescriptorSet) -> Self {
         Self {
-            index_offset: submesh.index_offset,
-            index_count: submesh.index_count,
-            vertex_offset: submesh.vertex_offset,
+            index_offset: prims.index_offset,
+            index_count: prims.index_count,
+            vertex_offset: prims.vertex_offset,
             descriptor,
             material_data: MaterialData::from_gltf(material),
         }

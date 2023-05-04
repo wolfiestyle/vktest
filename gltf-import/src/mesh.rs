@@ -45,7 +45,7 @@ impl Default for Vertex {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Submesh {
+pub struct Primitives {
     pub index_offset: u32,
     pub index_count: u32,
     pub vertex_offset: u32,
@@ -54,7 +54,7 @@ pub struct Submesh {
     pub material: Option<MaterialId>,
 }
 
-impl Submesh {
+impl Primitives {
     pub fn index_range(&self) -> Range<usize> {
         let first = self.index_offset as usize;
         let last = first + self.index_count as usize;
@@ -72,7 +72,7 @@ impl Submesh {
 pub struct MeshData {
     pub vertices: Vec<Vertex>,
     pub indices: Vec<u32>,
-    pub submeshes: Vec<Submesh>,
+    pub primitives: Vec<Primitives>,
     pub name: Option<String>,
     pub(crate) vert_offset: usize,
     pub(crate) idx_offset: usize,
@@ -135,7 +135,7 @@ impl MeshData {
         self.vert_offset = vert_offset;
         self.idx_offset = idx_offset;
 
-        self.submeshes.push(Submesh {
+        self.primitives.push(Primitives {
             index_offset: idx_offset as u32,
             index_count,
             vertex_offset: vert_offset as u32,
