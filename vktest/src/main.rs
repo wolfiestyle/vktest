@@ -339,12 +339,10 @@ fn main() -> VulkanResult<()> {
             let mut skybox_cmds = VkError::UnfinishedJob.into();
             let mut gui_cmds = VkError::UnfinishedJob.into();
             thread_pool.scoped(|scope| {
-                let mesh_chunks = objects.chunks_mut(1);
-                let ret_chunks = draw_buffer.chunks_mut(1);
-                for (obj, draw_ret) in mesh_chunks.zip(ret_chunks) {
-                    if obj[0].enabled {
+                for (obj, draw_ret) in objects.iter_mut().zip(draw_buffer.iter_mut()) {
+                    if obj.enabled {
                         scope.execute(|| {
-                            draw_ret[0] = obj[0].renderer.render(&vk_app, &obj[0].slices, &irr_map, &pref_map, &brdf_lut);
+                            *draw_ret = obj.renderer.render(&vk_app, &obj.slices, &irr_map, &pref_map, &brdf_lut);
                         });
                     }
                 }
