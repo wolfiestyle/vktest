@@ -121,11 +121,7 @@ impl VulkanEngine {
             light_buffer,
         };
 
-        let sampler = this.get_sampler(SamplerOptions {
-            mag_filter: vk::Filter::NEAREST,
-            min_filter: vk::Filter::NEAREST,
-            ..Default::default()
-        })?;
+        let sampler = this.get_sampler(vk::Filter::NEAREST.into())?;
         this.default_texture.info.sampler = sampler;
         this.default_normalmap.info.sampler = sampler;
 
@@ -252,27 +248,15 @@ impl VulkanEngine {
         Duration::from_nanos((self.gpu_time as f64 * self.device.dev_info.timestamp_period as f64) as u64)
     }
 
-    pub fn get_sampler(&self, params: SamplerOptions) -> VulkanResult<vk::Sampler> {
+    pub fn get_sampler(&self, mut params: SamplerOptions) -> VulkanResult<vk::Sampler> {
         use std::collections::hash_map::Entry;
+        if let Some(aniso) = &mut params.anisotropy {
+            *aniso = (*aniso).min(self.device.dev_info.max_aniso as u8);
+        }
         match self.samplers.lock().unwrap().entry(params) {
             Entry::Occupied(entry) => Ok(*entry.get()),
             Entry::Vacant(entry) => {
-                let sampler = vk::SamplerCreateInfo::builder()
-                    .mag_filter(params.mag_filter)
-                    .min_filter(params.min_filter)
-                    .address_mode_u(params.wrap_u)
-                    .address_mode_v(params.wrap_v)
-                    .address_mode_w(vk::SamplerAddressMode::REPEAT)
-                    .anisotropy_enable(params.aniso_enabled)
-                    .max_anisotropy(self.device.dev_info.max_aniso)
-                    .border_color(vk::BorderColor::INT_OPAQUE_BLACK)
-                    .unnormalized_coordinates(false)
-                    .compare_enable(false)
-                    .compare_op(vk::CompareOp::ALWAYS)
-                    .min_lod(0.0)
-                    .max_lod(vk::LOD_CLAMP_NONE)
-                    .mipmap_mode(params.mipmap_mode)
-                    .create(&self.device)?;
+                let sampler = params.create_sampler(&self.device)?;
                 entry.insert(sampler);
                 Ok(sampler)
             }
@@ -287,11 +271,7 @@ impl VulkanEngine {
     }
 
     pub fn create_cubemap(&self, width: u32, height: u32, cube_data: CubeData) -> VulkanResult<Texture> {
-        let sampler = self.get_sampler(SamplerOptions {
-            wrap_u: vk::SamplerAddressMode::CLAMP_TO_EDGE,
-            wrap_v: vk::SamplerAddressMode::CLAMP_TO_EDGE,
-            ..Default::default()
-        })?;
+        let sampler = self.get_sampler(vk::SamplerAddressMode::CLAMP_TO_EDGE.into())?;
         Texture::new(
             &self.device,
             [width, height].into(),
@@ -823,10 +803,12 @@ pub struct SamplerOptions {
     pub mipmap_mode: vk::SamplerMipmapMode,
     pub wrap_u: vk::SamplerAddressMode,
     pub wrap_v: vk::SamplerAddressMode,
-    pub aniso_enabled: bool,
+    pub anisotropy: Option<u8>,
 }
 
 impl SamplerOptions {
+    const DEFAULT_ANISO: u8 = 16;
+
     pub fn from_gltf(texture: &gltf_import::Texture) -> Self {
         use gltf_import::{MagFilter, MinFilter, WrappingMode};
         SamplerOptions {
@@ -852,8 +834,27 @@ impl SamplerOptions {
                 WrappingMode::ClampToEdge => vk::SamplerAddressMode::CLAMP_TO_EDGE,
                 WrappingMode::MirroredRepeat => vk::SamplerAddressMode::MIRRORED_REPEAT,
             },
-            aniso_enabled: true,
+            anisotropy: Some(Self::DEFAULT_ANISO),
         }
+    }
+
+    fn create_sampler(&self, device: &VulkanDevice) -> VulkanResult<vk::Sampler> {
+        vk::SamplerCreateInfo::builder()
+            .mag_filter(self.mag_filter)
+            .min_filter(self.min_filter)
+            .address_mode_u(self.wrap_u)
+            .address_mode_v(self.wrap_v)
+            .address_mode_w(vk::SamplerAddressMode::REPEAT)
+            .anisotropy_enable(self.anisotropy.is_some())
+            .max_anisotropy(self.anisotropy.unwrap_or(1) as f32)
+            .border_color(vk::BorderColor::INT_OPAQUE_BLACK)
+            .unnormalized_coordinates(false)
+            .compare_enable(false)
+            .compare_op(vk::CompareOp::ALWAYS)
+            .min_lod(0.0)
+            .max_lod(vk::LOD_CLAMP_NONE)
+            .mipmap_mode(self.mipmap_mode)
+            .create(device)
     }
 }
 
@@ -865,7 +866,27 @@ impl Default for SamplerOptions {
             mipmap_mode: vk::SamplerMipmapMode::LINEAR,
             wrap_u: vk::SamplerAddressMode::REPEAT,
             wrap_v: vk::SamplerAddressMode::REPEAT,
-            aniso_enabled: false,
+            anisotropy: None,
+        }
+    }
+}
+
+impl From<vk::Filter> for SamplerOptions {
+    fn from(filter: vk::Filter) -> Self {
+        Self {
+            mag_filter: filter,
+            min_filter: filter,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<vk::SamplerAddressMode> for SamplerOptions {
+    fn from(wrap: vk::SamplerAddressMode) -> Self {
+        Self {
+            wrap_u: wrap,
+            wrap_v: wrap,
+            ..Default::default()
         }
     }
 }

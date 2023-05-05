@@ -1,6 +1,6 @@
 use crate::create::CreateFromInfo;
 use crate::device::{ImageData, VulkanDevice};
-use crate::engine::{CmdBufferRing, DrawPayload, SamplerOptions, UploadBuffer, VulkanEngine};
+use crate::engine::{CmdBufferRing, DrawPayload, UploadBuffer, VulkanEngine};
 use crate::pipeline::{Pipeline, PipelineMode, Shader};
 use crate::texture::{Texture, TextureOptions};
 use crate::types::{Cleanup, VulkanResult};
@@ -51,11 +51,7 @@ impl UiRenderer {
             include_spirv!("src/shaders/gui.vert.glsl", vert, glsl),
             include_spirv!("src/shaders/gui.frag.glsl", frag, glsl),
         )?;
-        let sampler = engine.get_sampler(SamplerOptions {
-            wrap_u: vk::SamplerAddressMode::CLAMP_TO_EDGE,
-            wrap_v: vk::SamplerAddressMode::CLAMP_TO_EDGE,
-            ..Default::default()
-        })?;
+        let sampler = engine.get_sampler(vk::SamplerAddressMode::CLAMP_TO_EDGE.into())?;
         let set_layout = vk::DescriptorSetLayoutCreateInfo::builder()
             .flags(vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR)
             .bindings(&[vk::DescriptorSetLayoutBinding::builder()

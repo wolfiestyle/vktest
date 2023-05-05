@@ -1,6 +1,6 @@
 use crate::create::CreateFromInfo;
 use crate::device::{VkBuffer, VulkanDevice};
-use crate::engine::{CmdBufferRing, DrawPayload, SamplerOptions, UploadBuffer, VulkanEngine};
+use crate::engine::{CmdBufferRing, DrawPayload, UploadBuffer, VulkanEngine};
 use crate::pipeline::{Pipeline, PipelineMode, Shader};
 use crate::texture::Texture;
 use crate::types::{Cleanup, VulkanResult};
@@ -39,11 +39,7 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
             include_spirv!("src/shaders/pbr.vert.glsl", vert, glsl),
             include_spirv!("src/shaders/pbr.frag.glsl", frag, glsl),
         )?;
-        let sampler = engine.get_sampler(SamplerOptions {
-            wrap_u: vk::SamplerAddressMode::CLAMP_TO_EDGE,
-            wrap_v: vk::SamplerAddressMode::CLAMP_TO_EDGE,
-            ..Default::default()
-        })?;
+        let sampler = engine.get_sampler(vk::SamplerAddressMode::CLAMP_TO_EDGE.into())?;
         let push_desc_layout = vk::DescriptorSetLayoutCreateInfo::builder()
             .flags(vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR)
             .bindings(&[
@@ -455,11 +451,7 @@ impl SkyboxRenderer {
             include_spirv!("src/shaders/skybox.vert.glsl", vert, glsl),
             include_spirv!("src/shaders/skybox.frag.glsl", frag, glsl),
         )?;
-        let sampler = engine.get_sampler(SamplerOptions {
-            wrap_u: vk::SamplerAddressMode::CLAMP_TO_EDGE,
-            wrap_v: vk::SamplerAddressMode::CLAMP_TO_EDGE,
-            ..Default::default()
-        })?;
+        let sampler = engine.get_sampler(vk::SamplerAddressMode::CLAMP_TO_EDGE.into())?;
         let desc_layout = vk::DescriptorSetLayoutCreateInfo::builder()
             .flags(vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR)
             .bindings(&[vk::DescriptorSetLayoutBinding::builder()

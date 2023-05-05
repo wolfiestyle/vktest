@@ -43,11 +43,7 @@ impl Baker {
         let irrmap_shader = vk::ShaderModuleCreateInfo::builder()
             .code(include_spirv!("src/shaders/irrmap.comp.glsl", comp, glsl))
             .create(&device)?;
-        let sampler = engine.get_sampler(SamplerOptions {
-            wrap_u: vk::SamplerAddressMode::CLAMP_TO_EDGE,
-            wrap_v: vk::SamplerAddressMode::CLAMP_TO_EDGE,
-            ..Default::default()
-        })?;
+        let sampler = engine.get_sampler(vk::SamplerAddressMode::CLAMP_TO_EDGE.into())?;
         let desc_layout = vk::DescriptorSetLayoutCreateInfo::builder()
             .flags(vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR)
             .bindings(&[
@@ -80,11 +76,7 @@ impl Baker {
         let prefilter_shader = vk::ShaderModuleCreateInfo::builder()
             .code(include_spirv!("src/shaders/prefilter.comp.glsl", comp, glsl))
             .create(&device)?;
-        let sampler = engine.get_sampler(SamplerOptions {
-            wrap_u: vk::SamplerAddressMode::CLAMP_TO_EDGE,
-            wrap_v: vk::SamplerAddressMode::CLAMP_TO_EDGE,
-            ..Default::default()
-        })?;
+        let sampler = engine.get_sampler(vk::SamplerAddressMode::CLAMP_TO_EDGE.into())?;
         let desc_layout = vk::DescriptorSetLayoutCreateInfo::builder()
             .flags(vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR)
             .bindings(&[
