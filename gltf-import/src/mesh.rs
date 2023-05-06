@@ -274,8 +274,8 @@ impl Geometry for PrimData {
         self.texcoords0[self.indices[face * 3 + vert] as usize]
     }
 
-    fn set_tangent_encoded(&mut self, tangent: [f32; 4], face: usize, vert: usize) {
-        self.tangents[self.indices[face * 3 + vert] as usize] = tangent;
+    fn set_tangent_encoded(&mut self, [x, y, z, w]: [f32; 4], face: usize, vert: usize) {
+        self.tangents[self.indices[face * 3 + vert] as usize] = [x, y, z, -w]; // flip bitangent to match glTF coordinates
     }
 }
 
