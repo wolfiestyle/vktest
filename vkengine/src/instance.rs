@@ -238,12 +238,13 @@ impl VulkanInstance {
         };
         let extensions: BTreeSet<_> = ext_list.iter().map(|ext| vk_to_cstr(&ext.extension_name).to_owned()).collect();
         //eprintln!("Supported device extensions: {extensions:#?}");
-        let missing_ext = DEVICE_EXTENSIONS
+        let missing_ext: Vec<_> = DEVICE_EXTENSIONS
             .into_iter()
             .filter_map(|(name, required)| required.then_some(name))
-            .find(|&ext_name| !extensions.contains(ext_name));
-        if let Some(ext_name) = missing_ext {
-            eprintln!("Device '{name}' has missing required extension {ext_name:?}");
+            .filter(|&ext_name| !extensions.contains(ext_name))
+            .collect();
+        if !missing_ext.is_empty() {
+            eprintln!("Device '{name}' has missing required extensions: {missing_ext:?}");
             return Err(VkError::UnsuitableDevice);
         }
 
