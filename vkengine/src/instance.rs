@@ -179,11 +179,23 @@ impl VulkanInstance {
         let msaa_support = limits.framebuffer_color_sample_counts & limits.framebuffer_depth_sample_counts;
 
         // features
-        let mut tl_sem_feats = vk::PhysicalDeviceTimelineSemaphoreFeatures::default();
-        let mut features2 = vk::PhysicalDeviceFeatures2::builder().push_next(&mut tl_sem_feats);
-        unsafe { self.instance.get_physical_device_features2(phys_dev, &mut features2) };
-        if tl_sem_feats.timeline_semaphore == vk::FALSE {
-            eprintln!("Device '{name}' doesn't support timeline semaphores");
+        let mut features12 = vk::PhysicalDeviceVulkan12Features::default();
+        let mut features = vk::PhysicalDeviceFeatures2::builder().push_next(&mut features12);
+        unsafe { self.instance.get_physical_device_features2(phys_dev, &mut features) };
+        if features.features.sampler_anisotropy == vk::FALSE {
+            eprintln!("Device '{name}' doesn't support sampler anisotropy");
+            return Err(VkError::UnsuitableDevice);
+        }
+        if features.features.shader_storage_image_write_without_format == vk::FALSE {
+            eprintln!("Device '{name}' doesn't support shader storage image write without format");
+            return Err(VkError::UnsuitableDevice);
+        }
+        if features12.timeline_semaphore == vk::FALSE {
+            eprintln!("Device '{name}' doesn't support timeline semaphore");
+            return Err(VkError::UnsuitableDevice);
+        }
+        if features12.host_query_reset == vk::FALSE {
+            eprintln!("Device '{name}' doesn't support host query reset");
             return Err(VkError::UnsuitableDevice);
         }
 
@@ -294,6 +306,10 @@ impl VulkanInstance {
             .sampler_anisotropy(true)
             .shader_storage_image_write_without_format(true);
 
+        let mut features12 = vk::PhysicalDeviceVulkan12Features::builder()
+            .timeline_semaphore(true)
+            .host_query_reset(true);
+
         let extensions: Vec<_> = DEVICE_EXTENSIONS
             .into_iter()
             .filter_map(|(name, required)| {
@@ -306,14 +322,13 @@ impl VulkanInstance {
             .collect();
 
         let mut dyn_render_enable = vk::PhysicalDeviceDynamicRenderingFeatures::builder().dynamic_rendering(true);
-        let mut tl_sem_enable = vk::PhysicalDeviceTimelineSemaphoreFeatures::builder().timeline_semaphore(true);
 
         let device_ci = vk::DeviceCreateInfo::builder()
             .queue_create_infos(&queues_ci)
             .enabled_features(&features)
             .enabled_extension_names(&extensions)
-            .push_next(&mut dyn_render_enable)
-            .push_next(&mut tl_sem_enable);
+            .push_next(&mut features12)
+            .push_next(&mut dyn_render_enable);
 
         unsafe {
             self.instance

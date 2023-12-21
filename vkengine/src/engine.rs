@@ -762,6 +762,9 @@ impl FrameState {
             .query_type(vk::QueryType::TIMESTAMP)
             .query_count(2)
             .create(device)?;
+        unsafe {
+            device.reset_query_pool(time_query, 0, 2);
+        }
         device.debug(|d| {
             d.set_object_name(device, &image_avail_sem, "Image available semaphore");
             d.set_object_name(device, &render_finished_sem, "Render finished semaphore");
