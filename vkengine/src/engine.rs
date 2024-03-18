@@ -488,7 +488,18 @@ impl VulkanEngine {
         // we have to sample time here so presentation doesn't get in the way
         self.cpu_time = Instant::now() - self.cpu_time_start;
 
-        // the swapchain image id is available before it's actually ready to use
+        // wait for previous frame finished, so we can modify or reuse resources
+        let wait_info = vk::SemaphoreWaitInfo::builder()
+            .semaphores(slice::from_ref(&in_flight_sem))
+            .values(slice::from_ref(&frame.wait_frame));
+        unsafe {
+            self.device
+                .wait_semaphores(&wait_info, u64::MAX)
+                .describe_err("Failed waiting semaphore")?;
+        }
+
+        // the swapchain image id is available before it's actually ready to use, but we still
+        // need to wait for a free semaphore
         let image_idx = unsafe {
             let acquire_res = self
                 .device
@@ -514,20 +525,10 @@ impl VulkanEngine {
         let draw_cmds: Vec<_> = draw_commands.into_iter().collect();
         self.record_primary_command_buffer(command_buffer, &draw_cmds, image_idx as _, frame)?;
 
-        // now we can wait for frame finished, then we can modify resources
-        let wait_info = vk::SemaphoreWaitInfo::builder()
-            .semaphores(slice::from_ref(&in_flight_sem))
-            .values(slice::from_ref(&frame.wait_frame));
-        unsafe {
-            self.device
-                .wait_semaphores(&wait_info, u64::MAX)
-                .describe_err("Failed waiting semaphore")?;
-        }
+        // cleanup previous frame resources
         let frame = &mut self.frame_state[frame_idx];
         frame.execute_on_finish(&self.device);
-        let next_frame = self.current_frame + 1;
-        frame.wait_frame = next_frame;
-        frame.payload.extend(draw_cmds);
+
         // get timestamp data
         let mut query_data = [0u64; 2];
         let query_res = unsafe {
@@ -541,6 +542,9 @@ impl VulkanEngine {
         self.last_frame_time = Instant::now();
 
         // submit work for the next frame
+        let next_frame = self.current_frame + 1;
+        frame.wait_frame = next_frame;
+        frame.payload.extend(draw_cmds);
         let signal_values = [0, next_frame];
         let signal_sems = [render_finish_sem, in_flight_sem];
         let mut timeline_info = vk::TimelineSemaphoreSubmitInfo::builder().signal_semaphore_values(&signal_values);
