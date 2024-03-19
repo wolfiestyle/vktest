@@ -8,7 +8,7 @@ layout(constant_id = 1) const uint MipLevels = 1;
 const uint NumSamples = 1024 * 4;
 
 layout(binding = 0) uniform samplerCube inputTex;
-layout(binding = 1) uniform writeonly imageCube outputTex[MipLevels];
+layout(binding = 1) uniform writeonly imageCube outputTex;
 
 layout(push_constant) uniform PushConstants {
     uint level;
@@ -41,11 +41,11 @@ vec3 computePrefiltered(vec3 N, ivec2 texSize) {
 }
 
 void main() {
-    ivec2 img_size = imageSize(outputTex[level]);
+    ivec2 img_size = imageSize(outputTex);
     bvec2 cmp = lessThan(gl_GlobalInvocationID.xy, img_size);
     if (cmp.x && cmp.y) {
         vec3 N = getCubemapDir(gl_GlobalInvocationID, img_size);
         vec3 prefiltered = computePrefiltered(N, textureSize(inputTex, 0));
-        imageStore(outputTex[level], ivec3(gl_GlobalInvocationID), vec4(prefiltered, 1.0));
+        imageStore(outputTex, ivec3(gl_GlobalInvocationID), vec4(prefiltered, 1.0));
     }
 }

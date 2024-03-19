@@ -90,7 +90,7 @@ impl Baker {
                 vk::DescriptorSetLayoutBinding::builder()
                     .binding(1)
                     .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
-                    .descriptor_count(PREFILTERED_MIP_LEVELS)
+                    .descriptor_count(1)
                     .stage_flags(vk::ShaderStageFlags::COMPUTE)
                     .build(),
             ])
@@ -260,18 +260,11 @@ impl Baker {
                 vk::PipelineBindPoint::COMPUTE,
                 self.prefilter_pipeline.layout,
                 0,
-                &[
-                    vk::WriteDescriptorSet::builder()
-                        .dst_binding(0)
-                        .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                        .image_info(slice::from_ref(&cubemap.info))
-                        .build(),
-                    vk::WriteDescriptorSet::builder()
-                        .dst_binding(1)
-                        .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
-                        .image_info(&mip_infos)
-                        .build(),
-                ],
+                &[vk::WriteDescriptorSet::builder()
+                    .dst_binding(0)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .image_info(slice::from_ref(&cubemap.info))
+                    .build()],
             );
             let mut wg_size = PREFILTERED_WG;
             for level in 0..PREFILTERED_MIP_LEVELS {
@@ -281,6 +274,17 @@ impl Baker {
                     vk::ShaderStageFlags::COMPUTE,
                     0,
                     bytemuck::bytes_of(&level),
+                );
+                self.device.pushdesc_fn.cmd_push_descriptor_set(
+                    cmd_buffer,
+                    vk::PipelineBindPoint::COMPUTE,
+                    self.prefilter_pipeline.layout,
+                    0,
+                    &[vk::WriteDescriptorSet::builder()
+                        .dst_binding(1)
+                        .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+                        .image_info(slice::from_ref(&mip_infos[level as usize]))
+                        .build()],
                 );
                 self.device.cmd_dispatch(cmd_buffer, wg_size, wg_size, 6);
                 wg_size = 1.max(wg_size / 2);
