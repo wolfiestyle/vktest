@@ -3,6 +3,7 @@ name = "vkengine"
 version = "0.1.0"
 authors = ["SnowDerg <slayerbeast@gmail.com>"]
 edition = "2021"
+rust-version = "1.72"
 
 [dependencies]
 ash = "0.37.2"
