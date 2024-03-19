@@ -16,8 +16,8 @@ bytemuck = "1.13.0"
 bytemuck_derive = "1.4.0"
 gpu-allocator = { version = "0.22.0", features = ["vulkan"], default_features = false }
 
-winit = { version = "0.28.1", optional = true }
-egui = { version = "0.21.0", features = ["bytemuck"], optional = true }
+winit = { version = "0.28.7", optional = true }
+egui = { version = "0.24.1", features = ["bytemuck"], optional = true }
 gltf-import = { path = "../gltf-import" }
 #TODO: remove these or turn them optional
-egui-winit = { version = "0.21.1" }
+egui-winit = { version = "0.24.1" }

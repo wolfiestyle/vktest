@@ -5,8 +5,9 @@ use crate::pipeline::{Pipeline, PipelineMode, Shader};
 use crate::texture::{Texture, TextureOptions};
 use crate::types::{Cleanup, VulkanResult};
 use ash::vk;
+use bytemuck::{Pod, Zeroable};
 use egui::epaint::{Primitive, Vertex};
-use egui::{ClippedPrimitive, Context, FullOutput, PlatformOutput, TextureId, TexturesDelta};
+use egui::{ClippedPrimitive, Context, FullOutput, PlatformOutput, TextureId, TexturesDelta, ViewportId};
 use egui_winit::{EventResponse, State};
 use glam::Mat4;
 use inline_spirv::include_spirv;
@@ -16,7 +17,6 @@ use std::slice;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use winit::event::WindowEvent;
-use winit::event_loop::EventLoopWindowTarget;
 use winit::window::Window;
 
 pub use egui; //FIXME: forward only what's needed to build UIs
@@ -44,7 +44,7 @@ pub struct UiRenderer {
 }
 
 impl UiRenderer {
-    pub fn new(event_loop: &EventLoopWindowTarget<()>, engine: &VulkanEngine) -> VulkanResult<Self> {
+    pub fn new(window: &Window, engine: &VulkanEngine) -> VulkanResult<Self> {
         let device = engine.device.clone();
         let shader = Shader::new(
             &device,
@@ -65,7 +65,7 @@ impl UiRenderer {
         let push_constants = vk::PushConstantRange::builder()
             .stage_flags(vk::ShaderStageFlags::VERTEX)
             .offset(0)
-            .size(size_of::<Mat4>() as _)
+            .size(size_of::<PushConstants>() as _)
             .build();
         let pipeline = Pipeline::builder_graphics(&shader)
             .vertex_input::<Vertex>()
@@ -84,10 +84,13 @@ impl UiRenderer {
 
         let cmd_buffers = CmdBufferRing::new(&device)?;
 
+        let context = egui::Context::default();
+        let winit_state = State::new(ViewportId::ROOT, &window, None, None);
+
         Ok(Self {
             device,
-            context: egui::Context::default(),
-            winit_state: State::new(event_loop),
+            context,
+            winit_state,
             frame_output: None,
             platform_output: None,
             primitives: vec![],
@@ -105,7 +108,7 @@ impl UiRenderer {
     }
 
     pub fn event_input(&mut self, event: &WindowEvent) -> EventResponse {
-        self.winit_state.on_event(&self.context, event)
+        self.winit_state.on_window_event(&self.context, event)
     }
 
     pub fn run(&mut self, window: &Window, run_ui: impl FnOnce(&Context)) {
@@ -125,7 +128,7 @@ impl UiRenderer {
             // process a new set of primitives
             self.local_frame += 1;
             self.platform_output = Some(run_output.platform_output);
-            self.primitives = self.context.tessellate(run_output.shapes);
+            self.primitives = self.context.tessellate(run_output.shapes, run_output.pixels_per_point);
             let drop_textures = self.update_textures(run_output.textures_delta)?;
             self.update_buffers()?;
 
@@ -243,21 +246,26 @@ impl UiRenderer {
             device.cmd_set_viewport(cmd_buffer, 0, &[engine.swapchain.viewport()]);
         }
         let vk::Extent2D { width, height } = engine.swapchain.extent;
-        let proj = Mat4::orthographic_rh(0.0, width as _, 0.0, height as _, 0.0, 1.0);
+        let scale = self.context.pixels_per_point();
+        let constants = PushConstants {
+            proj: Mat4::orthographic_rh(0.0, width as _, 0.0, height as _, 0.0, 1.0),
+            scale,
+            _unused: Default::default(),
+        };
         unsafe {
             device.cmd_push_constants(
                 cmd_buffer,
                 self.pipeline.layout,
                 vk::ShaderStageFlags::VERTEX,
                 0,
-                bytemuck::bytes_of(&proj),
+                bytemuck::bytes_of(&constants),
             );
         }
 
         let mut vert_offset = 0;
         let mut idx_offset = 0;
         for prim in &self.primitives {
-            unsafe { device.cmd_set_scissor(cmd_buffer, 0, &[vk_rect(prim.clip_rect)]) };
+            unsafe { device.cmd_set_scissor(cmd_buffer, 0, &[vk_rect(prim.clip_rect, scale)]) };
             match &prim.primitive {
                 Primitive::Mesh(mesh) => {
                     let n_vert = mesh.vertices.len() as i32;
@@ -318,12 +326,21 @@ impl Drop for UiRenderer {
     }
 }
 
-fn vk_rect(rect: egui::Rect) -> vk::Rect2D {
-    let size = (rect.max - rect.min).abs();
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct PushConstants {
+    proj: Mat4,
+    scale: f32,
+    _unused: [f32; 3],
+}
+
+fn vk_rect(rect: egui::Rect, scale: f32) -> vk::Rect2D {
+    let pos = rect.min * scale;
+    let size = (rect.max - rect.min).abs() * scale;
     vk::Rect2D {
         offset: vk::Offset2D {
-            x: rect.min.x as _,
-            y: rect.min.y as _,
+            x: pos.x as _,
+            y: pos.y as _,
         },
         extent: vk::Extent2D {
             width: size.x as _,

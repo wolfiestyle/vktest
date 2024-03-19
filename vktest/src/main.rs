@@ -114,7 +114,7 @@ fn main() -> VulkanResult<()> {
     let mut skybox = SkyboxRenderer::new(&vk_app)?;
     let skybox_equirect = Texture::from_dynamicimage(vk_app.device(), &skybox_img, false, false, Default::default())?;
 
-    let mut gui = UiRenderer::new(&event_loop, &vk_app)?;
+    let mut gui = UiRenderer::new(&window, &vk_app)?;
     let mut show_gui = true;
 
     let baker = Baker::new(&vk_app)?;

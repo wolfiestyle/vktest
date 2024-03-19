@@ -1,6 +1,8 @@
 #version 450
 layout(push_constant) uniform PushConstants {
     mat4 proj;
+    float scale;
+    vec3 _unused;
 };
 
 layout(location = 0) in vec2 inPosition;
@@ -18,7 +20,7 @@ vec3 srgb_to_linear(vec3 srgb) {
 }
 
 void main() {
-    gl_Position = proj * vec4(inPosition, 0.0, 1.0);
+    gl_Position = proj * vec4(inPosition * scale, 0.0, 1.0);
     fragColor = vec4(srgb_to_linear(inColor.rgb), inColor.a);
     fragTexCoord = inTexCoord;
 }

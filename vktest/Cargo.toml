@@ -6,7 +6,7 @@ edition = "2021"
 
 [dependencies]
 vkengine = { path = "../vkengine", features = ["winit", "egui"] }
-winit = "0.28.1"
+winit = "0.28.7"
 image = "0.24.5"
 structopt = "0.3.26"
 yastl = "0.1.2"
