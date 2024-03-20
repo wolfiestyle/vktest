@@ -180,7 +180,10 @@ impl VulkanInstance {
 
         // features
         let mut features12 = vk::PhysicalDeviceVulkan12Features::default();
-        let mut features = vk::PhysicalDeviceFeatures2::builder().push_next(&mut features12);
+        let mut portability = vk::PhysicalDevicePortabilitySubsetFeaturesKHR::default();
+        let mut features = vk::PhysicalDeviceFeatures2::builder()
+            .push_next(&mut features12)
+            .push_next(&mut portability);
         unsafe { self.instance.get_physical_device_features2(phys_dev, &mut features) };
         if features.features.sampler_anisotropy == vk::FALSE {
             eprintln!("Device '{name}' doesn't support sampler anisotropy");
@@ -245,6 +248,11 @@ impl VulkanInstance {
             .collect();
         if !missing_ext.is_empty() {
             eprintln!("Device '{name}' has missing required extensions: {missing_ext:?}");
+            return Err(VkError::UnsuitableDevice);
+        }
+
+        if extensions.contains(vk::KhrPortabilitySubsetFn::name()) && portability.image_view_format_swizzle == vk::FALSE {
+            eprintln!("Device '{name}' doesn't support image view format swizzle (portability)");
             return Err(VkError::UnsuitableDevice);
         }
 
@@ -323,13 +331,18 @@ impl VulkanInstance {
             .collect();
 
         let mut dyn_render_enable = vk::PhysicalDeviceDynamicRenderingFeatures::builder().dynamic_rendering(true);
+        let mut portability_feats = vk::PhysicalDevicePortabilitySubsetFeaturesKHR::builder().image_view_format_swizzle(true);
 
-        let device_ci = vk::DeviceCreateInfo::builder()
+        let mut device_ci = vk::DeviceCreateInfo::builder()
             .queue_create_infos(&queues_ci)
             .enabled_features(&features)
             .enabled_extension_names(&extensions)
             .push_next(&mut features12)
             .push_next(&mut dyn_render_enable);
+
+        if dev_info.extensions.contains(vk::KhrPortabilitySubsetFn::name()) {
+            device_ci = device_ci.push_next(&mut portability_feats);
+        }
 
         unsafe {
             self.instance
