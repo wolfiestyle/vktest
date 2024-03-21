@@ -42,7 +42,7 @@ impl Baker {
         let device = &*engine.device;
         let irrmap_shader = vk::ShaderModuleCreateInfo::builder()
             .code(include_spirv!("src/shaders/irrmap.comp.glsl", comp, glsl))
-            .create(&device)?;
+            .create(device)?;
         let sampler = engine.get_sampler(vk::SamplerAddressMode::CLAMP_TO_EDGE.into())?;
         let desc_layout = vk::DescriptorSetLayoutCreateInfo::builder()
             .flags(vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR)
@@ -61,7 +61,7 @@ impl Baker {
                     .stage_flags(vk::ShaderStageFlags::COMPUTE)
                     .build(),
             ])
-            .create(&device)?;
+            .create(device)?;
         let irrmap_pipeline = Pipeline::builder_compute(irrmap_shader)
             .descriptor_layout(&desc_layout)
             .build(engine)?;
@@ -75,7 +75,7 @@ impl Baker {
         let device = &*engine.device;
         let prefilter_shader = vk::ShaderModuleCreateInfo::builder()
             .code(include_spirv!("src/shaders/prefilter.comp.glsl", comp, glsl))
-            .create(&device)?;
+            .create(device)?;
         let sampler = engine.get_sampler(vk::SamplerAddressMode::CLAMP_TO_EDGE.into())?;
         let desc_layout = vk::DescriptorSetLayoutCreateInfo::builder()
             .flags(vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR)
@@ -94,7 +94,7 @@ impl Baker {
                     .stage_flags(vk::ShaderStageFlags::COMPUTE)
                     .build(),
             ])
-            .create(&device)?;
+            .create(device)?;
         let push_constants = vk::PushConstantRange {
             stage_flags: vk::ShaderStageFlags::COMPUTE,
             offset: 0,
@@ -120,7 +120,7 @@ impl Baker {
         let device = &*engine.device;
         let brdf_shader = vk::ShaderModuleCreateInfo::builder()
             .code(include_spirv!("src/shaders/brdf_lut.comp.glsl", comp, glsl))
-            .create(&device)?;
+            .create(device)?;
         let desc_layout = vk::DescriptorSetLayoutCreateInfo::builder()
             .flags(vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR)
             .bindings(&[vk::DescriptorSetLayoutBinding::builder()
@@ -129,7 +129,7 @@ impl Baker {
                 .descriptor_count(1)
                 .stage_flags(vk::ShaderStageFlags::COMPUTE)
                 .build()])
-            .create(&device)?;
+            .create(device)?;
         let brdf_pipeline = Pipeline::builder_compute(brdf_shader)
             .descriptor_layout(&desc_layout)
             .build(engine)?;
@@ -143,7 +143,7 @@ impl Baker {
         let device = &*engine.device;
         let eq2cube_shader = vk::ShaderModuleCreateInfo::builder()
             .code(include_spirv!("src/shaders/equirect2cube.comp.glsl", comp, glsl))
-            .create(&device)?;
+            .create(device)?;
         let sampler = engine.get_sampler(SamplerOptions {
             wrap_u: vk::SamplerAddressMode::REPEAT,
             wrap_v: vk::SamplerAddressMode::CLAMP_TO_EDGE,
@@ -166,7 +166,7 @@ impl Baker {
                     .stage_flags(vk::ShaderStageFlags::COMPUTE)
                     .build(),
             ])
-            .create(&device)?;
+            .create(device)?;
         let eq2cube_pipeline = Pipeline::builder_compute(eq2cube_shader)
             .descriptor_layout(&desc_layout)
             .build(engine)?;

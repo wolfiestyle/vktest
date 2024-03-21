@@ -426,9 +426,9 @@ impl MaterialData {
             emissive: material.emissive.into(),
             uv_sets: (color_uv)
                 | (metrough_uv << UV_BITS)
-                | (normal_uv << UV_BITS * 2)
-                | (emiss_uv << UV_BITS * 3)
-                | (occl_uv << UV_BITS * 4),
+                | (normal_uv << (UV_BITS * 2))
+                | (emiss_uv << (UV_BITS * 3))
+                | (occl_uv << (UV_BITS * 4)),
         }
     }
 }

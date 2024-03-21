@@ -167,8 +167,8 @@ impl VulkanEngine {
                     .stage_flags(vk::ShaderStageFlags::FRAGMENT)
                     .build(),
             ])
-            .create(&device)?;
-        device.debug(|d| d.set_object_name(&device, &desc_layout, "PBR desc layout"));
+            .create(device)?;
+        device.debug(|d| d.set_object_name(device, &desc_layout, "PBR desc layout"));
         Ok(desc_layout)
     }
 
@@ -714,6 +714,7 @@ impl Cleanup<VulkanDevice> for UploadBuffer {
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub struct DrawPayload {
     pub cmd_buffer: vk::CommandBuffer,
     pub on_frame_finish: Option<Box<dyn FnOnce(&VulkanDevice) + Send + Sync>>,
