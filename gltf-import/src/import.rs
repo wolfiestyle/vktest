@@ -88,33 +88,28 @@ impl GltfData {
     }
 
     fn update_transforms(&mut self) {
-        let mut pending = vec![false; self.nodes.len()];
-        let mut all_done = true;
-        for i in 0..self.nodes.len() {
-            if let Some(NodeId(parent_id)) = self.nodes[i].parent {
-                if parent_id < i {
-                    let parent_transform = self.nodes[parent_id].transform;
-                    let node = &mut self.nodes[i];
-                    node.transform = parent_transform * node.local_transform;
-                } else {
-                    all_done = false;
-                    pending[i] = true;
+        let pending: Vec<_> = (0..self.nodes.len())
+            .filter(|&i| {
+                if let Some(NodeId(parent_id)) = self.nodes[i].parent {
+                    if parent_id < i {
+                        let parent_transform = self.nodes[parent_id].transform;
+                        let node = &mut self.nodes[i];
+                        node.transform = parent_transform * node.local_transform;
+                    } else {
+                        return true;
+                    }
                 }
-            }
-        }
-        if all_done {
-            return;
-        }
-        for i in (0..self.nodes.len()).rev() {
-            if pending[i] {
-                let parent_id = self.nodes[i].parent.unwrap().0;
-                if parent_id > i && !pending[parent_id] {
-                    let parent_transform = self.nodes[parent_id].transform;
-                    let node = &mut self.nodes[i];
-                    node.transform = parent_transform * node.local_transform;
-                } else {
-                    eprintln!("Couldn't compute transform for Node {i} with parent {parent_id}");
-                }
+                false
+            })
+            .collect();
+        for &i in pending.iter().rev() {
+            let NodeId(parent_id) = self.nodes[i].parent.unwrap();
+            if parent_id > i && pending.binary_search(&parent_id).is_err() {
+                let parent_transform = self.nodes[parent_id].transform;
+                let node = &mut self.nodes[i];
+                node.transform = parent_transform * node.local_transform;
+            } else {
+                eprintln!("Couldn't compute transform for Node {i} with parent {parent_id}");
             }
         }
     }
