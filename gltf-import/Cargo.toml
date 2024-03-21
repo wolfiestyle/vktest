@@ -5,9 +5,9 @@ authors = ["SnowDerg <slayerbeast@gmail.com>"]
 edition = "2021"
 
 [dependencies]
-gltf = { version = "1.1.0", features = ["KHR_lights_punctual"] }
-image = "0.24.5"
-urlencoding = "2.1.2"
-base64 = "0.21.0"
-glam = "0.23.0"
-bevy_mikktspace = "0.10.1"
+gltf = { workspace = true, features = ["KHR_lights_punctual"] }
+image = { workspace = true }
+urlencoding = { workspace = true }
+base64 = { workspace = true }
+glam = { workspace = true }
+bevy_mikktspace = { workspace = true }

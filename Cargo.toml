@@ -6,6 +6,28 @@ members = [
 ]
 resolver = "2"
 
+[workspace.dependencies]
+ash = "0.37.2"
+ash-window = "0.12.0"
+base64 = "0.21.0"
+bevy_mikktspace = "0.10.1"
+bytemuck = "1.13.0"
+bytemuck_derive = "1.4.0"
+cstr = "0.2.11"
+egui = "0.24.1"
+egui-winit = "0.24.1"
+glam = "0.23.0"
+gltf = "1.1.0"
+gpu-allocator = { version = "0.22.0", default-features = false }
+image = "0.24.5"
+inline-spirv = "0.1.5"
+memoffset = "0.8.0"
+raw-window-handle = "0.5.0"
+structopt = "0.3.26"
+urlencoding = "2.1.2"
+winit = "0.28.7"
+yastl = "0.1.2"
+
 # Always compile deps with optimization.
 # Some crates, like image, are *really* slow on unoptimized debug mode
 [profile.dev.package."*"]
