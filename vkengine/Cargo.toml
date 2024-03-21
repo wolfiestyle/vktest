@@ -3,15 +3,13 @@ name = "vkengine"
 version = "0.1.0"
 authors = ["SnowDerg <slayerbeast@gmail.com>"]
 edition = "2021"
-rust-version = "1.72"
+rust-version = "1.77"
 
 [dependencies]
 ash = { workspace = true }
 ash-window = { workspace = true }
 raw-window-handle = { workspace = true }
-cstr = { workspace = true }
 inline-spirv = { workspace = true }
-memoffset = { workspace = true }
 glam = { workspace = true, features = ["bytemuck"] }
 bytemuck = { workspace = true }
 bytemuck_derive = { workspace = true }

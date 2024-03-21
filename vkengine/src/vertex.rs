@@ -1,5 +1,5 @@
 use ash::vk;
-use memoffset::{offset_of, offset_of_tuple};
+use std::mem::offset_of;
 
 pub trait TypeFormat: Copy {
     const VK_FORMAT: vk::Format;
@@ -133,7 +133,7 @@ macro_rules! impl_vertex {
                         binding,
                         location,
                         format: $name::VK_FORMAT,
-                        offset: offset_of_tuple!(Self, $idx) as _,
+                        offset: offset_of!(Self, $idx) as _,
                     }
                 }),+]
             }

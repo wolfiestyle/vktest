@@ -5,7 +5,6 @@ use crate::swapchain::Swapchain;
 use crate::types::*;
 use crate::vertex::VertexInput;
 use ash::vk;
-use cstr::cstr;
 use std::slice;
 
 #[derive(Debug)]
@@ -29,7 +28,6 @@ impl Pipeline {
         engine: &VulkanEngine, layout: vk::PipelineLayout, params: GraphicsPipelineBuilder,
     ) -> VulkanResult<vk::Pipeline> {
         let device = &engine.device;
-        let entry_point = cstr!("main");
         let spec_info = vk::SpecializationInfo::builder()
             .map_entries(params.spec_entries)
             .data(params.spec_data);
@@ -37,13 +35,13 @@ impl Pipeline {
             vk::PipelineShaderStageCreateInfo::builder()
                 .stage(vk::ShaderStageFlags::VERTEX)
                 .module(params.shader.vert)
-                .name(entry_point)
+                .name(c"main")
                 .specialization_info(&spec_info)
                 .build(),
             vk::PipelineShaderStageCreateInfo::builder()
                 .stage(vk::ShaderStageFlags::FRAGMENT)
                 .module(params.shader.frag)
-                .name(entry_point)
+                .name(c"main")
                 .specialization_info(&spec_info)
                 .build(),
         ];
@@ -133,7 +131,7 @@ impl Pipeline {
         let shader_stages_ci = vk::PipelineShaderStageCreateInfo::builder()
             .stage(vk::ShaderStageFlags::COMPUTE)
             .module(params.shader)
-            .name(cstr!("main"))
+            .name(c"main")
             .specialization_info(&spec_info)
             .build();
 

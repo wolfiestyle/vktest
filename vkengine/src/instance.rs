@@ -2,14 +2,13 @@ use crate::debug::DebugUtils;
 use crate::types::*;
 use ash::extensions::{ext, khr};
 use ash::vk;
-use cstr::cstr;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use std::collections::BTreeSet;
 use std::convert::identity;
 use std::ffi::{c_char, CStr, CString};
 
 const VALIDATION_ENABLED: bool = cfg!(debug_assertions);
-const VALIDATION_LAYER: &CStr = cstr!("VK_LAYER_KHRONOS_validation");
+const VALIDATION_LAYER: &CStr = c"VK_LAYER_KHRONOS_validation";
 const DEVICE_EXTENSIONS: [(&CStr, bool); 4] = [
     (khr::Swapchain::name(), true),
     (vk::KhrPortabilitySubsetFn::name(), false),
@@ -527,7 +526,7 @@ impl From<DeviceType> for DeviceSelection<'_> {
 
 fn vk_to_cstr(raw: &[c_char]) -> &CStr {
     let raw_u8 = bytemuck::cast_slice(raw);
-    CStr::from_bytes_until_nul(raw_u8).unwrap_or(cstr!(""))
+    CStr::from_bytes_until_nul(raw_u8).unwrap_or_default()
 }
 
 #[derive(Debug, Clone, Copy)]
