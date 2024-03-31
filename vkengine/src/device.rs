@@ -57,6 +57,7 @@ impl VulkanDevice {
             physical_device: dev_info.phys_dev,
             debug_settings: Default::default(),
             buffer_device_address: false,
+            allocation_sizes: Default::default(),
         })?;
 
         let this = Self {
