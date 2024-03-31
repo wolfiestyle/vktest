@@ -8,6 +8,6 @@ edition = "2021"
 vkengine = { path = "../vkengine", features = ["winit", "egui"] }
 winit = { workspace = true }
 image = { workspace = true }
-structopt = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
 yastl = { workspace = true }
 gltf-import = { path = "../gltf-import" }

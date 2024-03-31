@@ -1,7 +1,7 @@
+use clap::Parser;
 use gltf_import::{GltfData, LightType, Material, Vertex};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use structopt::StructOpt;
 use vkengine::gui::{egui, UiRenderer};
 use vkengine::{
     Baker, Camera, CameraController, LightData, MeshRenderData, MeshRenderer, SkyboxRenderer, Texture, VkError, VulkanEngine, VulkanResult,
@@ -11,11 +11,11 @@ use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEve
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::Fullscreen;
 
-#[derive(StructOpt)]
+#[derive(Parser)]
 struct Arguments {
-    #[structopt(short, long, parse(from_os_str), help = "glTF model file")]
+    #[arg(short, long, help = "glTF model file")]
     model: Option<PathBuf>,
-    #[structopt(short, long, parse(from_os_str), help = "File with the HDR panorama skybox")]
+    #[arg(short, long, help = "File with the HDR panorama skybox")]
     skybox: Option<PathBuf>,
 }
 
@@ -28,7 +28,7 @@ pub struct MeshNode {
 }
 
 fn main() -> VulkanResult<()> {
-    let args = Arguments::from_args();
+    let args = Arguments::parse();
 
     let gltf = GltfData::from_file(args.model.unwrap_or_else(|| "data/model.glb".into())).unwrap();
     println!(
