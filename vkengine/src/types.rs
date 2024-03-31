@@ -1,47 +1,10 @@
 use ash::vk;
 use std::sync::Arc;
+use thiserror::Error;
 #[cfg(feature = "winit")]
 use winit::dpi::PhysicalSize;
 
 pub type VulkanResult<T> = Result<T, VkError>;
-
-#[derive(Debug)]
-pub enum VkError {
-    LoadingFailed(ash::LoadingError),
-    Vulkan(vk::Result),
-    VulkanMsg(&'static str, vk::Result),
-    MemoryAlloc(gpu_allocator::AllocationError),
-    InvalidArgument(&'static str),
-    EngineError(&'static str),
-    UnsuitableDevice, // used internally
-    UnfinishedJob,    // used internally
-}
-
-impl std::fmt::Display for VkError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        match self {
-            Self::LoadingFailed(err) => write!(f, "Failed to load Vulkan library: {err}"),
-            Self::Vulkan(err) => write!(f, "Vulkan error: {err}"),
-            Self::VulkanMsg(msg, err) => write!(f, "{msg}: {err}"),
-            Self::MemoryAlloc(err) => write!(f, "Memory allocation error: {err}"),
-            Self::InvalidArgument(desc) => write!(f, "Invalid argument: {desc}"),
-            Self::EngineError(desc) => write!(f, "{desc}"),
-            Self::UnsuitableDevice => write!(f, "Unsuitable device"),
-            Self::UnfinishedJob => write!(f, "Unfinished job"),
-        }
-    }
-}
-
-impl std::error::Error for VkError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::LoadingFailed(err) => Some(err),
-            Self::Vulkan(err) | Self::VulkanMsg(_, err) => Some(err),
-            Self::MemoryAlloc(err) => Some(err),
-            _ => None,
-        }
-    }
-}
 
 impl<T> From<VkError> for VulkanResult<T> {
     fn from(value: VkError) -> Self {
@@ -49,22 +12,31 @@ impl<T> From<VkError> for VulkanResult<T> {
     }
 }
 
-impl From<ash::LoadingError> for VkError {
-    fn from(err: ash::LoadingError) -> Self {
-        Self::LoadingFailed(err)
-    }
-}
+#[derive(Debug, Error)]
+pub enum VkError {
+    #[error("Failed to load Vulkan library: {0}")]
+    LoadingFailed(#[from] ash::LoadingError),
 
-impl From<vk::Result> for VkError {
-    fn from(err: vk::Result) -> Self {
-        Self::Vulkan(err)
-    }
-}
+    #[error("Vulkan error: {0}")]
+    Vulkan(#[from] vk::Result),
 
-impl From<gpu_allocator::AllocationError> for VkError {
-    fn from(err: gpu_allocator::AllocationError) -> Self {
-        Self::MemoryAlloc(err)
-    }
+    #[error("{0}: {1}")]
+    VulkanMsg(&'static str, #[source] vk::Result),
+
+    #[error("Memory allocation error: {0}")]
+    MemoryAlloc(#[from] gpu_allocator::AllocationError),
+
+    #[error("Invalid argument: {0}")]
+    InvalidArgument(&'static str),
+
+    #[error("{0}")]
+    EngineError(&'static str),
+
+    #[error("Unsuitable device")]
+    UnsuitableDevice, // used internally
+
+    #[error("Unfinished job")]
+    UnfinishedJob, // used internally
 }
 
 pub trait ErrorDescription<M> {

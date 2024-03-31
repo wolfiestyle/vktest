@@ -819,6 +819,7 @@ dependencies = [
  "glam",
  "gltf",
  "image",
+ "thiserror",
  "urlencoding",
 ]
 
@@ -1843,6 +1844,7 @@ dependencies = [
  "gpu-allocator",
  "inline-spirv",
  "raw-window-handle",
+ "thiserror",
  "winit",
 ]
 
