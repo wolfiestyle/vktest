@@ -26,6 +26,10 @@ pub enum VkError {
     #[error("Memory allocation error: {0}")]
     MemoryAlloc(#[from] gpu_allocator::AllocationError),
 
+    #[cfg(feature = "winit")]
+    #[error("EventLoop error: {0}")]
+    EventLoop(#[from] winit::error::EventLoopError),
+
     #[error("Invalid argument: {0}")]
     InvalidArgument(&'static str),
 

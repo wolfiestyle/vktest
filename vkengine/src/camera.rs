@@ -142,38 +142,39 @@ impl CameraController {
     #[cfg(feature = "winit")]
     #[rustfmt::skip]
     pub fn update_from_window_event(&mut self, event: &WindowEvent) {
-        use winit::event::{ElementState::*, KeyboardInput, MouseButton::*, VirtualKeyCode as Key};
+        use winit::event::{ElementState::*, KeyEvent, MouseButton::*};
+        use winit::keyboard::{PhysicalKey, KeyCode::*};
 
         match event {
-            WindowEvent::KeyboardInput { input: KeyboardInput { state, virtual_keycode: Some(keycode), .. }, .. } => match (state, keycode) {
-                (Pressed, Key::W) => {
+            WindowEvent::KeyboardInput { event: KeyEvent { state, physical_key: PhysicalKey::Code(keycode), .. }, .. } => match (state, keycode) {
+                (Pressed, KeyW) => {
                     self.forward_speed = -self.speed;
                 }
-                (Pressed, Key::S) => {
+                (Pressed, KeyS) => {
                     self.forward_speed = self.speed;
                 }
-                (Released, Key::W | Key::S) => {
+                (Released, KeyW | KeyS) => {
                     self.forward_speed = 0.0;
                 }
-                (Pressed, Key::A) => {
+                (Pressed, KeyA) => {
                     self.right_speed = -self.speed;
                 }
-                (Pressed, Key::D) => {
+                (Pressed, KeyD) => {
                     self.right_speed = self.speed;
                 }
-                (Released, Key::A | Key::D) => {
+                (Released, KeyA | KeyD) => {
                     self.right_speed = 0.0;
                 }
-                (Pressed, Key::Space) => {
+                (Pressed, Space) => {
                     self.up_speed = self.speed;
                 }
-                (Pressed, Key::C) => {
+                (Pressed, KeyC) => {
                     self.up_speed = -self.speed;
                 }
-                (Released, Key::Space | Key::C) => {
+                (Released, Space | KeyC) => {
                     self.up_speed = 0.0;
                 }
-                (Released, Key::F) => {
+                (Released, KeyF) => {
                     self.flying = !self.flying;
                 }
                 _ => (),

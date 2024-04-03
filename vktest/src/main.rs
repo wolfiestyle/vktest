@@ -7,8 +7,9 @@ use vkengine::{
     Baker, Camera, CameraController, LightData, MeshRenderData, MeshRenderer, SkyboxRenderer, Texture, VkError, VulkanEngine, VulkanResult,
 };
 use winit::dpi::PhysicalSize;
-use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
-use winit::event_loop::{ControlFlow, EventLoop};
+use winit::event::{ElementState, Event, KeyEvent, WindowEvent};
+use winit::event_loop::EventLoop;
+use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::Fullscreen;
 
 #[derive(Parser)]
@@ -42,7 +43,7 @@ fn main() -> VulkanResult<()> {
 
     let skybox_img = image::open(args.skybox.unwrap_or_else(|| "data/skybox.exr".into())).unwrap();
 
-    let event_loop = EventLoop::new();
+    let event_loop = EventLoop::new()?;
     let window = winit::window::WindowBuilder::new()
         .with_title("vulkan test")
         .with_inner_size(PhysicalSize::new(1657, 1024))
@@ -139,28 +140,28 @@ fn main() -> VulkanResult<()> {
     let mut fov = vk_app.camera.fov.to_degrees();
     let mut debug_mode = DebugMode::None;
 
-    event_loop.run(move |event, _, control_flow| match event {
+    event_loop.run(move |event, elwt| match event {
         Event::WindowEvent { event, .. } => {
-            if gui.event_input(&event).consumed {
+            if gui.event_input(&window, &event).consumed {
                 return;
             }
 
             match event {
-                WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+                WindowEvent::CloseRequested => elwt.exit(),
                 WindowEvent::KeyboardInput {
-                    input:
-                        KeyboardInput {
+                    event:
+                        KeyEvent {
                             state: ElementState::Pressed,
-                            virtual_keycode: Some(keycode),
+                            physical_key: PhysicalKey::Code(keycode),
                             ..
                         },
                     ..
                 } => match keycode {
-                    VirtualKeyCode::Escape => show_gui = !show_gui,
-                    VirtualKeyCode::F1 => {
+                    KeyCode::Escape => show_gui = !show_gui,
+                    KeyCode::F1 => {
                         eprintln!("{}", vk_app.device().get_memory_info());
                     }
-                    VirtualKeyCode::F11 => {
+                    KeyCode::F11 => {
                         fullscreen = !fullscreen;
                         window.set_fullscreen(fullscreen.then_some(Fullscreen::Borderless(None)));
                     }
@@ -169,11 +170,50 @@ fn main() -> VulkanResult<()> {
                 WindowEvent::Resized(size) => {
                     vk_app.resize(size.width, size.height);
                 }
+                WindowEvent::RedrawRequested => {
+                    vk_app.update();
+
+                    let objects = &mut scenes[cur_scene];
+                    draw_buffer.resize_with(objects.len(), || VkError::UnfinishedJob.into());
+                    let mut skybox_cmds = VkError::UnfinishedJob.into();
+                    let mut gui_cmds = VkError::UnfinishedJob.into();
+                    thread_pool.scoped(|scope| {
+                        for (obj, draw_ret) in objects.iter_mut().zip(draw_buffer.iter_mut()) {
+                            if obj.enabled {
+                                scope.execute(|| {
+                                    *draw_ret = obj.renderer.render(&vk_app, &obj.slices, &irr_map, &pref_map, &brdf_lut);
+                                });
+                            }
+                        }
+                        let cubemap = match debug_mode {
+                            DebugMode::ShowIrradiance => &irr_map,
+                            DebugMode::ShowPrefilter => &pref_map,
+                            _ => &skybox_tex,
+                        };
+                        scope.execute(|| skybox_cmds = skybox.render(&vk_app, cubemap));
+                        scope.execute(|| gui_cmds = gui.draw(&vk_app));
+                    });
+
+                    let draw_cmds = draw_buffer.drain(..).chain([skybox_cmds, gui_cmds]).filter_map(|res| res.ok());
+
+                    vk_app.submit_draw_commands(draw_cmds).unwrap();
+
+                    let cur_time = vk_app.get_frame_timestamp();
+                    let dt = cur_time - prev_time;
+                    if dt >= Duration::from_millis(500) {
+                        let frame_count = vk_app.get_current_frame();
+                        fps = (frame_count - prev_frame_count) * 1000 / dt.as_millis() as u64;
+                        gpu_time = vk_app.get_gpu_time();
+                        cpu_time = vk_app.get_cpu_time();
+                        prev_time = cur_time;
+                        prev_frame_count = frame_count;
+                    }
+                }
                 _ => controller.update_from_window_event(&event),
             }
         }
         Event::DeviceEvent { event, .. } => controller.update_from_device_event(&event),
-        Event::MainEventsCleared => {
+        Event::AboutToWait => {
             let dt = (vk_app.get_frame_time().as_micros() as f64 / 1e6) as f32;
             controller.update_camera(&mut vk_app.camera, dt);
 
@@ -306,7 +346,7 @@ fn main() -> VulkanResult<()> {
                             ui.add(egui::Slider::new(&mut skybox.lod, 0.0..=10.0));
                         });
                         if ui.button("Exit").clicked() {
-                            *control_flow = ControlFlow::Exit;
+                            elwt.exit();
                         }
                     });
             });
@@ -331,47 +371,9 @@ fn main() -> VulkanResult<()> {
 
             window.request_redraw();
         }
-        Event::RedrawRequested(_) => {
-            vk_app.update();
-
-            let objects = &mut scenes[cur_scene];
-            draw_buffer.resize_with(objects.len(), || VkError::UnfinishedJob.into());
-            let mut skybox_cmds = VkError::UnfinishedJob.into();
-            let mut gui_cmds = VkError::UnfinishedJob.into();
-            thread_pool.scoped(|scope| {
-                for (obj, draw_ret) in objects.iter_mut().zip(draw_buffer.iter_mut()) {
-                    if obj.enabled {
-                        scope.execute(|| {
-                            *draw_ret = obj.renderer.render(&vk_app, &obj.slices, &irr_map, &pref_map, &brdf_lut);
-                        });
-                    }
-                }
-                let cubemap = match debug_mode {
-                    DebugMode::ShowIrradiance => &irr_map,
-                    DebugMode::ShowPrefilter => &pref_map,
-                    _ => &skybox_tex,
-                };
-                scope.execute(|| skybox_cmds = skybox.render(&vk_app, cubemap));
-                scope.execute(|| gui_cmds = gui.draw(&vk_app));
-            });
-
-            let draw_cmds = draw_buffer.drain(..).chain([skybox_cmds, gui_cmds]).filter_map(|res| res.ok());
-
-            vk_app.submit_draw_commands(draw_cmds).unwrap();
-
-            let cur_time = vk_app.get_frame_timestamp();
-            let dt = cur_time - prev_time;
-            if dt >= Duration::from_millis(500) {
-                let frame_count = vk_app.get_current_frame();
-                fps = (frame_count - prev_frame_count) * 1000 / dt.as_millis() as u64;
-                gpu_time = vk_app.get_gpu_time();
-                cpu_time = vk_app.get_cpu_time();
-                prev_time = cur_time;
-                prev_frame_count = frame_count;
-            }
-        }
         _ => (),
-    });
+    })?;
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

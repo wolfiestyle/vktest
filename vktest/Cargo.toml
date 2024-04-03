@@ -6,7 +6,7 @@ edition = "2021"
 
 [dependencies]
 vkengine = { path = "../vkengine", features = ["winit", "egui"] }
-winit = { workspace = true }
+winit = { workspace = true, features = ["rwh_05"] }
 image = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 yastl = { workspace = true }

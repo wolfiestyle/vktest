@@ -85,7 +85,7 @@ impl UiRenderer {
         let cmd_buffers = CmdBufferRing::new(&device)?;
 
         let context = egui::Context::default();
-        let winit_state = State::new(ViewportId::ROOT, &window, None, None);
+        let winit_state = State::new(context.clone(), ViewportId::ROOT, &window, None, None);
 
         Ok(Self {
             device,
@@ -107,8 +107,8 @@ impl UiRenderer {
         })
     }
 
-    pub fn event_input(&mut self, event: &WindowEvent) -> EventResponse {
-        self.winit_state.on_window_event(&self.context, event)
+    pub fn event_input(&mut self, window: &Window, event: &WindowEvent) -> EventResponse {
+        self.winit_state.on_window_event(window, event)
     }
 
     pub fn run(&mut self, window: &Window, run_ui: impl FnOnce(&Context)) {
@@ -146,7 +146,7 @@ impl UiRenderer {
 
     pub fn event_output(&mut self, window: &Window) {
         if let Some(po) = self.platform_output.take() {
-            self.winit_state.handle_platform_output(window, &self.context, po);
+            self.winit_state.handle_platform_output(window, po);
         }
     }
 
