@@ -40,42 +40,37 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
             include_spirv!("src/shaders/pbr.frag.glsl", frag, glsl),
         )?;
         let sampler = engine.get_sampler(vk::SamplerAddressMode::CLAMP_TO_EDGE.into())?;
-        let push_desc_layout = vk::DescriptorSetLayoutCreateInfo::builder()
+        let push_desc_layout = vk::DescriptorSetLayoutCreateInfo::default()
             .flags(vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR)
             .bindings(&[
-                vk::DescriptorSetLayoutBinding::builder()
+                vk::DescriptorSetLayoutBinding::default()
                     .binding(0)
                     .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
                     .descriptor_count(1)
-                    .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
-                    .build(),
-                vk::DescriptorSetLayoutBinding::builder()
+                    .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT),
+                vk::DescriptorSetLayoutBinding::default()
                     .binding(1)
                     .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
                     .descriptor_count(1)
-                    .stage_flags(vk::ShaderStageFlags::FRAGMENT)
-                    .build(),
-                vk::DescriptorSetLayoutBinding::builder()
+                    .stage_flags(vk::ShaderStageFlags::FRAGMENT),
+                vk::DescriptorSetLayoutBinding::default()
                     .binding(2)
                     .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                     .descriptor_count(1)
                     .stage_flags(vk::ShaderStageFlags::FRAGMENT)
-                    .immutable_samplers(slice::from_ref(&sampler))
-                    .build(),
-                vk::DescriptorSetLayoutBinding::builder()
+                    .immutable_samplers(slice::from_ref(&sampler)),
+                vk::DescriptorSetLayoutBinding::default()
                     .binding(3)
                     .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                     .descriptor_count(1)
                     .stage_flags(vk::ShaderStageFlags::FRAGMENT)
-                    .immutable_samplers(slice::from_ref(&sampler))
-                    .build(),
-                vk::DescriptorSetLayoutBinding::builder()
+                    .immutable_samplers(slice::from_ref(&sampler)),
+                vk::DescriptorSetLayoutBinding::default()
                     .binding(4)
                     .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                     .descriptor_count(1)
                     .stage_flags(vk::ShaderStageFlags::FRAGMENT)
-                    .immutable_samplers(slice::from_ref(&sampler))
-                    .build(),
+                    .immutable_samplers(slice::from_ref(&sampler)),
             ])
             .create(&device)?;
         let push_constants = vk::PushConstantRange {
@@ -142,31 +137,26 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
                 self.pipeline.layout,
                 0,
                 &[
-                    vk::WriteDescriptorSet::builder()
+                    vk::WriteDescriptorSet::default()
                         .dst_binding(0)
                         .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                        .buffer_info(slice::from_ref(&obj_buffer_info))
-                        .build(),
-                    vk::WriteDescriptorSet::builder()
+                        .buffer_info(slice::from_ref(&obj_buffer_info)),
+                    vk::WriteDescriptorSet::default()
                         .dst_binding(1)
                         .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                        .buffer_info(slice::from_ref(&light_buffer_info))
-                        .build(),
-                    vk::WriteDescriptorSet::builder()
+                        .buffer_info(slice::from_ref(&light_buffer_info)),
+                    vk::WriteDescriptorSet::default()
                         .dst_binding(2)
                         .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                        .image_info(slice::from_ref(&irrmap.info))
-                        .build(),
-                    vk::WriteDescriptorSet::builder()
+                        .image_info(slice::from_ref(&irrmap.info)),
+                    vk::WriteDescriptorSet::default()
                         .dst_binding(3)
                         .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                        .image_info(slice::from_ref(&prefmap.info))
-                        .build(),
-                    vk::WriteDescriptorSet::builder()
+                        .image_info(slice::from_ref(&prefmap.info)),
+                    vk::WriteDescriptorSet::default()
                         .dst_binding(4)
                         .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                        .image_info(slice::from_ref(&brdf_lut.info))
-                        .build(),
+                        .image_info(slice::from_ref(&brdf_lut.info)),
                 ],
             );
             self.device
@@ -452,21 +442,19 @@ impl SkyboxRenderer {
             include_spirv!("src/shaders/skybox.frag.glsl", frag, glsl),
         )?;
         let sampler = engine.get_sampler(vk::SamplerAddressMode::CLAMP_TO_EDGE.into())?;
-        let desc_layout = vk::DescriptorSetLayoutCreateInfo::builder()
+        let desc_layout = vk::DescriptorSetLayoutCreateInfo::default()
             .flags(vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR)
-            .bindings(&[vk::DescriptorSetLayoutBinding::builder()
+            .bindings(&[vk::DescriptorSetLayoutBinding::default()
                 .binding(0)
                 .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                 .descriptor_count(1)
                 .stage_flags(vk::ShaderStageFlags::FRAGMENT)
-                .immutable_samplers(slice::from_ref(&sampler))
-                .build()])
+                .immutable_samplers(slice::from_ref(&sampler))])
             .create(&device)?;
-        let push_constants = vk::PushConstantRange::builder()
+        let push_constants = vk::PushConstantRange::default()
             .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
             .offset(0)
-            .size(size_of::<SkyboxParams>() as _)
-            .build();
+            .size(size_of::<SkyboxParams>() as _);
         let pipeline = Pipeline::builder_graphics(&shader)
             .descriptor_layout(&desc_layout)
             .push_constants(slice::from_ref(&push_constants))
@@ -509,11 +497,10 @@ impl SkyboxRenderer {
                 vk::PipelineBindPoint::GRAPHICS,
                 self.pipeline.layout,
                 0,
-                &[vk::WriteDescriptorSet::builder()
+                &[vk::WriteDescriptorSet::default()
                     .dst_binding(0)
                     .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                    .image_info(slice::from_ref(&cubemap.info))
-                    .build()],
+                    .image_info(slice::from_ref(&cubemap.info))],
             );
             self.device.cmd_push_constants(
                 cmd_buffer,

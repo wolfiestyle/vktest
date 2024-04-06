@@ -28,29 +28,27 @@ impl Pipeline {
         engine: &VulkanEngine, layout: vk::PipelineLayout, params: GraphicsPipelineBuilder,
     ) -> VulkanResult<vk::Pipeline> {
         let device = &engine.device;
-        let spec_info = vk::SpecializationInfo::builder()
+        let spec_info = vk::SpecializationInfo::default()
             .map_entries(params.spec_entries)
             .data(params.spec_data);
         let shader_stages_ci = [
-            vk::PipelineShaderStageCreateInfo::builder()
+            vk::PipelineShaderStageCreateInfo::default()
                 .stage(vk::ShaderStageFlags::VERTEX)
                 .module(params.shader.vert)
                 .name(c"main")
-                .specialization_info(&spec_info)
-                .build(),
-            vk::PipelineShaderStageCreateInfo::builder()
+                .specialization_info(&spec_info),
+            vk::PipelineShaderStageCreateInfo::default()
                 .stage(vk::ShaderStageFlags::FRAGMENT)
                 .module(params.shader.frag)
                 .name(c"main")
-                .specialization_info(&spec_info)
-                .build(),
+                .specialization_info(&spec_info),
         ];
 
-        let vertex_input_ci = vk::PipelineVertexInputStateCreateInfo::builder()
+        let vertex_input_ci = vk::PipelineVertexInputStateCreateInfo::default()
             .vertex_binding_descriptions(&params.binding_desc)
             .vertex_attribute_descriptions(&params.attrib_desc);
 
-        let input_assembly_ci = vk::PipelineInputAssemblyStateCreateInfo::builder()
+        let input_assembly_ci = vk::PipelineInputAssemblyStateCreateInfo::default()
             .topology(params.topology)
             .primitive_restart_enable(false);
 
@@ -61,19 +59,19 @@ impl Pipeline {
         };
 
         let dynamic_state_ci =
-            vk::PipelineDynamicStateCreateInfo::builder().dynamic_states(&[vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR]);
+            vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&[vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR]);
 
-        let rasterizer_ci = vk::PipelineRasterizationStateCreateInfo::builder()
+        let rasterizer_ci = vk::PipelineRasterizationStateCreateInfo::default()
             .polygon_mode(vk::PolygonMode::FILL)
             .line_width(1.0)
             .cull_mode(params.mode.cull_mode())
             .front_face(vk::FrontFace::COUNTER_CLOCKWISE);
 
-        let multisample_ci = vk::PipelineMultisampleStateCreateInfo::builder()
+        let multisample_ci = vk::PipelineMultisampleStateCreateInfo::default()
             .rasterization_samples(engine.swapchain.samples)
             .min_sample_shading(1.0);
 
-        let color_attach = vk::PipelineColorBlendAttachmentState::builder()
+        let color_attach = vk::PipelineColorBlendAttachmentState::default()
             .color_write_mask(vk::ColorComponentFlags::RGBA)
             .blend_enable(params.mode.blend_enable())
             .src_color_blend_factor(vk::BlendFactor::ONE) // premultiplied alpha
@@ -83,12 +81,12 @@ impl Pipeline {
             .dst_alpha_blend_factor(vk::BlendFactor::ZERO)
             .alpha_blend_op(vk::BlendOp::ADD);
 
-        let color_blend_ci = vk::PipelineColorBlendStateCreateInfo::builder()
+        let color_blend_ci = vk::PipelineColorBlendStateCreateInfo::default()
             .logic_op_enable(false)
             .logic_op(vk::LogicOp::COPY)
             .attachments(slice::from_ref(&color_attach));
 
-        let depth_stencil_ci = vk::PipelineDepthStencilStateCreateInfo::builder()
+        let depth_stencil_ci = vk::PipelineDepthStencilStateCreateInfo::default()
             .depth_test_enable(params.mode.depth_test())
             .depth_write_enable(params.mode.depth_write())
             .depth_compare_op(params.mode.depth_compare_op(engine.reverse_depth))
@@ -96,11 +94,11 @@ impl Pipeline {
             .min_depth_bounds(0.0)
             .max_depth_bounds(1.0);
 
-        let mut pipeline_rendering_ci = vk::PipelineRenderingCreateInfo::builder()
+        let mut pipeline_rendering_ci = vk::PipelineRenderingCreateInfo::default()
             .color_attachment_formats(slice::from_ref(&params.color_format))
             .depth_attachment_format(params.depth_format);
 
-        let pipeline_ci = vk::GraphicsPipelineCreateInfo::builder()
+        let pipeline_ci = vk::GraphicsPipelineCreateInfo::default()
             .stages(&shader_stages_ci)
             .vertex_input_state(&vertex_input_ci)
             .input_assembly_state(&input_assembly_ci)
@@ -125,17 +123,16 @@ impl Pipeline {
     fn create_compute_pipeline(
         engine: &VulkanEngine, layout: vk::PipelineLayout, params: ComputePipelineBuilder,
     ) -> VulkanResult<vk::Pipeline> {
-        let spec_info = vk::SpecializationInfo::builder()
+        let spec_info = vk::SpecializationInfo::default()
             .map_entries(params.spec_entries)
             .data(params.spec_data);
-        let shader_stages_ci = vk::PipelineShaderStageCreateInfo::builder()
+        let shader_stages_ci = vk::PipelineShaderStageCreateInfo::default()
             .stage(vk::ShaderStageFlags::COMPUTE)
             .module(params.shader)
             .name(c"main")
-            .specialization_info(&spec_info)
-            .build();
+            .specialization_info(&spec_info);
 
-        let pipeline_ci = vk::ComputePipelineCreateInfo::builder().stage(shader_stages_ci).layout(layout);
+        let pipeline_ci = vk::ComputePipelineCreateInfo::default().stage(shader_stages_ci).layout(layout);
 
         let pipeline = unsafe {
             engine
@@ -240,7 +237,7 @@ impl<'a> GraphicsPipelineBuilder<'a> {
     }
 
     pub fn build(self, engine: &VulkanEngine) -> VulkanResult<Pipeline> {
-        let layout = vk::PipelineLayoutCreateInfo::builder()
+        let layout = vk::PipelineLayoutCreateInfo::default()
             .set_layouts(self.desc_layouts)
             .push_constant_ranges(self.push_constants)
             .create(&engine.device)?;
@@ -290,7 +287,7 @@ impl<'a> ComputePipelineBuilder<'a> {
     }
 
     pub fn build(self, engine: &VulkanEngine) -> VulkanResult<Pipeline> {
-        let layout = vk::PipelineLayoutCreateInfo::builder()
+        let layout = vk::PipelineLayoutCreateInfo::default()
             .set_layouts(self.desc_layouts)
             .push_constant_ranges(self.push_constants)
             .create(&engine.device)?;
@@ -345,8 +342,8 @@ pub struct Shader {
 
 impl Shader {
     pub fn new(device: &VulkanDevice, vert_spv: &[u32], frag_spv: &[u32]) -> VulkanResult<Self> {
-        let vert = vk::ShaderModuleCreateInfo::builder().code(vert_spv).create(device)?;
-        let frag = vk::ShaderModuleCreateInfo::builder().code(frag_spv).create(device)?;
+        let vert = vk::ShaderModuleCreateInfo::default().code(vert_spv).create(device)?;
+        let frag = vk::ShaderModuleCreateInfo::default().code(frag_spv).create(device)?;
         Ok(Self { vert, frag })
     }
 }

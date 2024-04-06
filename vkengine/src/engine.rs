@@ -8,7 +8,7 @@ use crate::texture::Texture;
 use crate::types::*;
 use ash::vk;
 use glam::{Mat4, UVec2};
-use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
+use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use std::collections::HashMap;
 use std::slice;
 use std::sync::{Arc, Mutex};
@@ -48,7 +48,7 @@ pub struct VulkanEngine {
 impl VulkanEngine {
     pub fn new<W>(window: &W, app_name: &str, device_selection: DeviceSelection) -> VulkanResult<Self>
     where
-        W: HasRawDisplayHandle + HasRawWindowHandle + WindowSize,
+        W: HasDisplayHandle + HasWindowHandle + WindowSize,
     {
         let device = VulkanDevice::new(window, app_name, device_selection)?;
         let depth_format = device.find_depth_format(false)?;
@@ -81,7 +81,7 @@ impl VulkanEngine {
             Default::default(),
         )?;
 
-        let pipeline_cache = vk::PipelineCacheCreateInfo::builder().create(&device)?; //TODO: save/load cache data
+        let pipeline_cache = vk::PipelineCacheCreateInfo::default().create(&device)?; //TODO: save/load cache data
 
         let image_desc_layout = Self::pbr_descriptor_layout(&device)?;
 
@@ -129,46 +129,41 @@ impl VulkanEngine {
     }
 
     fn pbr_descriptor_layout(device: &VulkanDevice) -> VulkanResult<vk::DescriptorSetLayout> {
-        let desc_layout = vk::DescriptorSetLayoutCreateInfo::builder()
+        let desc_layout = vk::DescriptorSetLayoutCreateInfo::default()
             .bindings(&[
                 // color
-                vk::DescriptorSetLayoutBinding::builder()
+                vk::DescriptorSetLayoutBinding::default()
                     .binding(0)
                     .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                     .descriptor_count(1)
-                    .stage_flags(vk::ShaderStageFlags::FRAGMENT)
-                    .build(),
+                    .stage_flags(vk::ShaderStageFlags::FRAGMENT),
                 // metallic roughness
-                vk::DescriptorSetLayoutBinding::builder()
+                vk::DescriptorSetLayoutBinding::default()
                     .binding(1)
                     .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                     .descriptor_count(1)
-                    .stage_flags(vk::ShaderStageFlags::FRAGMENT)
-                    .build(),
+                    .stage_flags(vk::ShaderStageFlags::FRAGMENT),
                 // normal
-                vk::DescriptorSetLayoutBinding::builder()
+                vk::DescriptorSetLayoutBinding::default()
                     .binding(2)
                     .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                     .descriptor_count(1)
-                    .stage_flags(vk::ShaderStageFlags::FRAGMENT)
-                    .build(),
+                    .stage_flags(vk::ShaderStageFlags::FRAGMENT),
                 // emissive
-                vk::DescriptorSetLayoutBinding::builder()
+                vk::DescriptorSetLayoutBinding::default()
                     .binding(3)
                     .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                     .descriptor_count(1)
-                    .stage_flags(vk::ShaderStageFlags::FRAGMENT)
-                    .build(),
+                    .stage_flags(vk::ShaderStageFlags::FRAGMENT),
                 // occlusion
-                vk::DescriptorSetLayoutBinding::builder()
+                vk::DescriptorSetLayoutBinding::default()
                     .binding(4)
                     .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                     .descriptor_count(1)
-                    .stage_flags(vk::ShaderStageFlags::FRAGMENT)
-                    .build(),
+                    .stage_flags(vk::ShaderStageFlags::FRAGMENT),
             ])
             .create(device)?;
-        device.debug(|d| d.set_object_name(device, &desc_layout, "PBR desc layout"));
+        device.debug(|d| d.set_object_name(desc_layout, "PBR desc layout"));
         Ok(desc_layout)
     }
 
@@ -296,20 +291,19 @@ impl VulkanEngine {
             ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
             descriptor_count: count * 5,
         }];
-        let desc_pool = vk::DescriptorPoolCreateInfo::builder()
+        let desc_pool = vk::DescriptorPoolCreateInfo::default()
             .max_sets(count)
             .pool_sizes(&pool_sizes)
             .create(&self.device)?;
-        self.device
-            .debug(|d| d.set_object_name(&self.device, &desc_pool, "glTF materials pool"));
-        let material_desc = vk::DescriptorSetAllocateInfo::builder()
+        self.device.debug(|d| d.set_object_name(desc_pool, "glTF materials pool"));
+        let material_desc = vk::DescriptorSetAllocateInfo::default()
             .descriptor_pool(desc_pool)
             .set_layouts(&vec![self.pbr_desc_layout; count as usize])
             .create(&self.device)?;
 
         self.write_pbr_descriptor_set(material_desc[0], None, None, None, None, None);
         self.device
-            .debug(|d| d.set_object_name(&self.device, &material_desc[0], "Descriptor default material"));
+            .debug(|d| d.set_object_name(material_desc[0], "Descriptor default material"));
 
         for (material, &descriptor) in gltf.materials.iter().zip(material_desc.iter().skip(1)) {
             let color = material.color_tex.map(|tex| &textures[tex.id].info);
@@ -320,8 +314,7 @@ impl VulkanEngine {
             self.write_pbr_descriptor_set(descriptor, color, metal_rough, normal, emissive, occlusion);
             self.device.debug(|d| {
                 d.set_object_name(
-                    &self.device,
-                    &descriptor,
+                    descriptor,
                     &format!("Descriptor material {}", material.name.as_deref().unwrap_or("")),
                 )
             });
@@ -339,36 +332,31 @@ impl VulkanEngine {
         normal: Option<&vk::DescriptorImageInfo>, emissive: Option<&vk::DescriptorImageInfo>, occlusion: Option<&vk::DescriptorImageInfo>,
     ) {
         let desc_writes = [
-            vk::WriteDescriptorSet::builder()
+            vk::WriteDescriptorSet::default()
                 .dst_set(descriptor)
                 .dst_binding(0)
                 .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .image_info(slice::from_ref(color.unwrap_or(&self.default_texture.info)))
-                .build(),
-            vk::WriteDescriptorSet::builder()
+                .image_info(slice::from_ref(color.unwrap_or(&self.default_texture.info))),
+            vk::WriteDescriptorSet::default()
                 .dst_set(descriptor)
                 .dst_binding(1)
                 .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .image_info(slice::from_ref(metal_rough.unwrap_or(&self.default_texture.info)))
-                .build(),
-            vk::WriteDescriptorSet::builder()
+                .image_info(slice::from_ref(metal_rough.unwrap_or(&self.default_texture.info))),
+            vk::WriteDescriptorSet::default()
                 .dst_set(descriptor)
                 .dst_binding(2)
                 .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .image_info(slice::from_ref(normal.unwrap_or(&self.default_normalmap.info)))
-                .build(),
-            vk::WriteDescriptorSet::builder()
+                .image_info(slice::from_ref(normal.unwrap_or(&self.default_normalmap.info))),
+            vk::WriteDescriptorSet::default()
                 .dst_set(descriptor)
                 .dst_binding(3)
                 .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .image_info(slice::from_ref(emissive.unwrap_or(&self.default_texture.info)))
-                .build(),
-            vk::WriteDescriptorSet::builder()
+                .image_info(slice::from_ref(emissive.unwrap_or(&self.default_texture.info))),
+            vk::WriteDescriptorSet::default()
                 .dst_set(descriptor)
                 .dst_binding(4)
                 .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .image_info(slice::from_ref(occlusion.unwrap_or(&self.default_texture.info)))
-                .build(),
+                .image_info(slice::from_ref(occlusion.unwrap_or(&self.default_texture.info))),
         ];
         unsafe {
             self.device.update_descriptor_sets(&desc_writes, &[]);
@@ -378,7 +366,7 @@ impl VulkanEngine {
     fn record_primary_command_buffer(
         &self, cmd_buffer: vk::CommandBuffer, draw_cmds: &[DrawPayload], image_idx: usize, frame: &FrameState,
     ) -> VulkanResult<()> {
-        let begin_info = vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+        let begin_info = vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
         unsafe {
             self.device
                 .begin_command_buffer(cmd_buffer, &begin_info)
@@ -410,7 +398,7 @@ impl VulkanEngine {
 
         let color_attach = self.swapchain.color_attachment(image_idx);
         let depth_attach = self.swapchain.depth_attachment(self.reverse_depth);
-        let render_info = vk::RenderingInfo::builder()
+        let render_info = vk::RenderingInfo::default()
             .flags(vk::RenderingFlags::CONTENTS_SECONDARY_COMMAND_BUFFERS)
             .render_area(self.swapchain.extent_rect())
             .layer_count(1)
@@ -442,12 +430,12 @@ impl VulkanEngine {
     }
 
     pub fn begin_secondary_draw_commands(&self, cmd_buffer: vk::CommandBuffer, flags: vk::CommandBufferUsageFlags) -> VulkanResult<()> {
-        let mut render_info = vk::CommandBufferInheritanceRenderingInfo::builder()
+        let mut render_info = vk::CommandBufferInheritanceRenderingInfo::default()
             .color_attachment_formats(slice::from_ref(&self.swapchain.format))
             .depth_attachment_format(self.swapchain.depth_format)
             .rasterization_samples(self.swapchain.samples);
-        let inherit_info = vk::CommandBufferInheritanceInfo::builder().push_next(&mut render_info);
-        let begin_info = vk::CommandBufferBeginInfo::builder()
+        let inherit_info = vk::CommandBufferInheritanceInfo::default().push_next(&mut render_info);
+        let begin_info = vk::CommandBufferBeginInfo::default()
             .flags(vk::CommandBufferUsageFlags::RENDER_PASS_CONTINUE | flags)
             .inheritance_info(&inherit_info);
         unsafe {
@@ -489,7 +477,7 @@ impl VulkanEngine {
         self.cpu_time = Instant::now() - self.cpu_time_start;
 
         // wait for previous frame finished, so we can modify or reuse resources
-        let wait_info = vk::SemaphoreWaitInfo::builder()
+        let wait_info = vk::SemaphoreWaitInfo::default()
             .semaphores(slice::from_ref(&in_flight_sem))
             .values(slice::from_ref(&frame.wait_frame));
         unsafe {
@@ -533,7 +521,7 @@ impl VulkanEngine {
         let mut query_data = [0u64; 2];
         let query_res = unsafe {
             self.device
-                .get_query_pool_results(frame.time_query, 0, 2, &mut query_data, vk::QueryResultFlags::TYPE_64)
+                .get_query_pool_results(frame.time_query, 0, &mut query_data, vk::QueryResultFlags::TYPE_64)
         };
         if query_res.is_ok() {
             self.gpu_time = query_data[1].saturating_sub(query_data[0]);
@@ -547,8 +535,8 @@ impl VulkanEngine {
         frame.payload.extend(draw_cmds);
         let signal_values = [0, next_frame];
         let signal_sems = [render_finish_sem, in_flight_sem];
-        let mut timeline_info = vk::TimelineSemaphoreSubmitInfo::builder().signal_semaphore_values(&signal_values);
-        let submit_info = vk::SubmitInfo::builder()
+        let mut timeline_info = vk::TimelineSemaphoreSubmitInfo::default().signal_semaphore_values(&signal_values);
+        let submit_info = vk::SubmitInfo::default()
             .wait_semaphores(slice::from_ref(&image_avail_sem))
             .wait_dst_stage_mask(&[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT])
             .command_buffers(slice::from_ref(&command_buffer))
@@ -562,7 +550,7 @@ impl VulkanEngine {
 
         self.current_frame += 1;
 
-        let present_info = vk::PresentInfoKHR::builder()
+        let present_info = vk::PresentInfoKHR::default()
             .wait_semaphores(slice::from_ref(&render_finish_sem))
             .swapchains(slice::from_ref(&*self.swapchain))
             .image_indices(slice::from_ref(&image_idx));
@@ -613,13 +601,13 @@ impl CmdBufferRing {
     }
 
     fn new_with_level(device: &VulkanDevice, level: vk::CommandBufferLevel) -> VulkanResult<Self> {
-        let pool = vk::CommandPoolCreateInfo::builder()
+        let pool = vk::CommandPoolCreateInfo::default()
             .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
             .queue_family_index(device.dev_info.graphics_idx)
             .create(device)?;
-        device.debug(|d| d.set_object_name(device, &pool, "CmdBufferRing pool"));
+        device.debug(|d| d.set_object_name(pool, "CmdBufferRing pool"));
         // we use N + 1 command buffers so we can write on them right away without waiting for the previous frame
-        let buffers = vk::CommandBufferAllocateInfo::builder()
+        let buffers = vk::CommandBufferAllocateInfo::default()
             .command_pool(pool)
             .level(level)
             .command_buffer_count(QUEUE_DEPTH as u32 + 1)
@@ -665,7 +653,7 @@ impl UploadBuffer {
             .try_into()
             .unwrap();
         let this = Self { buffers };
-        device.debug(|d| this.buffers.iter().for_each(|b| d.set_object_name(device, &b.handle, name)));
+        device.debug(|d| this.buffers.iter().for_each(|b| d.set_object_name(b.handle, name)));
         Ok(this)
     }
 
@@ -765,7 +753,7 @@ impl FrameState {
         let image_avail_sem = device.make_semaphore(vk::SemaphoreType::BINARY)?;
         let render_finished_sem = device.make_semaphore(vk::SemaphoreType::BINARY)?;
         let in_flight_sem = device.make_semaphore(vk::SemaphoreType::TIMELINE)?;
-        let time_query = vk::QueryPoolCreateInfo::builder()
+        let time_query = vk::QueryPoolCreateInfo::default()
             .query_type(vk::QueryType::TIMESTAMP)
             .query_count(2)
             .create(device)?;
@@ -773,10 +761,10 @@ impl FrameState {
             device.reset_query_pool(time_query, 0, 2);
         }
         device.debug(|d| {
-            d.set_object_name(device, &image_avail_sem, "Image available semaphore");
-            d.set_object_name(device, &render_finished_sem, "Render finished semaphore");
-            d.set_object_name(device, &in_flight_sem, "In-flight semaphore");
-            d.set_object_name(device, &time_query, "Timestamp QueryPool");
+            d.set_object_name(image_avail_sem, "Image available semaphore");
+            d.set_object_name(render_finished_sem, "Render finished semaphore");
+            d.set_object_name(in_flight_sem, "In-flight semaphore");
+            d.set_object_name(time_query, "Timestamp QueryPool");
         });
         Ok(Self {
             image_avail_sem,
@@ -849,7 +837,7 @@ impl SamplerOptions {
     }
 
     fn create_sampler(&self, device: &VulkanDevice) -> VulkanResult<vk::Sampler> {
-        vk::SamplerCreateInfo::builder()
+        vk::SamplerCreateInfo::default()
             .mag_filter(self.mag_filter)
             .min_filter(self.min_filter)
             .address_mode_u(self.wrap_u)

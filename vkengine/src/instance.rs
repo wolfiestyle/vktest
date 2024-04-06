@@ -1,8 +1,8 @@
-use crate::debug::DebugUtils;
+use crate::debug::DebugUtilsInstance;
 use crate::types::*;
-use ash::extensions::{ext, khr};
 use ash::vk;
-use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
+use ash::{ext, khr};
+use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use std::collections::BTreeSet;
 use std::convert::identity;
 use std::ffi::{c_char, CStr, CString};
@@ -10,23 +10,23 @@ use std::ffi::{c_char, CStr, CString};
 const VALIDATION_ENABLED: bool = cfg!(debug_assertions);
 const VALIDATION_LAYER: &CStr = c"VK_LAYER_KHRONOS_validation";
 const DEVICE_EXTENSIONS: [(&CStr, bool); 4] = [
-    (khr::Swapchain::name(), true),
-    (vk::KhrPortabilitySubsetFn::name(), false),
-    (khr::DynamicRendering::name(), true),
-    (khr::PushDescriptor::name(), true),
+    (khr::swapchain::NAME, true),
+    (khr::portability_subset::NAME, false),
+    (khr::dynamic_rendering::NAME, true),
+    (khr::push_descriptor::NAME, true),
 ];
 const VULKAN_VERSION: u32 = vk::API_VERSION_1_2;
 
 pub(crate) struct VulkanInstance {
     entry: ash::Entry,
     instance: ash::Instance,
-    pub surface_utils: khr::Surface,
+    pub surface_utils: khr::surface::Instance,
     #[cfg(debug_assertions)]
-    debug_utils: DebugUtils,
+    debug_utils: DebugUtilsInstance,
 }
 
 impl VulkanInstance {
-    pub fn new<W: HasRawDisplayHandle>(window: &W, app_name: &str) -> VulkanResult<Self> {
+    pub fn new<W: HasDisplayHandle>(window: &W, app_name: &str) -> VulkanResult<Self> {
         let entry = unsafe { ash::Entry::load()? };
         if VALIDATION_ENABLED {
             Self::check_validation_support(&entry)?;
@@ -34,11 +34,11 @@ impl VulkanInstance {
         let app_name = CString::new(app_name).unwrap();
         let engine_name = CString::new(env!("CARGO_PKG_NAME")).unwrap();
         let instance = Self::create_instance(&entry, window, &app_name, &engine_name)?;
-        let surface_utils = khr::Surface::new(&entry, &instance);
+        let surface_utils = khr::surface::Instance::new(&entry, &instance);
 
         Ok(Self {
             #[cfg(debug_assertions)]
-            debug_utils: DebugUtils::new(&entry, &instance),
+            debug_utils: DebugUtilsInstance::new(&entry, &instance),
             entry,
             instance,
             surface_utils,
@@ -46,34 +46,40 @@ impl VulkanInstance {
     }
 
     fn check_validation_support(entry: &ash::Entry) -> VulkanResult<()> {
-        let supported_layers = entry
-            .enumerate_instance_layer_properties()
-            .describe_err("Failed to enumerate instance layer properties")?;
+        let supported_layers = unsafe {
+            entry
+                .enumerate_instance_layer_properties()
+                .describe_err("Failed to enumerate instance layer properties")?
+        };
         //eprintln!("Supported instance layers: {supported_layers:#?}");
         supported_layers
             .iter()
-            .any(|layer| vk_to_cstr(&layer.layer_name) == VALIDATION_LAYER)
+            .map(|layer| layer.layer_name_as_c_str().unwrap_or_default())
+            .any(|name| name == VALIDATION_LAYER)
             .then_some(())
             .ok_or(VkError::EngineError("Validation layers requested but not available"))
     }
 
     fn check_portability_support(entry: &ash::Entry) -> VulkanResult<Option<*const c_char>> {
-        let ext_list = entry
-            .enumerate_instance_extension_properties(None)
-            .describe_err("Failed to enumerate instance extension properties")?;
+        let ext_list = unsafe {
+            entry
+                .enumerate_instance_extension_properties(None)
+                .describe_err("Failed to enumerate instance extension properties")?
+        };
         //eprintln!("Supported instance extensions: {ext_list:#?}");
-        let ext_name = vk::KhrPortabilityEnumerationFn::name();
+        let ext_name = khr::portability_enumeration::NAME;
         let supported = ext_list
             .iter()
-            .any(|&ext| vk_to_cstr(&ext.extension_name) == ext_name)
+            .map(|ext| ext.extension_name_as_c_str().unwrap_or_default())
+            .any(|name| name == ext_name)
             .then_some(ext_name.as_ptr());
         Ok(supported)
     }
 
-    fn create_instance<W: HasRawDisplayHandle>(
+    fn create_instance<W: HasDisplayHandle>(
         entry: &ash::Entry, window: &W, app_name: &CStr, engine_name: &CStr,
     ) -> VulkanResult<ash::Instance> {
-        let version = entry.try_enumerate_instance_version()?.unwrap_or(vk::API_VERSION_1_0);
+        let version = unsafe { entry.try_enumerate_instance_version()?.unwrap_or(vk::API_VERSION_1_0) };
         if version < VULKAN_VERSION {
             eprintln!(
                 "Instance supported Vulkan version {} is lower than required version {}",
@@ -83,7 +89,7 @@ impl VulkanInstance {
             return Err(vk::Result::ERROR_INCOMPATIBLE_DRIVER.into());
         }
 
-        let mut extension_names = ash_window::enumerate_required_extensions(window.raw_display_handle())
+        let mut extension_names = ash_window::enumerate_required_extensions(window.display_handle()?.into())
             .describe_err("Unsupported display platform")?
             .to_vec();
         let portability = Self::check_portability_support(entry)?;
@@ -92,7 +98,7 @@ impl VulkanInstance {
             .map(|_| vk::InstanceCreateFlags::ENUMERATE_PORTABILITY_KHR)
             .unwrap_or_default();
         if VALIDATION_ENABLED {
-            extension_names.push(ext::DebugUtils::name().as_ptr());
+            extension_names.push(ext::debug_utils::NAME.as_ptr());
         }
         for &name in &extension_names {
             eprintln!("Using instance extension: {:?}", unsafe { CStr::from_ptr(name) });
@@ -100,15 +106,15 @@ impl VulkanInstance {
 
         let layer_names = [VALIDATION_LAYER.as_ptr()];
 
-        let app_info = vk::ApplicationInfo::builder()
+        let app_info = vk::ApplicationInfo::default()
             .application_name(app_name)
             .application_version(vk::make_api_version(0, 1, 0, 0))
             .engine_name(engine_name)
             .engine_version(vk::make_api_version(0, 1, 0, 0))
             .api_version(VULKAN_VERSION);
 
-        let mut dbg_messenger_ci = DebugUtils::create_debug_messenger_ci();
-        let mut instance_ci = vk::InstanceCreateInfo::builder()
+        let mut dbg_messenger_ci = DebugUtilsInstance::create_debug_messenger_ci();
+        let mut instance_ci = vk::InstanceCreateInfo::default()
             .flags(flags)
             .application_info(&app_info)
             .enabled_extension_names(&extension_names);
@@ -122,14 +128,14 @@ impl VulkanInstance {
 
     pub fn create_surface<W>(&self, window: &W) -> VulkanResult<vk::SurfaceKHR>
     where
-        W: HasRawDisplayHandle + HasRawWindowHandle,
+        W: HasDisplayHandle + HasWindowHandle,
     {
         unsafe {
             ash_window::create_surface(
                 &self.entry,
                 &self.instance,
-                window.raw_display_handle(),
-                window.raw_window_handle(),
+                window.display_handle()?.into(),
+                window.window_handle()?.into(),
                 None,
             )
             .describe_err("Failed to create surface")
@@ -165,13 +171,21 @@ impl VulkanInstance {
     fn query_device_feature_support(&self, phys_dev: vk::PhysicalDevice, surface: vk::SurfaceKHR) -> VulkanResult<DeviceInfo> {
         // device info
         let mut driver_props = vk::PhysicalDeviceDriverProperties::default();
-        let mut props = vk::PhysicalDeviceProperties2::builder().push_next(&mut driver_props).build();
+        let mut props = vk::PhysicalDeviceProperties2 {
+            p_next: &mut driver_props as *mut vk::PhysicalDeviceDriverProperties as *mut _, // FIXME: workaround for .push_next() holding mut borrow to driver_props
+            ..Default::default()
+        };
         unsafe { self.instance.get_physical_device_properties2(phys_dev, &mut props) };
         let dev_type = props.properties.device_type.into();
-        let name = vk_to_cstr(&props.properties.device_name).to_str().unwrap_or("unknown").to_owned();
+        let name = props
+            .properties
+            .device_name_as_c_str()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
         let driver = [
-            vk_to_cstr(&driver_props.driver_name).to_str().unwrap_or("unknown"),
-            vk_to_cstr(&driver_props.driver_info).to_str().unwrap_or(""),
+            driver_props.driver_name_as_c_str().unwrap_or_default().to_string_lossy(),
+            driver_props.driver_info_as_c_str().unwrap_or_default().to_string_lossy(),
         ]
         .join(" ");
         let limits = &props.properties.limits;
@@ -180,7 +194,7 @@ impl VulkanInstance {
         // features
         let mut features12 = vk::PhysicalDeviceVulkan12Features::default();
         let mut portability = vk::PhysicalDevicePortabilitySubsetFeaturesKHR::default();
-        let mut features = vk::PhysicalDeviceFeatures2::builder()
+        let mut features = vk::PhysicalDeviceFeatures2::default()
             .push_next(&mut features12)
             .push_next(&mut portability);
         unsafe { self.instance.get_physical_device_features2(phys_dev, &mut features) };
@@ -238,7 +252,10 @@ impl VulkanInstance {
                 .enumerate_device_extension_properties(phys_dev)
                 .describe_err("Failed to enumerate device extensions")?
         };
-        let extensions: BTreeSet<_> = ext_list.iter().map(|ext| vk_to_cstr(&ext.extension_name).to_owned()).collect();
+        let extensions: BTreeSet<_> = ext_list
+            .iter()
+            .map(|ext| ext.extension_name_as_c_str().unwrap_or_default().to_owned())
+            .collect();
         //eprintln!("Supported device extensions: {extensions:#?}");
         let missing_ext: Vec<_> = DEVICE_EXTENSIONS
             .into_iter()
@@ -250,7 +267,7 @@ impl VulkanInstance {
             return Err(VkError::UnsuitableDevice);
         }
 
-        if extensions.contains(vk::KhrPortabilitySubsetFn::name()) && portability.image_view_format_swizzle == vk::FALSE {
+        if extensions.contains(khr::portability_subset::NAME) && portability.image_view_format_swizzle == vk::FALSE {
             eprintln!("Device '{name}' doesn't support image view format swizzle (portability)");
             return Err(VkError::UnsuitableDevice);
         }
@@ -303,18 +320,17 @@ impl VulkanInstance {
             .unique_families
             .iter()
             .map(|&idx| {
-                vk::DeviceQueueCreateInfo::builder()
+                vk::DeviceQueueCreateInfo::default()
                     .queue_family_index(idx)
                     .queue_priorities(&queue_prio)
-                    .build()
             })
             .collect();
 
-        let features = vk::PhysicalDeviceFeatures::builder()
+        let features = vk::PhysicalDeviceFeatures::default()
             .sampler_anisotropy(true)
             .shader_storage_image_write_without_format(true);
 
-        let mut features12 = vk::PhysicalDeviceVulkan12Features::builder()
+        let mut features12 = vk::PhysicalDeviceVulkan12Features::default()
             .timeline_semaphore(true)
             .host_query_reset(true);
 
@@ -329,17 +345,17 @@ impl VulkanInstance {
             .map(CStr::as_ptr)
             .collect();
 
-        let mut dyn_render_enable = vk::PhysicalDeviceDynamicRenderingFeatures::builder().dynamic_rendering(true);
-        let mut portability_feats = vk::PhysicalDevicePortabilitySubsetFeaturesKHR::builder().image_view_format_swizzle(true);
+        let mut dyn_render_enable = vk::PhysicalDeviceDynamicRenderingFeatures::default().dynamic_rendering(true);
+        let mut portability_feats = vk::PhysicalDevicePortabilitySubsetFeaturesKHR::default().image_view_format_swizzle(true);
 
-        let mut device_ci = vk::DeviceCreateInfo::builder()
+        let mut device_ci = vk::DeviceCreateInfo::default()
             .queue_create_infos(&queues_ci)
             .enabled_features(&features)
             .enabled_extension_names(&extensions)
             .push_next(&mut features12)
             .push_next(&mut dyn_render_enable);
 
-        if dev_info.extensions.contains(vk::KhrPortabilitySubsetFn::name()) {
+        if dev_info.extensions.contains(khr::portability_subset::NAME) {
             device_ci = device_ci.push_next(&mut portability_feats);
         }
 
@@ -349,16 +365,6 @@ impl VulkanInstance {
                 .describe_err("Failed to create logical device")
         }
     }
-
-    #[cfg(debug_assertions)]
-    #[inline]
-    pub fn debug<F: FnOnce(&DebugUtils)>(&self, debug_f: F) {
-        debug_f(&self.debug_utils)
-    }
-
-    #[cfg(not(debug_assertions))]
-    #[inline]
-    pub fn debug<F: FnOnce(&DebugUtils)>(&self, _debug_f: F) {}
 }
 
 impl Drop for VulkanInstance {
@@ -368,7 +374,6 @@ impl Drop for VulkanInstance {
             {
                 self.debug_utils.cleanup(&());
             }
-
             self.instance.destroy_instance(None);
         }
     }
@@ -522,11 +527,6 @@ impl From<DeviceType> for DeviceSelection<'_> {
             dev_type: Some(ty),
         }
     }
-}
-
-fn vk_to_cstr(raw: &[c_char]) -> &CStr {
-    let raw_u8 = bytemuck::cast_slice(raw);
-    CStr::from_bytes_until_nul(raw_u8).unwrap_or_default()
 }
 
 #[derive(Debug, Clone, Copy)]

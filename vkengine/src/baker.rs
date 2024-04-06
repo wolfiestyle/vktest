@@ -40,26 +40,24 @@ impl Baker {
 
     fn create_irrmap_pipeline(engine: &VulkanEngine) -> VulkanResult<Pipeline> {
         let device = &*engine.device;
-        let irrmap_shader = vk::ShaderModuleCreateInfo::builder()
+        let irrmap_shader = vk::ShaderModuleCreateInfo::default()
             .code(include_spirv!("src/shaders/irrmap.comp.glsl", comp, glsl))
             .create(device)?;
         let sampler = engine.get_sampler(vk::SamplerAddressMode::CLAMP_TO_EDGE.into())?;
-        let desc_layout = vk::DescriptorSetLayoutCreateInfo::builder()
+        let desc_layout = vk::DescriptorSetLayoutCreateInfo::default()
             .flags(vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR)
             .bindings(&[
-                vk::DescriptorSetLayoutBinding::builder()
+                vk::DescriptorSetLayoutBinding::default()
                     .binding(0)
                     .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                     .descriptor_count(1)
                     .stage_flags(vk::ShaderStageFlags::COMPUTE)
-                    .immutable_samplers(slice::from_ref(&sampler))
-                    .build(),
-                vk::DescriptorSetLayoutBinding::builder()
+                    .immutable_samplers(slice::from_ref(&sampler)),
+                vk::DescriptorSetLayoutBinding::default()
                     .binding(1)
                     .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
                     .descriptor_count(1)
-                    .stage_flags(vk::ShaderStageFlags::COMPUTE)
-                    .build(),
+                    .stage_flags(vk::ShaderStageFlags::COMPUTE),
             ])
             .create(device)?;
         let irrmap_pipeline = Pipeline::builder_compute(irrmap_shader)
@@ -73,26 +71,24 @@ impl Baker {
 
     fn create_prefilter_pipeline(engine: &VulkanEngine) -> VulkanResult<Pipeline> {
         let device = &*engine.device;
-        let prefilter_shader = vk::ShaderModuleCreateInfo::builder()
+        let prefilter_shader = vk::ShaderModuleCreateInfo::default()
             .code(include_spirv!("src/shaders/prefilter.comp.glsl", comp, glsl))
             .create(device)?;
         let sampler = engine.get_sampler(vk::SamplerAddressMode::CLAMP_TO_EDGE.into())?;
-        let desc_layout = vk::DescriptorSetLayoutCreateInfo::builder()
+        let desc_layout = vk::DescriptorSetLayoutCreateInfo::default()
             .flags(vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR)
             .bindings(&[
-                vk::DescriptorSetLayoutBinding::builder()
+                vk::DescriptorSetLayoutBinding::default()
                     .binding(0)
                     .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                     .descriptor_count(1)
                     .stage_flags(vk::ShaderStageFlags::COMPUTE)
-                    .immutable_samplers(slice::from_ref(&sampler))
-                    .build(),
-                vk::DescriptorSetLayoutBinding::builder()
+                    .immutable_samplers(slice::from_ref(&sampler)),
+                vk::DescriptorSetLayoutBinding::default()
                     .binding(1)
                     .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
                     .descriptor_count(1)
-                    .stage_flags(vk::ShaderStageFlags::COMPUTE)
-                    .build(),
+                    .stage_flags(vk::ShaderStageFlags::COMPUTE),
             ])
             .create(device)?;
         let push_constants = vk::PushConstantRange {
@@ -118,17 +114,16 @@ impl Baker {
 
     fn create_brdf_lut_pipeline(engine: &VulkanEngine) -> VulkanResult<Pipeline> {
         let device = &*engine.device;
-        let brdf_shader = vk::ShaderModuleCreateInfo::builder()
+        let brdf_shader = vk::ShaderModuleCreateInfo::default()
             .code(include_spirv!("src/shaders/brdf_lut.comp.glsl", comp, glsl))
             .create(device)?;
-        let desc_layout = vk::DescriptorSetLayoutCreateInfo::builder()
+        let desc_layout = vk::DescriptorSetLayoutCreateInfo::default()
             .flags(vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR)
-            .bindings(&[vk::DescriptorSetLayoutBinding::builder()
+            .bindings(&[vk::DescriptorSetLayoutBinding::default()
                 .binding(0)
                 .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
                 .descriptor_count(1)
-                .stage_flags(vk::ShaderStageFlags::COMPUTE)
-                .build()])
+                .stage_flags(vk::ShaderStageFlags::COMPUTE)])
             .create(device)?;
         let brdf_pipeline = Pipeline::builder_compute(brdf_shader)
             .descriptor_layout(&desc_layout)
@@ -141,7 +136,7 @@ impl Baker {
 
     fn create_eq2cube_pipeline(engine: &VulkanEngine) -> VulkanResult<Pipeline> {
         let device = &*engine.device;
-        let eq2cube_shader = vk::ShaderModuleCreateInfo::builder()
+        let eq2cube_shader = vk::ShaderModuleCreateInfo::default()
             .code(include_spirv!("src/shaders/equirect2cube.comp.glsl", comp, glsl))
             .create(device)?;
         let sampler = engine.get_sampler(SamplerOptions {
@@ -149,22 +144,20 @@ impl Baker {
             wrap_v: vk::SamplerAddressMode::CLAMP_TO_EDGE,
             ..Default::default()
         })?;
-        let desc_layout = vk::DescriptorSetLayoutCreateInfo::builder()
+        let desc_layout = vk::DescriptorSetLayoutCreateInfo::default()
             .flags(vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR)
             .bindings(&[
-                vk::DescriptorSetLayoutBinding::builder()
+                vk::DescriptorSetLayoutBinding::default()
                     .binding(0)
                     .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                     .descriptor_count(1)
                     .stage_flags(vk::ShaderStageFlags::COMPUTE)
-                    .immutable_samplers(slice::from_ref(&sampler))
-                    .build(),
-                vk::DescriptorSetLayoutBinding::builder()
+                    .immutable_samplers(slice::from_ref(&sampler)),
+                vk::DescriptorSetLayoutBinding::default()
                     .binding(1)
                     .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
                     .descriptor_count(1)
-                    .stage_flags(vk::ShaderStageFlags::COMPUTE)
-                    .build(),
+                    .stage_flags(vk::ShaderStageFlags::COMPUTE),
             ])
             .create(device)?;
         let eq2cube_pipeline = Pipeline::builder_compute(eq2cube_shader)
@@ -186,8 +179,7 @@ impl Baker {
             ..Default::default()
         };
         let mut irrmap = Texture::new_empty(&self.device, params, vk::ImageCreateFlags::CUBE_COMPATIBLE, vk::Sampler::null())?;
-        self.device
-            .debug(|d| d.set_object_name(&self.device, &*irrmap.image, "Irradiance map"));
+        self.device.debug(|d| d.set_object_name(*irrmap.image, "Irradiance map"));
         let cmd_buffer = self.device.begin_one_time_commands()?;
         irrmap.transition_layout(&self.device, cmd_buffer, vk::ImageLayout::GENERAL);
         unsafe {
@@ -199,16 +191,14 @@ impl Baker {
                 self.irrmap_pipeline.layout,
                 0,
                 &[
-                    vk::WriteDescriptorSet::builder()
+                    vk::WriteDescriptorSet::default()
                         .dst_binding(0)
                         .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                        .image_info(slice::from_ref(&cubemap.info))
-                        .build(),
-                    vk::WriteDescriptorSet::builder()
+                        .image_info(slice::from_ref(&cubemap.info)),
+                    vk::WriteDescriptorSet::default()
                         .dst_binding(1)
                         .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
-                        .image_info(slice::from_ref(&irrmap.info))
-                        .build(),
+                        .image_info(slice::from_ref(&irrmap.info)),
                 ],
             );
             self.device.cmd_dispatch(cmd_buffer, IRRMAP_WG, IRRMAP_WG, 6);
@@ -229,8 +219,7 @@ impl Baker {
             ..Default::default()
         };
         let mut prefmap = Texture::new_empty(&self.device, params, vk::ImageCreateFlags::CUBE_COMPATIBLE, vk::Sampler::null())?;
-        self.device
-            .debug(|d| d.set_object_name(&self.device, &*prefmap.image, "Prefiltered map"));
+        self.device.debug(|d| d.set_object_name(*prefmap.image, "Prefiltered map"));
         let cmd_buffer = self.device.begin_one_time_commands()?;
         prefmap.transition_layout(&self.device, cmd_buffer, vk::ImageLayout::GENERAL);
         let mip_infos = (0..PREFILTERED_MIP_LEVELS)
@@ -260,11 +249,10 @@ impl Baker {
                 vk::PipelineBindPoint::COMPUTE,
                 self.prefilter_pipeline.layout,
                 0,
-                &[vk::WriteDescriptorSet::builder()
+                &[vk::WriteDescriptorSet::default()
                     .dst_binding(0)
                     .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                    .image_info(slice::from_ref(&cubemap.info))
-                    .build()],
+                    .image_info(slice::from_ref(&cubemap.info))],
             );
             let mut wg_size = PREFILTERED_WG;
             for level in 0..PREFILTERED_MIP_LEVELS {
@@ -280,11 +268,10 @@ impl Baker {
                     vk::PipelineBindPoint::COMPUTE,
                     self.prefilter_pipeline.layout,
                     0,
-                    &[vk::WriteDescriptorSet::builder()
+                    &[vk::WriteDescriptorSet::default()
                         .dst_binding(1)
                         .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
-                        .image_info(slice::from_ref(&mip_infos[level as usize]))
-                        .build()],
+                        .image_info(slice::from_ref(&mip_infos[level as usize]))],
                 );
                 self.device.cmd_dispatch(cmd_buffer, wg_size, wg_size, 6);
                 wg_size = 1.max(wg_size / 2);
@@ -307,7 +294,7 @@ impl Baker {
             ..Default::default()
         };
         let mut brdf_lut = Texture::new_empty(&self.device, params, vk::ImageCreateFlags::empty(), vk::Sampler::null())?;
-        self.device.debug(|d| d.set_object_name(&self.device, &*brdf_lut.image, "BRDF lut"));
+        self.device.debug(|d| d.set_object_name(*brdf_lut.image, "BRDF lut"));
         let cmd_buffer = self.device.begin_one_time_commands()?;
         brdf_lut.transition_layout(&self.device, cmd_buffer, vk::ImageLayout::GENERAL);
         unsafe {
@@ -318,11 +305,10 @@ impl Baker {
                 vk::PipelineBindPoint::COMPUTE,
                 self.brdf_pipeline.layout,
                 0,
-                &[vk::WriteDescriptorSet::builder()
+                &[vk::WriteDescriptorSet::default()
                     .dst_binding(0)
                     .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
-                    .image_info(slice::from_ref(&brdf_lut.info))
-                    .build()],
+                    .image_info(slice::from_ref(&brdf_lut.info))],
             );
             self.device.cmd_dispatch(cmd_buffer, BRDFLUT_WG, BRDFLUT_WG, 1);
         }
@@ -343,8 +329,7 @@ impl Baker {
             ..Default::default()
         };
         let mut cubemap = Texture::new_empty(&self.device, params, vk::ImageCreateFlags::CUBE_COMPATIBLE, vk::Sampler::null())?;
-        self.device
-            .debug(|d| d.set_object_name(&self.device, &*cubemap.image, "Cubemap image"));
+        self.device.debug(|d| d.set_object_name(*cubemap.image, "Cubemap image"));
         let cmd_buffer = self.device.begin_one_time_commands()?;
         cubemap.transition_layout(&self.device, cmd_buffer, vk::ImageLayout::GENERAL);
         unsafe {
@@ -356,16 +341,14 @@ impl Baker {
                 self.eq2cube_pipeline.layout,
                 0,
                 &[
-                    vk::WriteDescriptorSet::builder()
+                    vk::WriteDescriptorSet::default()
                         .dst_binding(0)
                         .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                        .image_info(slice::from_ref(&equirect.info))
-                        .build(),
-                    vk::WriteDescriptorSet::builder()
+                        .image_info(slice::from_ref(&equirect.info)),
+                    vk::WriteDescriptorSet::default()
                         .dst_binding(1)
                         .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
-                        .image_info(slice::from_ref(&cubemap.info))
-                        .build(),
+                        .image_info(slice::from_ref(&cubemap.info)),
                 ],
             );
             let wg_size = size / EQ2CUBE_WG_SIZE;

@@ -64,7 +64,7 @@ impl Swapchain {
             vk::SharingMode::EXCLUSIVE
         };
 
-        let swapchain_ci = vk::SwapchainCreateInfoKHR::builder()
+        let swapchain_ci = vk::SwapchainCreateInfoKHR::default()
             .surface(device.surface)
             .min_image_count(img_count)
             .image_format(surface_format.format)
@@ -97,7 +97,7 @@ impl Swapchain {
         let image_views = images
             .iter()
             .map(|&image| {
-                vk::ImageViewCreateInfo::builder()
+                vk::ImageViewCreateInfo::default()
                     .image(image)
                     .format(surface_format.format)
                     .view_type(vk::ImageViewType::TYPE_2D)
@@ -141,8 +141,8 @@ impl Swapchain {
         let imgview = image.create_view(device, vk::ImageViewType::TYPE_2D)?;
 
         device.debug(|d| {
-            d.set_object_name(device, &*image, "MSAA color image");
-            d.set_object_name(device, &imgview, "MSAA color image view");
+            d.set_object_name(*image, "MSAA color image");
+            d.set_object_name(imgview, "MSAA color image view");
         });
         self.samples = samples;
         self.msaa_image = Some(image);
@@ -170,8 +170,8 @@ impl Swapchain {
         let depth_imgview = depth_image.create_view(device, vk::ImageViewType::TYPE_2D)?;
 
         device.debug(|d| {
-            d.set_object_name(device, &*depth_image, "Depth image");
-            d.set_object_name(device, &depth_imgview, "Depth image view");
+            d.set_object_name(*depth_image, "Depth image");
+            d.set_object_name(depth_imgview, "Depth image view");
         });
 
         self.depth_image = Some(depth_image);
@@ -225,7 +225,7 @@ impl Swapchain {
 
     pub(crate) fn color_attachment(&self, image_idx: usize) -> vk::RenderingAttachmentInfo {
         if let Some(msaa_imgview) = self.msaa_imgview {
-            vk::RenderingAttachmentInfo::builder()
+            vk::RenderingAttachmentInfo::default()
                 .image_view(msaa_imgview)
                 .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
                 .load_op(vk::AttachmentLoadOp::DONT_CARE)
@@ -233,19 +233,17 @@ impl Swapchain {
                 .resolve_mode(vk::ResolveModeFlags::AVERAGE)
                 .resolve_image_view(self.image_views[image_idx])
                 .resolve_image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-                .build()
         } else {
-            vk::RenderingAttachmentInfo::builder()
+            vk::RenderingAttachmentInfo::default()
                 .image_view(self.image_views[image_idx])
                 .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
                 .load_op(vk::AttachmentLoadOp::DONT_CARE)
                 .store_op(vk::AttachmentStoreOp::STORE)
-                .build()
         }
     }
 
     pub(crate) fn depth_attachment(&self, rev_depth: bool) -> vk::RenderingAttachmentInfo {
-        vk::RenderingAttachmentInfo::builder()
+        vk::RenderingAttachmentInfo::default()
             .image_view(self.depth_imgview.expect("missing depth image view"))
             .image_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
             .load_op(vk::AttachmentLoadOp::CLEAR)
@@ -256,7 +254,6 @@ impl Swapchain {
                     stencil: 0,
                 },
             })
-            .build()
     }
 }
 

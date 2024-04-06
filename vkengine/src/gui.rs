@@ -52,21 +52,19 @@ impl UiRenderer {
             include_spirv!("src/shaders/gui.frag.glsl", frag, glsl),
         )?;
         let sampler = engine.get_sampler(vk::SamplerAddressMode::CLAMP_TO_EDGE.into())?;
-        let set_layout = vk::DescriptorSetLayoutCreateInfo::builder()
+        let set_layout = vk::DescriptorSetLayoutCreateInfo::default()
             .flags(vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR)
-            .bindings(&[vk::DescriptorSetLayoutBinding::builder()
+            .bindings(&[vk::DescriptorSetLayoutBinding::default()
                 .binding(0)
                 .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                 .descriptor_count(1)
                 .stage_flags(vk::ShaderStageFlags::FRAGMENT)
-                .immutable_samplers(slice::from_ref(&sampler))
-                .build()])
+                .immutable_samplers(slice::from_ref(&sampler))])
             .create(&device)?;
-        let push_constants = vk::PushConstantRange::builder()
+        let push_constants = vk::PushConstantRange::default()
             .stage_flags(vk::ShaderStageFlags::VERTEX)
             .offset(0)
-            .size(size_of::<PushConstants>() as _)
-            .build();
+            .size(size_of::<PushConstants>() as _);
         let pipeline = Pipeline::builder_graphics(&shader)
             .vertex_input::<Vertex>()
             .descriptor_layout(&set_layout)
@@ -213,8 +211,7 @@ impl UiRenderer {
         let buffer = &mut self.buffers[self.local_frame];
         let resized = buffer.ensure_capacity(&self.device, total_bytes as _, false)?;
         if resized {
-            self.device
-                .debug(|d| d.set_object_name(&self.device, &buffer.handle, "UiRenderer buffer"))
+            self.device.debug(|d| d.set_object_name(buffer.handle, "UiRenderer buffer"))
         }
         // write vertices and indices on the same buffer
         let mut vert_offset = 0;
@@ -271,7 +268,7 @@ impl UiRenderer {
                     let n_vert = mesh.vertices.len() as i32;
                     let n_idx = mesh.indices.len() as u32;
                     let texture = self.textures.get(&mesh.texture_id).unwrap_or(&engine.default_texture);
-                    let desc_writes = vk::WriteDescriptorSet::builder()
+                    let desc_writes = vk::WriteDescriptorSet::default()
                         .dst_binding(0)
                         .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                         .image_info(slice::from_ref(&texture.info));

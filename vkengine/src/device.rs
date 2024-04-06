@@ -3,12 +3,12 @@ use crate::debug::DebugUtils;
 use crate::format::{image_aspect_flags, FormatInfo};
 use crate::instance::{DeviceInfo, DeviceSelection, VulkanInstance};
 use crate::types::*;
-use ash::extensions::khr;
+use ash::khr;
 use ash::vk;
 use glam::UVec2;
 use gpu_allocator::vulkan::{Allocation, AllocationCreateDesc, AllocationScheme, Allocator, AllocatorCreateDesc};
 use gpu_allocator::MemoryLocation;
-use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
+use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use std::mem::ManuallyDrop;
 use std::mem::{size_of, size_of_val};
 use std::slice;
@@ -23,16 +23,18 @@ pub struct VulkanDevice {
     pub present_queue: vk::Queue,
     onetime_pool: vk::CommandPool,
     onetime_fence: vk::Fence,
-    pub swapchain_fn: khr::Swapchain,
-    pub dynrender_fn: khr::DynamicRendering,
-    pub pushdesc_fn: khr::PushDescriptor,
+    pub swapchain_fn: khr::swapchain::Device,
+    pub dynrender_fn: khr::dynamic_rendering::Device,
+    pub pushdesc_fn: khr::push_descriptor::Device,
     allocator: ManuallyDrop<Mutex<Allocator>>,
+    #[cfg(debug_assertions)]
+    debug_utils: DebugUtils,
 }
 
 impl VulkanDevice {
     pub(crate) fn new<W>(window: &W, app_name: &str, selection: DeviceSelection) -> VulkanResult<Self>
     where
-        W: HasRawDisplayHandle + HasRawWindowHandle,
+        W: HasDisplayHandle + HasWindowHandle,
     {
         let instance = VulkanInstance::new(window, app_name)?;
         let surface = instance.create_surface(window)?;
@@ -41,15 +43,15 @@ impl VulkanDevice {
         let device = instance.create_logical_device(&dev_info)?;
         let graphics_queue = unsafe { device.get_device_queue(dev_info.graphics_idx, 0) };
         let present_queue = unsafe { device.get_device_queue(dev_info.present_idx, 0) };
-        let swapchain_fn = khr::Swapchain::new(&instance, &device);
-        let dynrender_fn = khr::DynamicRendering::new(&instance, &device);
-        let pushdesc_fn = khr::PushDescriptor::new(&instance, &device);
+        let swapchain_fn = khr::swapchain::Device::new(&instance, &device);
+        let dynrender_fn = khr::dynamic_rendering::Device::new(&instance, &device);
+        let pushdesc_fn = khr::push_descriptor::Device::new(&instance, &device);
 
-        let transfer_pool = vk::CommandPoolCreateInfo::builder()
+        let transfer_pool = vk::CommandPoolCreateInfo::default()
             .flags(vk::CommandPoolCreateFlags::TRANSIENT)
             .queue_family_index(dev_info.graphics_idx)
             .create(&device)?;
-        let transfer_fence = vk::FenceCreateInfo::builder().create(&device)?;
+        let transfer_fence = vk::FenceCreateInfo::default().create(&device)?;
 
         let allocator = Allocator::new(&AllocatorCreateDesc {
             instance: (*instance).clone(),
@@ -61,6 +63,8 @@ impl VulkanDevice {
         })?;
 
         let this = Self {
+            #[cfg(debug_assertions)]
+            debug_utils: DebugUtils::new(&instance, &device),
             instance,
             surface,
             dev_info,
@@ -76,25 +80,25 @@ impl VulkanDevice {
         };
 
         this.debug(|d| {
-            d.set_object_name(&this, &this.onetime_pool, "One-time command pool");
-            d.set_object_name(&this, &this.onetime_fence, "One-time fence");
+            d.set_object_name(this.onetime_pool, "One-time command pool");
+            d.set_object_name(this.onetime_fence, "One-time fence");
         });
 
         Ok(this)
     }
 
     pub fn make_semaphore(&self, sem_type: vk::SemaphoreType) -> VulkanResult<vk::Semaphore> {
-        let mut sem_type_ci = vk::SemaphoreTypeCreateInfo::builder().semaphore_type(sem_type);
-        vk::SemaphoreCreateInfo::builder().push_next(&mut sem_type_ci).create(&self.device)
+        let mut sem_type_ci = vk::SemaphoreTypeCreateInfo::default().semaphore_type(sem_type);
+        vk::SemaphoreCreateInfo::default().push_next(&mut sem_type_ci).create(&self.device)
     }
 
     pub(crate) fn begin_one_time_commands(&self) -> VulkanResult<vk::CommandBuffer> {
-        let cmd_buffer = vk::CommandBufferAllocateInfo::builder()
+        let cmd_buffer = vk::CommandBufferAllocateInfo::default()
             .command_pool(self.onetime_pool)
             .level(vk::CommandBufferLevel::PRIMARY)
             .command_buffer_count(1)
             .create(&self.device)?[0];
-        let begin_info = vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+        let begin_info = vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
         unsafe {
             self.device
                 .begin_command_buffer(cmd_buffer, &begin_info)
@@ -104,7 +108,7 @@ impl VulkanDevice {
     }
 
     pub(crate) fn end_one_time_commands(&self, cmd_buffer: vk::CommandBuffer) -> VulkanResult<()> {
-        let submit_info = vk::SubmitInfo::builder().command_buffers(slice::from_ref(&cmd_buffer));
+        let submit_info = vk::SubmitInfo::default().command_buffers(slice::from_ref(&cmd_buffer));
         unsafe {
             self.device
                 .end_command_buffer(cmd_buffer)
@@ -124,7 +128,7 @@ impl VulkanDevice {
     }
 
     fn allocate_buffer(&self, size: vk::DeviceSize, params: BufferParams) -> VulkanResult<VkBuffer> {
-        let buffer_ci = vk::BufferCreateInfo::builder()
+        let buffer_ci = vk::BufferCreateInfo::default()
             .size(size)
             .usage(params.usage)
             .sharing_mode(vk::SharingMode::EXCLUSIVE);
@@ -135,9 +139,9 @@ impl VulkanDevice {
                 .describe_err("Failed to create buffer")?
         };
 
-        let buffer_info = vk::BufferMemoryRequirementsInfo2::builder().buffer(buffer);
+        let buffer_info = vk::BufferMemoryRequirementsInfo2::default().buffer(buffer);
         let mut ded_reqs = vk::MemoryDedicatedRequirements::default();
-        let mut mem_reqs = vk::MemoryRequirements2::builder().push_next(&mut ded_reqs);
+        let mut mem_reqs = vk::MemoryRequirements2::default().push_next(&mut ded_reqs);
         unsafe { self.device.get_buffer_memory_requirements2(&buffer_info, &mut mem_reqs) };
 
         let requirements = mem_reqs.memory_requirements;
@@ -213,8 +217,7 @@ impl VulkanDevice {
 
         self.debug(|d| {
             d.set_object_name(
-                self,
-                &dst_buffer.handle,
+                dst_buffer.handle,
                 &format!("Buffer {:?}", (dst_buffer.props.location, dst_buffer.props.usage)),
             )
         });
@@ -225,7 +228,7 @@ impl VulkanDevice {
     pub fn allocate_image(
         &self, params: ImageParams, flags: vk::ImageCreateFlags, img_usage: vk::ImageUsageFlags, location: MemoryLocation,
     ) -> VulkanResult<VkImage> {
-        let image_ci = vk::ImageCreateInfo::builder()
+        let image_ci = vk::ImageCreateInfo::default()
             .image_type(vk::ImageType::TYPE_2D)
             .extent(vk::Extent3D {
                 width: params.width,
@@ -244,9 +247,9 @@ impl VulkanDevice {
 
         let image = unsafe { self.device.create_image(&image_ci, None).describe_err("Failed to create image")? };
 
-        let image_info = vk::ImageMemoryRequirementsInfo2::builder().image(image);
+        let image_info = vk::ImageMemoryRequirementsInfo2::default().image(image);
         let mut ded_reqs = vk::MemoryDedicatedRequirements::default();
-        let mut mem_reqs = vk::MemoryRequirements2::builder().push_next(&mut ded_reqs);
+        let mut mem_reqs = vk::MemoryRequirements2::default().push_next(&mut ded_reqs);
         unsafe { self.device.get_image_memory_requirements2(&image_info, &mut mem_reqs) };
 
         let requirements = mem_reqs.memory_requirements;
@@ -304,7 +307,7 @@ impl VulkanDevice {
         let (src_access, src_stage) = Self::layout_to_access_and_stage(old_layout, false);
         let (dst_access, dst_stage) = Self::layout_to_access_and_stage(new_layout, true);
 
-        let barrier = vk::ImageMemoryBarrier::builder()
+        let barrier = vk::ImageMemoryBarrier::default()
             .image(image)
             .old_layout(old_layout)
             .new_layout(new_layout)
@@ -340,7 +343,7 @@ impl VulkanDevice {
         };
         let (dst_access, dst_stage) = Self::layout_to_access_and_stage(layout, true);
 
-        let barrier = vk::ImageMemoryBarrier::builder()
+        let barrier = vk::ImageMemoryBarrier::default()
             .image(image)
             .old_layout(vk::ImageLayout::UNDEFINED)
             .new_layout(layout)
@@ -370,7 +373,7 @@ impl VulkanDevice {
 
     pub(crate) unsafe fn generate_mipmaps(&self, cmd_buffer: vk::CommandBuffer, image: vk::Image, params: ImageParams) {
         let aspect_mask = params.aspect_flags();
-        let mut barrier = vk::ImageMemoryBarrier::builder()
+        let mut barrier = vk::ImageMemoryBarrier::default()
             .image(image)
             .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
             .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
@@ -402,7 +405,7 @@ impl VulkanDevice {
             // perform the blit on the destination mip level
             let width_2 = 1.max(width / 2);
             let height_2 = 1.max(height / 2);
-            let blit = vk::ImageBlit::builder()
+            let blit = vk::ImageBlit::default()
                 .src_offsets([
                     vk::Offset3D::default(),
                     vk::Offset3D {
@@ -523,7 +526,7 @@ impl VulkanDevice {
         );
         unsafe {
             // copy the image bytes into the base mip level
-            let region = vk::BufferImageCopy::builder()
+            let region = vk::BufferImageCopy::default()
                 .image_subresource(vk::ImageSubresourceLayers {
                     aspect_mask: params.aspect_flags(),
                     mip_level: 0,
@@ -547,8 +550,7 @@ impl VulkanDevice {
         self.dispose_of(src_buffer);
         self.debug(|d| {
             d.set_object_name(
-                &self.device,
-                &tex_image.handle,
+                tex_image.handle,
                 &format!("Image {:?}", (params.width, params.height, params.layers)),
             )
         });
@@ -586,7 +588,7 @@ impl VulkanDevice {
         );
         unsafe {
             // update base mip
-            let region = vk::BufferImageCopy::builder()
+            let region = vk::BufferImageCopy::default()
                 .image_subresource(vk::ImageSubresourceLayers {
                     aspect_mask: image.props.aspect_flags(),
                     mip_level: 0,
@@ -656,10 +658,15 @@ impl VulkanDevice {
         self.find_supported_format(formats, vk::ImageTiling::OPTIMAL, vk::FormatFeatureFlags::DEPTH_STENCIL_ATTACHMENT)
     }
 
+    #[cfg(debug_assertions)]
     #[inline]
     pub fn debug<F: FnOnce(&DebugUtils)>(&self, debug_f: F) {
-        self.instance.debug(debug_f)
+        debug_f(&self.debug_utils)
     }
+
+    #[cfg(not(debug_assertions))]
+    #[inline]
+    pub fn debug<F: FnOnce(&DebugUtils)>(&self, _debug_f: F) {}
 
     #[inline]
     pub fn dispose_of(&self, mut obj: impl Cleanup<Self>) {
@@ -845,7 +852,7 @@ impl MemoryObject<vk::Image, ImageParams> {
     pub fn create_view_subresource(
         &self, device: &ash::Device, view_type: vk::ImageViewType, subresource: vk::ImageSubresourceRange,
     ) -> VulkanResult<vk::ImageView> {
-        vk::ImageViewCreateInfo::builder()
+        vk::ImageViewCreateInfo::default()
             .image(self.handle)
             .format(self.props.format)
             .view_type(view_type)
@@ -856,7 +863,7 @@ impl MemoryObject<vk::Image, ImageParams> {
     pub fn create_view_swizzle(
         &self, device: &ash::Device, view_type: vk::ImageViewType, swizzle: vk::ComponentMapping,
     ) -> VulkanResult<vk::ImageView> {
-        vk::ImageViewCreateInfo::builder()
+        vk::ImageViewCreateInfo::default()
             .image(self.handle)
             .format(self.props.format)
             .view_type(view_type)

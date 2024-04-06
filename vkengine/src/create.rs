@@ -7,7 +7,7 @@ pub trait CreateFromInfo {
     fn create(&self, device: &ash::Device) -> VulkanResult<Self::Output>;
 }
 
-impl CreateFromInfo for vk::ShaderModuleCreateInfo {
+impl CreateFromInfo for vk::ShaderModuleCreateInfo<'_> {
     type Output = vk::ShaderModule;
 
     #[inline]
@@ -20,7 +20,7 @@ impl CreateFromInfo for vk::ShaderModuleCreateInfo {
     }
 }
 
-impl CreateFromInfo for vk::DescriptorSetLayoutCreateInfo {
+impl CreateFromInfo for vk::DescriptorSetLayoutCreateInfo<'_> {
     type Output = vk::DescriptorSetLayout;
 
     #[inline]
@@ -33,7 +33,7 @@ impl CreateFromInfo for vk::DescriptorSetLayoutCreateInfo {
     }
 }
 
-impl CreateFromInfo for vk::PipelineLayoutCreateInfo {
+impl CreateFromInfo for vk::PipelineLayoutCreateInfo<'_> {
     type Output = vk::PipelineLayout;
 
     #[inline]
@@ -46,7 +46,7 @@ impl CreateFromInfo for vk::PipelineLayoutCreateInfo {
     }
 }
 
-impl CreateFromInfo for vk::PipelineCacheCreateInfo {
+impl CreateFromInfo for vk::PipelineCacheCreateInfo<'_> {
     type Output = vk::PipelineCache;
 
     #[inline]
@@ -59,7 +59,7 @@ impl CreateFromInfo for vk::PipelineCacheCreateInfo {
     }
 }
 
-impl CreateFromInfo for vk::CommandPoolCreateInfo {
+impl CreateFromInfo for vk::CommandPoolCreateInfo<'_> {
     type Output = vk::CommandPool;
 
     #[inline]
@@ -68,7 +68,7 @@ impl CreateFromInfo for vk::CommandPoolCreateInfo {
     }
 }
 
-impl CreateFromInfo for vk::CommandBufferAllocateInfo {
+impl CreateFromInfo for vk::CommandBufferAllocateInfo<'_> {
     type Output = Vec<vk::CommandBuffer>;
 
     #[inline]
@@ -81,7 +81,7 @@ impl CreateFromInfo for vk::CommandBufferAllocateInfo {
     }
 }
 
-impl CreateFromInfo for vk::SemaphoreCreateInfo {
+impl CreateFromInfo for vk::SemaphoreCreateInfo<'_> {
     type Output = vk::Semaphore;
 
     #[inline]
@@ -90,7 +90,7 @@ impl CreateFromInfo for vk::SemaphoreCreateInfo {
     }
 }
 
-impl CreateFromInfo for vk::FenceCreateInfo {
+impl CreateFromInfo for vk::FenceCreateInfo<'_> {
     type Output = vk::Fence;
 
     #[inline]
@@ -99,7 +99,7 @@ impl CreateFromInfo for vk::FenceCreateInfo {
     }
 }
 
-impl CreateFromInfo for vk::ImageViewCreateInfo {
+impl CreateFromInfo for vk::ImageViewCreateInfo<'_> {
     type Output = vk::ImageView;
 
     #[inline]
@@ -108,7 +108,7 @@ impl CreateFromInfo for vk::ImageViewCreateInfo {
     }
 }
 
-impl CreateFromInfo for vk::SamplerCreateInfo {
+impl CreateFromInfo for vk::SamplerCreateInfo<'_> {
     type Output = vk::Sampler;
 
     #[inline]
@@ -117,7 +117,7 @@ impl CreateFromInfo for vk::SamplerCreateInfo {
     }
 }
 
-impl CreateFromInfo for vk::QueryPoolCreateInfo {
+impl CreateFromInfo for vk::QueryPoolCreateInfo<'_> {
     type Output = vk::QueryPool;
 
     #[inline]
@@ -126,7 +126,7 @@ impl CreateFromInfo for vk::QueryPoolCreateInfo {
     }
 }
 
-impl CreateFromInfo for vk::DescriptorPoolCreateInfo {
+impl CreateFromInfo for vk::DescriptorPoolCreateInfo<'_> {
     type Output = vk::DescriptorPool;
 
     fn create(&self, device: &ash::Device) -> VulkanResult<Self::Output> {
@@ -138,7 +138,7 @@ impl CreateFromInfo for vk::DescriptorPoolCreateInfo {
     }
 }
 
-impl CreateFromInfo for vk::DescriptorSetAllocateInfo {
+impl CreateFromInfo for vk::DescriptorSetAllocateInfo<'_> {
     type Output = Vec<vk::DescriptorSet>;
 
     fn create(&self, device: &ash::Device) -> VulkanResult<Self::Output> {
