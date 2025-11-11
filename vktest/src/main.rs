@@ -4,7 +4,8 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use vkengine::gui::{UiRenderer, egui};
 use vkengine::{
-    Baker, Camera, CameraController, LightData, MeshRenderData, MeshRenderer, SkyboxRenderer, Texture, VkError, VulkanEngine, VulkanResult,
+    Baker, Camera, CameraController, Cleanup, LightData, MeshRenderData, MeshRenderer, SkyboxRenderer, Texture, VkError, VulkanEngine,
+    VulkanResult,
 };
 use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, Event, KeyEvent, WindowEvent};
@@ -113,16 +114,17 @@ fn main() -> VulkanResult<()> {
     vk_app.lights = lights[cur_scene].clone();
 
     let mut skybox = SkyboxRenderer::new(&vk_app)?;
-    let skybox_equirect = Texture::from_dynamicimage(vk_app.device(), &skybox_img, false, false, Default::default())?;
+    let mut skybox_equirect = Texture::from_dynamicimage(vk_app.device(), &skybox_img, false, false, Default::default())?;
 
     let mut gui = UiRenderer::new(&window, &vk_app)?;
     let mut show_gui = true;
 
     let baker = Baker::new(&vk_app)?;
-    let skybox_tex = baker.equirect_to_cubemap(&skybox_equirect, true)?;
-    let irr_map = baker.generate_irradiance_map(&skybox_tex)?;
-    let pref_map = baker.generate_prefilter_map(&skybox_tex)?;
-    let brdf_lut = baker.generate_brdf_lut()?;
+    let mut skybox_tex = baker.equirect_to_cubemap(&skybox_equirect, true)?;
+    let mut irr_map = baker.generate_irradiance_map(&skybox_tex)?;
+    let mut pref_map = baker.generate_prefilter_map(&skybox_tex)?;
+    let mut brdf_lut = baker.generate_brdf_lut()?;
+    drop(baker);
 
     let thread_pool = yastl::Pool::new(16);
     let mut draw_buffer = vec![];
@@ -139,6 +141,7 @@ fn main() -> VulkanResult<()> {
     let mut num_lights = vk_app.lights.len();
     let mut fov = vk_app.camera.fov.to_degrees();
     let mut debug_mode = DebugMode::None;
+    let mut should_exit = false;
 
     event_loop.run(move |event, elwt| match event {
         Event::WindowEvent { event, .. } => {
@@ -147,7 +150,9 @@ fn main() -> VulkanResult<()> {
             }
 
             match event {
-                WindowEvent::CloseRequested => elwt.exit(),
+                WindowEvent::CloseRequested => {
+                    should_exit = true;
+                }
                 WindowEvent::KeyboardInput {
                     event:
                         KeyEvent {
@@ -214,6 +219,21 @@ fn main() -> VulkanResult<()> {
         }
         Event::DeviceEvent { event, .. } => controller.update_from_device_event(&event),
         Event::AboutToWait => {
+            if should_exit {
+                // final cleanup, must drop all vulkan objects here
+                unsafe {
+                    let device = vk_app.device();
+                    device.device_wait_idle().unwrap();
+                    skybox_equirect.cleanup(device);
+                    skybox_tex.cleanup(device);
+                    irr_map.cleanup(device);
+                    pref_map.cleanup(device);
+                    brdf_lut.cleanup(device);
+                }
+                elwt.exit();
+                return;
+            }
+
             let dt = (vk_app.get_frame_time().as_micros() as f64 / 1e6) as f32;
             controller.update_camera(&mut vk_app.camera, dt);
 
@@ -346,7 +366,7 @@ fn main() -> VulkanResult<()> {
                             ui.add(egui::Slider::new(&mut skybox.lod, 0.0..=10.0));
                         });
                         if ui.button("Exit").clicked() {
-                            elwt.exit();
+                            should_exit = true;
                         }
                     });
             });

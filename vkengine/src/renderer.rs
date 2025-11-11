@@ -73,6 +73,7 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
                     .immutable_samplers(slice::from_ref(&sampler)),
             ])
             .create(&device)?;
+        device.debug(|d| d.set_object_name(push_desc_layout, "MeshRenderer push desc layout"));
         let push_constants = vk::PushConstantRange {
             stage_flags: vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
             offset: 0,
@@ -451,6 +452,7 @@ impl SkyboxRenderer {
                 .stage_flags(vk::ShaderStageFlags::FRAGMENT)
                 .immutable_samplers(slice::from_ref(&sampler))])
             .create(&device)?;
+        device.debug(|d| d.set_object_name(desc_layout, "SkyboxRenderer desc layout"));
         let push_constants = vk::PushConstantRange::default()
             .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
             .offset(0)

@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 const SWAPCHAIN_IMAGE_COUNT: u32 = 3;
-pub const QUEUE_DEPTH: usize = 2;
+pub const QUEUE_DEPTH: usize = 3;
 pub const MAX_LIGHTS: usize = 16;
 
 #[derive(Debug)]

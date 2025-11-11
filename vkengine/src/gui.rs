@@ -61,6 +61,7 @@ impl UiRenderer {
                 .stage_flags(vk::ShaderStageFlags::FRAGMENT)
                 .immutable_samplers(slice::from_ref(&sampler))])
             .create(&device)?;
+        device.debug(|d| d.set_object_name(set_layout, "UiRenderer desc layout"));
         let push_constants = vk::PushConstantRange::default()
             .stage_flags(vk::ShaderStageFlags::VERTEX)
             .offset(0)
