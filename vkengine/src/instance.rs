@@ -5,7 +5,7 @@ use ash::{ext, khr};
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use std::collections::BTreeSet;
 use std::convert::identity;
-use std::ffi::{c_char, CStr, CString};
+use std::ffi::{CStr, CString, c_char};
 
 const VALIDATION_ENABLED: bool = cfg!(debug_assertions);
 const VALIDATION_LAYER: &CStr = c"VK_LAYER_KHRONOS_validation";
@@ -446,7 +446,7 @@ impl SurfaceInfo {
     }
 
     pub fn calc_extent(&self, width: u32, height: u32) -> vk::Extent2D {
-        if self.capabilities.current_extent.width != u32::max_value() {
+        if self.capabilities.current_extent.width != u32::MAX {
             self.capabilities.current_extent
         } else {
             vk::Extent2D {

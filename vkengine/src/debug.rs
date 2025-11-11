@@ -1,7 +1,7 @@
 use crate::types::Cleanup;
 use ash::ext;
 use ash::vk::{self, Handle};
-use std::ffi::{c_void, CStr, CString};
+use std::ffi::{CStr, CString, c_void};
 
 pub struct DebugUtils {
     debug_dfn: ext::debug_utils::Device,
@@ -114,7 +114,9 @@ impl DebugUtilsInstance {
 
 impl Cleanup<()> for DebugUtilsInstance {
     unsafe fn cleanup(&mut self, _: &()) {
-        self.debug_ifn.destroy_debug_utils_messenger(self.messenger, None);
+        unsafe {
+            self.debug_ifn.destroy_debug_utils_messenger(self.messenger, None);
+        }
     }
 }
 

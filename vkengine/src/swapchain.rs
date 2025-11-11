@@ -268,11 +268,13 @@ impl std::ops::Deref for Swapchain {
 
 impl Cleanup<VulkanDevice> for Swapchain {
     unsafe fn cleanup(&mut self, device: &VulkanDevice) {
-        self.image_views.cleanup(device);
-        self.msaa_imgview.cleanup(device);
-        self.msaa_image.cleanup(device);
-        self.depth_imgview.cleanup(device);
-        self.depth_image.cleanup(device);
-        device.swapchain_fn.destroy_swapchain(self.handle, None);
+        unsafe {
+            self.image_views.cleanup(device);
+            self.msaa_imgview.cleanup(device);
+            self.msaa_image.cleanup(device);
+            self.depth_imgview.cleanup(device);
+            self.depth_image.cleanup(device);
+            device.swapchain_fn.destroy_swapchain(self.handle, None);
+        }
     }
 }

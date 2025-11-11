@@ -17,7 +17,7 @@ pub use baker::Baker;
 pub use camera::{Camera, CameraController};
 pub use create::CreateFromInfo;
 pub use device::{CubeData, ImageData, VkBuffer, VkImage, VulkanDevice};
-pub use engine::{CmdBufferRing, DrawPayload, UploadBuffer, VulkanEngine, MAX_LIGHTS};
+pub use engine::{CmdBufferRing, DrawPayload, MAX_LIGHTS, UploadBuffer, VulkanEngine};
 pub use format::FormatInfo;
 pub use instance::{DeviceInfo, DeviceSelection, DeviceType};
 pub use pipeline::{ComputePipelineBuilder, GraphicsPipelineBuilder, Pipeline, PipelineMode, Shader};

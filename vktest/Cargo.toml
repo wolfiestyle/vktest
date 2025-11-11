@@ -2,7 +2,7 @@
 name = "vktest"
 version = "0.1.0"
 authors = ["SnowDerg <slayerbeast@gmail.com>"]
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 vkengine = { path = "../vkengine", features = ["winit", "egui"] }

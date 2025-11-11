@@ -1,9 +1,9 @@
 use crate::import::BufferData;
 use crate::material::MaterialId;
-use bevy_mikktspace::{generate_tangents, Geometry};
+use bevy_mikktspace::{Geometry, generate_tangents};
 use glam::{Vec3, Vec3A};
-use gltf::mesh::Mode;
 use gltf::Semantic;
+use gltf::mesh::Mode;
 use std::ops::Range;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]

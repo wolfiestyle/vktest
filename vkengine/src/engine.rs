@@ -636,7 +636,9 @@ impl std::ops::Index<u64> for CmdBufferRing {
 
 impl Cleanup<VulkanDevice> for CmdBufferRing {
     unsafe fn cleanup(&mut self, device: &VulkanDevice) {
-        self.pool.cleanup(device);
+        unsafe {
+            self.pool.cleanup(device);
+        }
     }
 }
 
@@ -698,7 +700,7 @@ impl std::ops::IndexMut<u64> for UploadBuffer {
 
 impl Cleanup<VulkanDevice> for UploadBuffer {
     unsafe fn cleanup(&mut self, device: &VulkanDevice) {
-        self.buffers.cleanup(device)
+        unsafe { self.buffers.cleanup(device) }
     }
 }
 
@@ -787,10 +789,12 @@ impl FrameState {
 
 impl Cleanup<VulkanDevice> for FrameState {
     unsafe fn cleanup(&mut self, device: &VulkanDevice) {
-        device.destroy_semaphore(self.image_avail_sem, None);
-        device.destroy_semaphore(self.render_finished_sem, None);
-        device.destroy_semaphore(self.in_flight_sem, None);
-        device.destroy_query_pool(self.time_query, None);
+        unsafe {
+            device.destroy_semaphore(self.image_avail_sem, None);
+            device.destroy_semaphore(self.render_finished_sem, None);
+            device.destroy_semaphore(self.in_flight_sem, None);
+            device.destroy_query_pool(self.time_query, None);
+        }
     }
 }
 

@@ -147,8 +147,10 @@ impl Pipeline {
 
 impl Cleanup<VulkanDevice> for Pipeline {
     unsafe fn cleanup(&mut self, device: &VulkanDevice) {
-        device.destroy_pipeline(self.handle, None);
-        device.destroy_pipeline_layout(self.layout, None);
+        unsafe {
+            device.destroy_pipeline(self.handle, None);
+            device.destroy_pipeline_layout(self.layout, None);
+        }
     }
 }
 
@@ -350,7 +352,9 @@ impl Shader {
 
 impl Cleanup<VulkanDevice> for Shader {
     unsafe fn cleanup(&mut self, device: &VulkanDevice) {
-        device.destroy_shader_module(self.vert, None);
-        device.destroy_shader_module(self.frag, None);
+        unsafe {
+            device.destroy_shader_module(self.vert, None);
+            device.destroy_shader_module(self.frag, None);
+        }
     }
 }

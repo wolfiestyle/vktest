@@ -1,5 +1,5 @@
 use crate::types::*;
-use base64::engine::{general_purpose::STANDARD as BASE64, Engine};
+use base64::engine::{Engine, general_purpose::STANDARD as BASE64};
 use std::borrow::Cow;
 use std::path::Path;
 

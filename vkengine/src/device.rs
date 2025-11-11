@@ -1,13 +1,13 @@
 use crate::create::CreateFromInfo;
 use crate::debug::DebugUtils;
-use crate::format::{image_aspect_flags, FormatInfo};
+use crate::format::{FormatInfo, image_aspect_flags};
 use crate::instance::{DeviceInfo, DeviceSelection, VulkanInstance};
 use crate::types::*;
 use ash::khr;
 use ash::vk;
 use glam::UVec2;
-use gpu_allocator::vulkan::{Allocation, AllocationCreateDesc, AllocationScheme, Allocator, AllocatorCreateDesc};
 use gpu_allocator::MemoryLocation;
+use gpu_allocator::vulkan::{Allocation, AllocationCreateDesc, AllocationScheme, Allocator, AllocatorCreateDesc};
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use std::mem::ManuallyDrop;
 use std::mem::{size_of, size_of_val};
@@ -372,81 +372,101 @@ impl VulkanDevice {
     }
 
     pub(crate) unsafe fn generate_mipmaps(&self, cmd_buffer: vk::CommandBuffer, image: vk::Image, params: ImageParams) {
-        let aspect_mask = params.aspect_flags();
-        let mut barrier = vk::ImageMemoryBarrier::default()
-            .image(image)
-            .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-            .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-            .subresource_range(vk::ImageSubresourceRange {
-                aspect_mask,
-                base_mip_level: 0,
-                level_count: 1,
-                base_array_layer: 0,
-                layer_count: params.layers,
-            });
-        let mut width = params.width;
-        let mut height = params.height;
-        for i in 1..params.mip_levels {
-            // prepare source mip level for reading
-            barrier.subresource_range.base_mip_level = i - 1;
-            barrier.old_layout = vk::ImageLayout::TRANSFER_DST_OPTIMAL;
-            barrier.new_layout = vk::ImageLayout::TRANSFER_SRC_OPTIMAL;
-            barrier.src_access_mask = vk::AccessFlags::TRANSFER_WRITE;
-            barrier.dst_access_mask = vk::AccessFlags::TRANSFER_READ;
-            self.device.cmd_pipeline_barrier(
-                cmd_buffer,
-                vk::PipelineStageFlags::TRANSFER,
-                vk::PipelineStageFlags::TRANSFER,
-                vk::DependencyFlags::empty(),
-                &[],
-                &[],
-                slice::from_ref(&barrier),
-            );
-            // perform the blit on the destination mip level
-            let width_2 = 1.max(width / 2);
-            let height_2 = 1.max(height / 2);
-            let blit = vk::ImageBlit::default()
-                .src_offsets([
-                    vk::Offset3D::default(),
-                    vk::Offset3D {
-                        x: width as _,
-                        y: height as _,
-                        z: 1,
-                    },
-                ])
-                .src_subresource(vk::ImageSubresourceLayers {
+        unsafe {
+            let aspect_mask = params.aspect_flags();
+            let mut barrier = vk::ImageMemoryBarrier::default()
+                .image(image)
+                .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .subresource_range(vk::ImageSubresourceRange {
                     aspect_mask,
-                    mip_level: i - 1,
-                    base_array_layer: 0,
-                    layer_count: params.layers,
-                })
-                .dst_offsets([
-                    vk::Offset3D::default(),
-                    vk::Offset3D {
-                        x: width_2 as _,
-                        y: height_2 as _,
-                        z: 1,
-                    },
-                ])
-                .dst_subresource(vk::ImageSubresourceLayers {
-                    aspect_mask,
-                    mip_level: i,
+                    base_mip_level: 0,
+                    level_count: 1,
                     base_array_layer: 0,
                     layer_count: params.layers,
                 });
-            self.device.cmd_blit_image(
-                cmd_buffer,
-                image,
-                vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
-                image,
-                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                slice::from_ref(&blit),
-                vk::Filter::LINEAR,
-            );
-            // transition the source level into shader read
-            barrier.old_layout = vk::ImageLayout::TRANSFER_SRC_OPTIMAL;
+            let mut width = params.width;
+            let mut height = params.height;
+            for i in 1..params.mip_levels {
+                // prepare source mip level for reading
+                barrier.subresource_range.base_mip_level = i - 1;
+                barrier.old_layout = vk::ImageLayout::TRANSFER_DST_OPTIMAL;
+                barrier.new_layout = vk::ImageLayout::TRANSFER_SRC_OPTIMAL;
+                barrier.src_access_mask = vk::AccessFlags::TRANSFER_WRITE;
+                barrier.dst_access_mask = vk::AccessFlags::TRANSFER_READ;
+                self.device.cmd_pipeline_barrier(
+                    cmd_buffer,
+                    vk::PipelineStageFlags::TRANSFER,
+                    vk::PipelineStageFlags::TRANSFER,
+                    vk::DependencyFlags::empty(),
+                    &[],
+                    &[],
+                    slice::from_ref(&barrier),
+                );
+                // perform the blit on the destination mip level
+                let width_2 = 1.max(width / 2);
+                let height_2 = 1.max(height / 2);
+                let blit = vk::ImageBlit::default()
+                    .src_offsets([
+                        vk::Offset3D::default(),
+                        vk::Offset3D {
+                            x: width as _,
+                            y: height as _,
+                            z: 1,
+                        },
+                    ])
+                    .src_subresource(vk::ImageSubresourceLayers {
+                        aspect_mask,
+                        mip_level: i - 1,
+                        base_array_layer: 0,
+                        layer_count: params.layers,
+                    })
+                    .dst_offsets([
+                        vk::Offset3D::default(),
+                        vk::Offset3D {
+                            x: width_2 as _,
+                            y: height_2 as _,
+                            z: 1,
+                        },
+                    ])
+                    .dst_subresource(vk::ImageSubresourceLayers {
+                        aspect_mask,
+                        mip_level: i,
+                        base_array_layer: 0,
+                        layer_count: params.layers,
+                    });
+                self.device.cmd_blit_image(
+                    cmd_buffer,
+                    image,
+                    vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                    image,
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    slice::from_ref(&blit),
+                    vk::Filter::LINEAR,
+                );
+                // transition the source level into shader read
+                barrier.old_layout = vk::ImageLayout::TRANSFER_SRC_OPTIMAL;
+                barrier.new_layout = vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL;
+                barrier.src_access_mask = vk::AccessFlags::TRANSFER_READ;
+                barrier.dst_access_mask = vk::AccessFlags::SHADER_READ;
+                self.device.cmd_pipeline_barrier(
+                    cmd_buffer,
+                    vk::PipelineStageFlags::TRANSFER,
+                    vk::PipelineStageFlags::FRAGMENT_SHADER,
+                    vk::DependencyFlags::empty(),
+                    &[],
+                    &[],
+                    slice::from_ref(&barrier),
+                );
+                // use the current destination image as the source for the next iteration
+                width = width_2;
+                height = height_2;
+            }
+            // transition the last mip level
+            barrier.subresource_range.base_mip_level = params.mip_levels - 1;
+            barrier.old_layout = vk::ImageLayout::TRANSFER_DST_OPTIMAL;
             barrier.new_layout = vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL;
-            barrier.src_access_mask = vk::AccessFlags::TRANSFER_READ;
+            barrier.src_access_mask = vk::AccessFlags::TRANSFER_WRITE;
             barrier.dst_access_mask = vk::AccessFlags::SHADER_READ;
             self.device.cmd_pipeline_barrier(
                 cmd_buffer,
@@ -457,25 +477,7 @@ impl VulkanDevice {
                 &[],
                 slice::from_ref(&barrier),
             );
-            // use the current destination image as the source for the next iteration
-            width = width_2;
-            height = height_2;
         }
-        // transition the last mip level
-        barrier.subresource_range.base_mip_level = params.mip_levels - 1;
-        barrier.old_layout = vk::ImageLayout::TRANSFER_DST_OPTIMAL;
-        barrier.new_layout = vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL;
-        barrier.src_access_mask = vk::AccessFlags::TRANSFER_WRITE;
-        barrier.dst_access_mask = vk::AccessFlags::SHADER_READ;
-        self.device.cmd_pipeline_barrier(
-            cmd_buffer,
-            vk::PipelineStageFlags::TRANSFER,
-            vk::PipelineStageFlags::FRAGMENT_SHADER,
-            vk::DependencyFlags::empty(),
-            &[],
-            &[],
-            slice::from_ref(&barrier),
-        );
     }
 
     pub fn create_image_from_data(&self, params: ImageParams, data: ImageData, flags: vk::ImageCreateFlags) -> VulkanResult<VkImage> {
@@ -716,25 +718,33 @@ impl std::fmt::Debug for VulkanDevice {
 
 impl Cleanup<VulkanDevice> for vk::CommandPool {
     unsafe fn cleanup(&mut self, device: &VulkanDevice) {
-        device.destroy_command_pool(*self, None);
+        unsafe {
+            device.destroy_command_pool(*self, None);
+        }
     }
 }
 
 impl Cleanup<VulkanDevice> for vk::Sampler {
     unsafe fn cleanup(&mut self, device: &VulkanDevice) {
-        device.destroy_sampler(*self, None);
+        unsafe {
+            device.destroy_sampler(*self, None);
+        }
     }
 }
 
 impl Cleanup<VulkanDevice> for vk::DescriptorSetLayout {
     unsafe fn cleanup(&mut self, device: &VulkanDevice) {
-        device.destroy_descriptor_set_layout(*self, None);
+        unsafe {
+            device.destroy_descriptor_set_layout(*self, None);
+        }
     }
 }
 
 impl Cleanup<VulkanDevice> for vk::ImageView {
     unsafe fn cleanup(&mut self, device: &VulkanDevice) {
-        device.destroy_image_view(*self, None);
+        unsafe {
+            device.destroy_image_view(*self, None);
+        }
     }
 }
 
@@ -761,12 +771,14 @@ impl<T, P> MemoryObject<T, P> {
     }
 
     unsafe fn free_memory(&mut self, device: &VulkanDevice) {
-        device
-            .allocator
-            .lock()
-            .unwrap()
-            .free(ManuallyDrop::take(&mut self.memory))
-            .expect("Failed to free memory");
+        unsafe {
+            device
+                .allocator
+                .lock()
+                .unwrap()
+                .free(ManuallyDrop::take(&mut self.memory))
+                .expect("Failed to free memory");
+        }
     }
 }
 
@@ -779,15 +791,19 @@ impl<T, P> std::ops::Deref for MemoryObject<T, P> {
 
 impl<P> Cleanup<VulkanDevice> for MemoryObject<vk::Buffer, P> {
     unsafe fn cleanup(&mut self, device: &VulkanDevice) {
-        device.destroy_buffer(self.handle, None);
-        self.free_memory(device);
+        unsafe {
+            device.destroy_buffer(self.handle, None);
+            self.free_memory(device);
+        }
     }
 }
 
 impl<P> Cleanup<VulkanDevice> for MemoryObject<vk::Image, P> {
     unsafe fn cleanup(&mut self, device: &VulkanDevice) {
-        device.destroy_image(self.handle, None);
-        self.free_memory(device);
+        unsafe {
+            device.destroy_image(self.handle, None);
+            self.free_memory(device);
+        }
     }
 }
 

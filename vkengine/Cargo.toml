@@ -2,8 +2,8 @@
 name = "vkengine"
 version = "0.1.0"
 authors = ["SnowDerg <slayerbeast@gmail.com>"]
-edition = "2021"
-rust-version = "1.77"
+edition = "2024"
+rust-version = "1.85"
 
 [dependencies]
 ash = { workspace = true }

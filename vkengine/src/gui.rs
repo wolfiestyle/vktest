@@ -11,7 +11,7 @@ use egui::{ClippedPrimitive, Context, FullOutput, PlatformOutput, TextureId, Tex
 use egui_winit::{EventResponse, State};
 use glam::Mat4;
 use inline_spirv::include_spirv;
-use std::collections::{hash_map::Entry, HashMap};
+use std::collections::{HashMap, hash_map::Entry};
 use std::mem::size_of;
 use std::slice;
 use std::sync::Arc;

@@ -2,7 +2,7 @@ use clap::Parser;
 use gltf_import::{GltfData, LightType, Material, Vertex};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use vkengine::gui::{egui, UiRenderer};
+use vkengine::gui::{UiRenderer, egui};
 use vkengine::{
     Baker, Camera, CameraController, LightData, MeshRenderData, MeshRenderer, SkyboxRenderer, Texture, VkError, VulkanEngine, VulkanResult,
 };

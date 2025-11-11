@@ -169,7 +169,9 @@ impl Texture {
 
 impl Cleanup<VulkanDevice> for Texture {
     unsafe fn cleanup(&mut self, device: &VulkanDevice) {
-        self.info.image_view.cleanup(device);
-        self.image.cleanup(device);
+        unsafe {
+            self.info.image_view.cleanup(device);
+            self.image.cleanup(device);
+        }
     }
 }
