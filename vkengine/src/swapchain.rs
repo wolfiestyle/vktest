@@ -223,7 +223,7 @@ impl Swapchain {
         matches!(self.depth_format, vk::Format::D32_SFLOAT | vk::Format::D32_SFLOAT_S8_UINT)
     }
 
-    pub(crate) fn color_attachment(&self, image_idx: usize) -> vk::RenderingAttachmentInfo {
+    pub(crate) fn color_attachment(&self, image_idx: usize) -> vk::RenderingAttachmentInfo<'_> {
         if let Some(msaa_imgview) = self.msaa_imgview {
             vk::RenderingAttachmentInfo::default()
                 .image_view(msaa_imgview)
@@ -242,7 +242,7 @@ impl Swapchain {
         }
     }
 
-    pub(crate) fn depth_attachment(&self, rev_depth: bool) -> vk::RenderingAttachmentInfo {
+    pub(crate) fn depth_attachment(&self, rev_depth: bool) -> vk::RenderingAttachmentInfo<'_> {
         vk::RenderingAttachmentInfo::default()
             .image_view(self.depth_imgview.expect("missing depth image view"))
             .image_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)

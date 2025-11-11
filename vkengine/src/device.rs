@@ -755,7 +755,7 @@ impl<T, P> MemoryObject<T, P> {
         self.size
     }
 
-    pub fn map(&mut self) -> VulkanResult<MappedMemory> {
+    pub fn map(&mut self) -> VulkanResult<MappedMemory<'_>> {
         let mapped = self.memory.mapped_slice_mut().describe_err("Failed to map memory")?;
         Ok(MappedMemory { mapped })
     }

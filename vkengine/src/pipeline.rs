@@ -15,7 +15,7 @@ pub struct Pipeline {
 
 impl Pipeline {
     #[inline]
-    pub fn builder_graphics(shader: &Shader) -> GraphicsPipelineBuilder {
+    pub fn builder_graphics(shader: &Shader) -> GraphicsPipelineBuilder<'_> {
         GraphicsPipelineBuilder::new(shader)
     }
 

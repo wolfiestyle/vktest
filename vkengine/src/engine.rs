@@ -667,7 +667,7 @@ impl UploadBuffer {
         &mut self[engine.current_frame]
     }
 
-    pub fn map(&mut self, engine: &VulkanEngine) -> VulkanResult<MappedMemory> {
+    pub fn map(&mut self, engine: &VulkanEngine) -> VulkanResult<MappedMemory<'_>> {
         self.get_current_buffer_mut(engine).map()
     }
 
