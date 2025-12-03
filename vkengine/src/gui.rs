@@ -11,7 +11,7 @@ use egui::{ClippedPrimitive, Context, FullOutput, PlatformOutput, TextureId, Tex
 use egui_winit::{EventResponse, State};
 use glam::Mat4;
 use inline_spirv::include_spirv;
-use std::collections::{HashMap, hash_map::Entry};
+use std::collections::HashMap;
 use std::mem::size_of;
 use std::slice;
 use std::sync::Arc;
@@ -84,7 +84,7 @@ impl UiRenderer {
         let cmd_buffers = CmdBufferRing::new(&device)?;
 
         let context = egui::Context::default();
-        let winit_state = State::new(context.clone(), ViewportId::ROOT, &window, None, None);
+        let winit_state = State::new(context.clone(), ViewportId::ROOT, &window, None, None, None);
 
         Ok(Self {
             device,
@@ -110,7 +110,7 @@ impl UiRenderer {
         self.winit_state.on_window_event(window, event)
     }
 
-    pub fn run(&mut self, window: &Window, run_ui: impl FnOnce(&Context)) {
+    pub fn run(&mut self, window: &Window, mut run_ui: impl FnMut(&Context)) {
         let now = Instant::now();
         if let Some(last_draw) = self.last_draw_time {
             if now - last_draw < MIN_FRAME_TIME {
@@ -119,7 +119,7 @@ impl UiRenderer {
         }
         self.last_draw_time = Some(now);
         let raw_input = self.winit_state.take_egui_input(window);
-        self.frame_output = self.context.run(raw_input, run_ui).into();
+        self.frame_output = self.context.run(raw_input, &mut run_ui).into();
     }
 
     pub fn draw(&mut self, engine: &VulkanEngine) -> VulkanResult<DrawPayload> {
@@ -152,41 +152,32 @@ impl UiRenderer {
     fn update_textures(&mut self, tex_delta: TexturesDelta) -> VulkanResult<Vec<Texture>> {
         // create or update textures
         for (id, image) in tex_delta.set {
-            let (bytes, size, format) = match &image.image {
-                egui::ImageData::Color(img) => (
-                    bytemuck::cast_slice::<egui::Color32, u8>(&img.pixels),
-                    img.size.map(|v| v as u32),
-                    vk::Format::R8G8B8A8_SRGB,
-                ),
-                egui::ImageData::Font(img) => (
-                    bytemuck::cast_slice::<f32, u8>(&img.pixels),
-                    img.size.map(|v| v as u32),
-                    vk::Format::R32_SFLOAT,
-                ),
-            };
-            match self.textures.entry(id) {
-                Entry::Vacant(entry) => {
-                    let swizzle = (format == vk::Format::R32_SFLOAT).then_some(vk::ComponentMapping {
-                        r: vk::ComponentSwizzle::R,
-                        g: vk::ComponentSwizzle::R,
-                        b: vk::ComponentSwizzle::R,
-                        a: vk::ComponentSwizzle::R,
-                    });
-                    entry.insert(Texture::new(
-                        &self.device,
-                        size.into(),
-                        format,
-                        ImageData::Single(bytes),
-                        vk::Sampler::null(),
-                        TextureOptions {
-                            gen_mipmaps: false,
-                            swizzle,
-                        },
-                    )?);
+            let egui::ImageData::Color(img) = &image.image;
+            let bytes = bytemuck::cast_slice::<egui::Color32, u8>(&img.pixels);
+            let size = img.size.map(|v| v as u32).into();
+            match image.pos {
+                None => {
+                    self.textures.insert(
+                        id,
+                        Texture::new(
+                            &self.device,
+                            size,
+                            vk::Format::R8G8B8A8_SRGB,
+                            ImageData::Single(bytes),
+                            vk::Sampler::null(),
+                            TextureOptions {
+                                gen_mipmaps: false,
+                                swizzle: None,
+                            },
+                        )?,
+                    );
                 }
-                Entry::Occupied(mut entry) => {
-                    let pos = image.pos.unwrap_or([0, 0]).map(|v| v as _);
-                    entry.get_mut().update(pos.into(), size.into(), bytes)?;
+                Some(pos) => {
+                    if let Some(tex) = self.textures.get_mut(&id) {
+                        tex.update(pos.map(|n| n as u32).into(), size, bytes)?;
+                    } else {
+                        eprintln!("Error: received ImageDelta update on undefined texture {id:?}");
+                    }
                 }
             }
         }

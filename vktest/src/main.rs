@@ -10,7 +10,7 @@ use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, Event, KeyEvent, WindowEvent};
 use winit::event_loop::EventLoop;
 use winit::keyboard::{KeyCode, PhysicalKey};
-use winit::window::Fullscreen;
+use winit::window::{Fullscreen, Window};
 
 #[derive(Parser)]
 struct Arguments {
@@ -44,10 +44,13 @@ fn main() -> VulkanResult<()> {
     let skybox_img = image::open(args.skybox.unwrap_or_else(|| "data/skybox.exr".into())).unwrap();
 
     let event_loop = EventLoop::new()?;
-    let window = winit::window::WindowBuilder::new()
-        .with_title("vulkan test")
-        .with_inner_size(PhysicalSize::new(1657, 1024))
-        .build(&event_loop)
+    #[allow(deprecated)]
+    let window = event_loop
+        .create_window(
+            Window::default_attributes()
+                .with_title("vulkan test")
+                .with_inner_size(PhysicalSize::new(1657, 1024)),
+        )
         .unwrap();
 
     let mut vk_app = VulkanEngine::new(&window, "vulkan test", Default::default())?;
@@ -142,6 +145,7 @@ fn main() -> VulkanResult<()> {
     let mut debug_mode = DebugMode::None;
     let mut should_exit = false;
 
+    #[allow(deprecated)]
     event_loop.run(move |event, elwt| match event {
         Event::WindowEvent { event, .. } => {
             if gui.event_input(&window, &event).consumed {
@@ -285,7 +289,7 @@ fn main() -> VulkanResult<()> {
                         ui.add_space(10.0);
                         ui.horizontal(|ui| {
                             ui.label("Lights:");
-                            ui.add(egui::DragValue::new(&mut num_lights).clamp_range(0..=vkengine::MAX_LIGHTS - 1));
+                            ui.add(egui::DragValue::new(&mut num_lights).range(0..=vkengine::MAX_LIGHTS - 1));
                             if num_lights != vk_app.lights.len() {
                                 vk_app.lights.resize_with(num_lights, Default::default);
                             }
