@@ -6,6 +6,7 @@ use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use std::collections::BTreeSet;
 use std::convert::identity;
 use std::ffi::{CStr, CString, c_char};
+use std::mem::ManuallyDrop;
 
 const VALIDATION_ENABLED: bool = cfg!(debug_assertions);
 const VALIDATION_LAYER: &CStr = c"VK_LAYER_KHRONOS_validation";
@@ -22,7 +23,7 @@ pub(crate) struct VulkanInstance {
     instance: ash::Instance,
     pub surface_utils: khr::surface::Instance,
     #[cfg(debug_assertions)]
-    debug_utils: DebugUtilsInstance,
+    debug_utils: ManuallyDrop<DebugUtilsInstance>,
 }
 
 impl VulkanInstance {
@@ -38,7 +39,7 @@ impl VulkanInstance {
 
         Ok(Self {
             #[cfg(debug_assertions)]
-            debug_utils: DebugUtilsInstance::new(&entry, &instance),
+            debug_utils: ManuallyDrop::new(DebugUtilsInstance::new(&entry, &instance)),
             entry,
             instance,
             surface_utils,
@@ -370,10 +371,9 @@ impl VulkanInstance {
 impl Drop for VulkanInstance {
     fn drop(&mut self) {
         unsafe {
+            // Debug utils must be destroyed before the instance
             #[cfg(debug_assertions)]
-            {
-                self.debug_utils.cleanup(&());
-            }
+            ManuallyDrop::drop(&mut self.debug_utils);
             self.instance.destroy_instance(None);
         }
     }

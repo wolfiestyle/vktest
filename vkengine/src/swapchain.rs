@@ -1,12 +1,13 @@
 use crate::create::CreateFromInfo;
 use crate::device::{ImageParams, VkImage, VulkanDevice};
-use crate::types::*;
+use crate::types::{ErrorDescription, VkError, VulkanResult};
 use ash::vk;
 use glam::UVec2;
 use gpu_allocator::MemoryLocation;
+use std::sync::Arc;
 
-#[derive(Debug)]
 pub struct Swapchain {
+    device: Arc<VulkanDevice>,
     pub handle: vk::SwapchainKHR,
     pub images: Vec<vk::Image>,
     pub image_views: Vec<vk::ImageView>,
@@ -31,26 +32,33 @@ impl Swapchain {
     };
 
     pub fn new(
-        device: &VulkanDevice, win_size: UVec2, image_count: u32, depth_format: vk::Format, samples: vk::SampleCountFlags, vsync: bool,
+        device: &Arc<VulkanDevice>, win_size: UVec2, image_count: u32, depth_format: vk::Format, samples: vk::SampleCountFlags, vsync: bool,
     ) -> VulkanResult<Self> {
         let mut swapchain = Swapchain::create(device, win_size.x, win_size.y, image_count, vsync, vk::SwapchainKHR::null())?;
-        swapchain.create_msaa_attachment(device, samples)?;
-        swapchain.create_depth_attachment(device, depth_format)?;
+        swapchain.create_msaa_attachment(samples)?;
+        swapchain.create_depth_attachment(depth_format)?;
         Ok(swapchain)
     }
 
-    pub fn recreate(&mut self, device: &VulkanDevice, win_size: UVec2) -> VulkanResult<()> {
-        let mut swapchain = Swapchain::create(device, win_size.x, win_size.y, self.images.len() as _, self.vsync, self.handle)?;
-        swapchain.create_msaa_attachment(device, self.samples)?;
-        swapchain.create_depth_attachment(device, self.depth_format)?;
-        let old_swapchain = std::mem::replace(self, swapchain);
-        unsafe { device.device_wait_idle()? };
-        device.dispose_of(old_swapchain);
+    pub fn recreate(&mut self, win_size: UVec2) -> VulkanResult<()> {
+        let mut swapchain = Swapchain::create(
+            &self.device,
+            win_size.x,
+            win_size.y,
+            self.images.len() as _,
+            self.vsync,
+            self.handle,
+        )?;
+        swapchain.create_msaa_attachment(self.samples)?;
+        swapchain.create_depth_attachment(self.depth_format)?;
+        let _old_swapchain = std::mem::replace(self, swapchain);
+        unsafe { self.device.device_wait_idle()? };
+        // old_swapchain is dropped here
         Ok(())
     }
 
     fn create(
-        device: &VulkanDevice, width: u32, height: u32, image_count: u32, vsync: bool, old_swapchain: vk::SwapchainKHR,
+        device: &Arc<VulkanDevice>, width: u32, height: u32, image_count: u32, vsync: bool, old_swapchain: vk::SwapchainKHR,
     ) -> VulkanResult<Self> {
         let surface_info = device.instance.query_surface_info(device.dev_info.phys_dev, device.surface)?;
         let surface_format = surface_info.find_surface_format();
@@ -102,11 +110,12 @@ impl Swapchain {
                     .format(surface_format.format)
                     .view_type(vk::ImageViewType::TYPE_2D)
                     .subresource_range(Self::SUBRESOURCE_RANGE)
-                    .create(device)
+                    .create(&device)
             })
             .collect::<Result<_, _>>()?;
 
         Ok(Self {
+            device: Arc::clone(device),
             handle: swapchain,
             images,
             image_views,
@@ -122,11 +131,11 @@ impl Swapchain {
         })
     }
 
-    fn create_msaa_attachment(&mut self, device: &VulkanDevice, samples: vk::SampleCountFlags) -> VulkanResult<()> {
+    fn create_msaa_attachment(&mut self, samples: vk::SampleCountFlags) -> VulkanResult<()> {
         if samples == vk::SampleCountFlags::TYPE_1 {
             return Ok(());
         }
-        let image = device.allocate_image(
+        let image = self.device.allocate_image(
             ImageParams {
                 width: self.extent.width,
                 height: self.extent.height,
@@ -138,9 +147,9 @@ impl Swapchain {
             vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSIENT_ATTACHMENT,
             MemoryLocation::GpuOnly,
         )?;
-        let imgview = image.create_view(device, vk::ImageViewType::TYPE_2D)?;
+        let imgview = image.create_view(&self.device, vk::ImageViewType::TYPE_2D)?;
 
-        device.debug(|d| {
+        self.device.debug(|d| {
             d.set_object_name(*image, "MSAA color image");
             d.set_object_name(imgview, "MSAA color image view");
         });
@@ -150,11 +159,11 @@ impl Swapchain {
         Ok(())
     }
 
-    fn create_depth_attachment(&mut self, device: &VulkanDevice, depth_format: vk::Format) -> VulkanResult<()> {
+    fn create_depth_attachment(&mut self, depth_format: vk::Format) -> VulkanResult<()> {
         if depth_format == vk::Format::UNDEFINED {
             return VkError::EngineError("depth format undefined").into();
         }
-        let depth_image = device.allocate_image(
+        let depth_image = self.device.allocate_image(
             ImageParams {
                 width: self.extent.width,
                 height: self.extent.height,
@@ -167,9 +176,9 @@ impl Swapchain {
             MemoryLocation::GpuOnly,
         )?;
 
-        let depth_imgview = depth_image.create_view(device, vk::ImageViewType::TYPE_2D)?;
+        let depth_imgview = depth_image.create_view(&self.device, vk::ImageViewType::TYPE_2D)?;
 
-        device.debug(|d| {
+        self.device.debug(|d| {
             d.set_object_name(*depth_image, "Depth image");
             d.set_object_name(depth_imgview, "Depth image view");
         });
@@ -266,15 +275,31 @@ impl std::ops::Deref for Swapchain {
     }
 }
 
-impl Cleanup<VulkanDevice> for Swapchain {
-    unsafe fn cleanup(&mut self, device: &VulkanDevice) {
+impl Drop for Swapchain {
+    fn drop(&mut self) {
         unsafe {
-            self.image_views.cleanup(device);
-            self.msaa_imgview.cleanup(device);
-            self.msaa_image.cleanup(device);
-            self.depth_imgview.cleanup(device);
-            self.depth_image.cleanup(device);
-            device.swapchain_fn.destroy_swapchain(self.handle, None);
+            for view in &self.image_views {
+                self.device.destroy_image_view(*view, None);
+            }
+            if let Some(view) = self.msaa_imgview {
+                self.device.destroy_image_view(view, None);
+            }
+            if let Some(view) = self.depth_imgview {
+                self.device.destroy_image_view(view, None);
+            }
+            self.device.swapchain_fn.destroy_swapchain(self.handle, None);
         }
+    }
+}
+
+impl std::fmt::Debug for Swapchain {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Swapchain")
+            .field("handle", &self.handle)
+            .field("format", &self.format)
+            .field("extent", &self.extent)
+            .field("samples", &self.samples)
+            .field("vsync", &self.vsync)
+            .finish_non_exhaustive()
     }
 }

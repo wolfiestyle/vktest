@@ -12,7 +12,7 @@ use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use std::mem::ManuallyDrop;
 use std::mem::{size_of, size_of_val};
 use std::slice;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 pub struct VulkanDevice {
     pub(crate) instance: VulkanInstance,
@@ -127,7 +127,7 @@ impl VulkanDevice {
         Ok(())
     }
 
-    fn allocate_buffer(&self, size: vk::DeviceSize, params: BufferParams) -> VulkanResult<VkBuffer> {
+    pub fn allocate_buffer(self: &Arc<Self>, size: vk::DeviceSize, params: BufferParams) -> VulkanResult<VkBuffer> {
         let buffer_ci = vk::BufferCreateInfo::default()
             .size(size)
             .usage(params.usage)
@@ -165,6 +165,7 @@ impl VulkanDevice {
         };
 
         Ok(MemoryObject {
+            device: Arc::clone(self),
             handle: buffer,
             memory: ManuallyDrop::new(allocation),
             size,
@@ -173,7 +174,7 @@ impl VulkanDevice {
     }
 
     #[inline]
-    pub fn allocate_cpu_buffer(&self, size: vk::DeviceSize, usage: vk::BufferUsageFlags) -> VulkanResult<VkBuffer> {
+    pub fn allocate_cpu_buffer(self: &Arc<Self>, size: vk::DeviceSize, usage: vk::BufferUsageFlags) -> VulkanResult<VkBuffer> {
         let params = BufferParams {
             usage,
             location: MemoryLocation::CpuToGpu,
@@ -182,7 +183,7 @@ impl VulkanDevice {
     }
 
     #[inline]
-    pub fn allocate_gpu_buffer(&self, size: vk::DeviceSize, usage: vk::BufferUsageFlags) -> VulkanResult<VkBuffer> {
+    pub fn allocate_gpu_buffer(self: &Arc<Self>, size: vk::DeviceSize, usage: vk::BufferUsageFlags) -> VulkanResult<VkBuffer> {
         let params = BufferParams {
             usage,
             location: MemoryLocation::GpuOnly,
@@ -207,7 +208,7 @@ impl VulkanDevice {
         self.end_one_time_commands(cmd_buffer)
     }
 
-    pub fn create_buffer_from_data<T: Copy>(&self, data: &[T], usage: vk::BufferUsageFlags) -> VulkanResult<VkBuffer> {
+    pub fn create_buffer_from_data<T: Copy>(self: &Arc<Self>, data: &[T], usage: vk::BufferUsageFlags) -> VulkanResult<VkBuffer> {
         let size = size_of_val(data) as _;
         let mut src_buffer = self.allocate_cpu_buffer(size, vk::BufferUsageFlags::TRANSFER_SRC)?;
         let dst_buffer = self.allocate_gpu_buffer(size, vk::BufferUsageFlags::TRANSFER_DST | usage)?;
@@ -221,12 +222,12 @@ impl VulkanDevice {
                 &format!("Buffer {:?}", (dst_buffer.props.location, dst_buffer.props.usage)),
             )
         });
-        self.dispose_of(src_buffer);
+        drop(src_buffer);
         Ok(dst_buffer)
     }
 
     pub fn allocate_image(
-        &self, params: ImageParams, flags: vk::ImageCreateFlags, img_usage: vk::ImageUsageFlags, location: MemoryLocation,
+        self: &Arc<Self>, params: ImageParams, flags: vk::ImageCreateFlags, img_usage: vk::ImageUsageFlags, location: MemoryLocation,
     ) -> VulkanResult<VkImage> {
         let image_ci = vk::ImageCreateInfo::default()
             .image_type(vk::ImageType::TYPE_2D)
@@ -273,6 +274,7 @@ impl VulkanDevice {
         }
 
         Ok(VkImage {
+            device: Arc::clone(self),
             handle: image,
             memory: ManuallyDrop::new(allocation),
             size: requirements.size,
@@ -480,7 +482,9 @@ impl VulkanDevice {
         }
     }
 
-    pub fn create_image_from_data(&self, params: ImageParams, data: ImageData, flags: vk::ImageCreateFlags) -> VulkanResult<VkImage> {
+    pub fn create_image_from_data(
+        self: &Arc<Self>, params: ImageParams, data: ImageData, flags: vk::ImageCreateFlags,
+    ) -> VulkanResult<VkImage> {
         if params.layers != data.layer_count() {
             return VkError::InvalidArgument("Image and data layer count doesn't match").into();
         }
@@ -549,7 +553,6 @@ impl VulkanDevice {
         }
         self.end_one_time_commands(cmd_buffer)?;
 
-        self.dispose_of(src_buffer);
         self.debug(|d| {
             d.set_object_name(
                 tex_image.handle,
@@ -576,7 +579,7 @@ impl VulkanDevice {
             return VkError::InvalidArgument("Image data size doesn't match the expected size").into();
         }
 
-        let mut src_buffer = self.allocate_cpu_buffer(size, vk::BufferUsageFlags::TRANSFER_SRC)?;
+        let mut src_buffer = image.device().allocate_cpu_buffer(size, vk::BufferUsageFlags::TRANSFER_SRC)?;
         data.write_to_buffer(&mut src_buffer.map()?);
 
         let cmd_buffer = self.begin_one_time_commands()?;
@@ -619,7 +622,6 @@ impl VulkanDevice {
         }
         self.end_one_time_commands(cmd_buffer)?;
 
-        self.dispose_of(src_buffer);
         Ok(())
     }
 
@@ -670,12 +672,6 @@ impl VulkanDevice {
     #[inline]
     pub fn debug<F: FnOnce(&DebugUtils)>(&self, _debug_f: F) {}
 
-    #[inline]
-    pub fn dispose_of(&self, mut obj: impl Cleanup<Self>) {
-        unsafe { obj.cleanup(self) };
-        std::mem::forget(obj);
-    }
-
     pub fn get_memory_info(&self) -> String {
         format!("{:#?}", self.allocator.lock().unwrap())
     }
@@ -716,63 +712,64 @@ impl std::fmt::Debug for VulkanDevice {
     }
 }
 
-impl Cleanup<VulkanDevice> for vk::CommandPool {
-    unsafe fn cleanup(&mut self, device: &VulkanDevice) {
-        unsafe {
-            device.destroy_command_pool(*self, None);
-        }
-    }
-}
-
-impl Cleanup<VulkanDevice> for vk::Sampler {
-    unsafe fn cleanup(&mut self, device: &VulkanDevice) {
-        unsafe {
-            device.destroy_sampler(*self, None);
-        }
-    }
-}
-
-impl Cleanup<VulkanDevice> for vk::DescriptorSetLayout {
-    unsafe fn cleanup(&mut self, device: &VulkanDevice) {
-        unsafe {
-            device.destroy_descriptor_set_layout(*self, None);
-        }
-    }
-}
-
-impl Cleanup<VulkanDevice> for vk::ImageView {
-    unsafe fn cleanup(&mut self, device: &VulkanDevice) {
-        unsafe {
-            device.destroy_image_view(*self, None);
-        }
-    }
-}
-
 pub type VkBuffer = MemoryObject<vk::Buffer, BufferParams>;
 pub type VkImage = MemoryObject<vk::Image, ImageParams>;
 
-#[derive(Debug)]
-pub struct MemoryObject<T, P> {
+/// Trait for Vulkan handles that can be destroyed
+pub trait VulkanHandle: Copy {
+    /// Destroy this handle using the given device
+    unsafe fn destroy(self, device: &ash::Device);
+}
+
+impl VulkanHandle for vk::Buffer {
+    unsafe fn destroy(self, device: &ash::Device) {
+        unsafe { device.destroy_buffer(self, None) };
+    }
+}
+
+impl VulkanHandle for vk::Image {
+    unsafe fn destroy(self, device: &ash::Device) {
+        unsafe { device.destroy_image(self, None) };
+    }
+}
+
+pub struct MemoryObject<T: VulkanHandle, P> {
+    device: Arc<VulkanDevice>,
     pub handle: T,
     memory: ManuallyDrop<Allocation>,
     size: u64,
     pub props: P,
 }
 
-impl<T, P> MemoryObject<T, P> {
+impl<T: VulkanHandle, P> MemoryObject<T, P> {
     #[inline]
     pub fn size(&self) -> u64 {
         self.size
+    }
+
+    #[inline]
+    pub fn device(&self) -> &Arc<VulkanDevice> {
+        &self.device
     }
 
     pub fn map(&mut self) -> VulkanResult<MappedMemory<'_>> {
         let mapped = self.memory.mapped_slice_mut().describe_err("Failed to map memory")?;
         Ok(MappedMemory { mapped })
     }
+}
 
-    unsafe fn free_memory(&mut self, device: &VulkanDevice) {
+impl<T: VulkanHandle, P> std::ops::Deref for MemoryObject<T, P> {
+    type Target = T;
+    fn deref(&self) -> &Self::Target {
+        &self.handle
+    }
+}
+
+impl<T: VulkanHandle, P> Drop for MemoryObject<T, P> {
+    fn drop(&mut self) {
         unsafe {
-            device
+            self.handle.destroy(&self.device);
+            self.device
                 .allocator
                 .lock()
                 .unwrap()
@@ -782,28 +779,13 @@ impl<T, P> MemoryObject<T, P> {
     }
 }
 
-impl<T, P> std::ops::Deref for MemoryObject<T, P> {
-    type Target = T;
-    fn deref(&self) -> &Self::Target {
-        &self.handle
-    }
-}
-
-impl<P> Cleanup<VulkanDevice> for MemoryObject<vk::Buffer, P> {
-    unsafe fn cleanup(&mut self, device: &VulkanDevice) {
-        unsafe {
-            device.destroy_buffer(self.handle, None);
-            self.free_memory(device);
-        }
-    }
-}
-
-impl<P> Cleanup<VulkanDevice> for MemoryObject<vk::Image, P> {
-    unsafe fn cleanup(&mut self, device: &VulkanDevice) {
-        unsafe {
-            device.destroy_image(self.handle, None);
-            self.free_memory(device);
-        }
+impl<T: VulkanHandle + std::fmt::Debug, P: std::fmt::Debug> std::fmt::Debug for MemoryObject<T, P> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MemoryObject")
+            .field("handle", &self.handle)
+            .field("size", &self.size)
+            .field("props", &self.props)
+            .finish_non_exhaustive()
     }
 }
 
@@ -826,32 +808,32 @@ impl<P> MemoryObject<vk::Buffer, P> {
 }
 
 impl MemoryObject<vk::Buffer, BufferParams> {
-    pub fn resize(&mut self, device: &VulkanDevice, new_size: vk::DeviceSize, preserve_contents: bool) -> VulkanResult<()> {
+    pub fn resize(&mut self, new_size: vk::DeviceSize, preserve_contents: bool) -> VulkanResult<()> {
         if preserve_contents {
             self.props.usage |= vk::BufferUsageFlags::TRANSFER_DST;
         }
-        let new_buffer = device.allocate_buffer(new_size, self.props)?;
+        let new_buffer = self.device.allocate_buffer(new_size, self.props)?;
         if preserve_contents {
-            let cmd_buffer = device.begin_one_time_commands()?;
+            let cmd_buffer = self.device.begin_one_time_commands()?;
             let copy_region = vk::BufferCopy {
                 src_offset: 0,
                 dst_offset: 0,
                 size: self.size.min(new_buffer.size),
             };
             unsafe {
-                device.cmd_copy_buffer(cmd_buffer, self.handle, *new_buffer, slice::from_ref(&copy_region));
+                self.device
+                    .cmd_copy_buffer(cmd_buffer, self.handle, *new_buffer, slice::from_ref(&copy_region));
             }
-            device.end_one_time_commands(cmd_buffer)?;
+            self.device.end_one_time_commands(cmd_buffer)?;
         }
-        let old_buffer = std::mem::replace(self, new_buffer);
-        device.dispose_of(old_buffer);
+        *self = new_buffer;
         Ok(())
     }
 
-    pub fn ensure_capacity(&mut self, device: &VulkanDevice, size: vk::DeviceSize, preserve_contents: bool) -> VulkanResult<bool> {
+    pub fn ensure_capacity(&mut self, size: vk::DeviceSize, preserve_contents: bool) -> VulkanResult<bool> {
         if size > self.size {
             let new_size = 1u64 << ((size - 1).ilog2() + 1); // nearest power of two rounded up
-            self.resize(device, new_size, preserve_contents)?;
+            self.resize(new_size, preserve_contents)?;
             Ok(true)
         } else {
             Ok(false)

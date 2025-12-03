@@ -3,7 +3,7 @@ use crate::device::{VkBuffer, VulkanDevice};
 use crate::engine::{CmdBufferRing, DrawPayload, UploadBuffer, VulkanEngine};
 use crate::pipeline::{Pipeline, PipelineMode, Shader};
 use crate::texture::Texture;
-use crate::types::{Cleanup, VulkanResult};
+use crate::types::VulkanResult;
 use crate::vertex::{IndexInput, VertexInput};
 use ash::vk;
 use bytemuck_derive::{Pod, Zeroable};
@@ -213,8 +213,7 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
             .push_constants(slice::from_ref(&self.push_constants))
             .render_to_swapchain(&engine.swapchain)
             .build(engine)?;
-        let old_pipeline = std::mem::replace(&mut self.pipeline, pipeline);
-        self.device.dispose_of(old_pipeline);
+        self.pipeline = pipeline;
         Ok(())
     }
 }
@@ -223,13 +222,7 @@ impl<V, I> Drop for MeshRenderer<V, I> {
     fn drop(&mut self) {
         unsafe {
             self.device.device_wait_idle().unwrap();
-            self.vertex_buffer.cleanup(&self.device);
-            self.index_buffer.cleanup(&self.device);
-            self.pipeline.cleanup(&self.device);
-            self.shader.cleanup(&self.device);
-            self.push_desc_layout.cleanup(&self.device);
-            self.cmd_buffers.cleanup(&self.device);
-            self.obj_uniforms.cleanup(&self.device);
+            self.device.destroy_descriptor_set_layout(self.push_desc_layout, None);
         }
     }
 }
@@ -525,8 +518,7 @@ impl SkyboxRenderer {
             .render_to_swapchain(&engine.swapchain)
             .mode(PipelineMode::Background)
             .build(engine)?;
-        let old_pipeline = std::mem::replace(&mut self.pipeline, pipeline);
-        self.device.dispose_of(old_pipeline);
+        self.pipeline = pipeline;
         Ok(())
     }
 }
@@ -535,10 +527,7 @@ impl Drop for SkyboxRenderer {
     fn drop(&mut self) {
         unsafe {
             self.device.device_wait_idle().unwrap();
-            self.pipeline.cleanup(&self.device);
-            self.shader.cleanup(&self.device);
-            self.desc_layout.cleanup(&self.device);
-            self.cmd_buffers.cleanup(&self.device);
+            self.device.destroy_descriptor_set_layout(self.desc_layout, None);
         }
     }
 }

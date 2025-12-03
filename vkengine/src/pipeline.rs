@@ -2,13 +2,14 @@ use crate::create::CreateFromInfo;
 use crate::device::VulkanDevice;
 use crate::engine::VulkanEngine;
 use crate::swapchain::Swapchain;
-use crate::types::*;
+use crate::types::{VkError, VulkanResult};
 use crate::vertex::VertexInput;
 use ash::vk;
 use std::slice;
+use std::sync::Arc;
 
-#[derive(Debug)]
 pub struct Pipeline {
+    device: Arc<VulkanDevice>,
     pub(crate) handle: vk::Pipeline,
     pub(crate) layout: vk::PipelineLayout,
 }
@@ -145,12 +146,21 @@ impl Pipeline {
     }
 }
 
-impl Cleanup<VulkanDevice> for Pipeline {
-    unsafe fn cleanup(&mut self, device: &VulkanDevice) {
+impl Drop for Pipeline {
+    fn drop(&mut self) {
         unsafe {
-            device.destroy_pipeline(self.handle, None);
-            device.destroy_pipeline_layout(self.layout, None);
+            self.device.destroy_pipeline(self.handle, None);
+            self.device.destroy_pipeline_layout(self.layout, None);
         }
+    }
+}
+
+impl std::fmt::Debug for Pipeline {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Pipeline")
+            .field("handle", &self.handle)
+            .field("layout", &self.layout)
+            .finish_non_exhaustive()
     }
 }
 
@@ -244,7 +254,11 @@ impl<'a> GraphicsPipelineBuilder<'a> {
             .push_constant_ranges(self.push_constants)
             .create(&engine.device)?;
         let handle = Pipeline::create_graphics_pipeline(engine, layout, self)?;
-        Ok(Pipeline { handle, layout })
+        Ok(Pipeline {
+            device: Arc::clone(&engine.device),
+            handle,
+            layout,
+        })
     }
 }
 
@@ -294,7 +308,11 @@ impl<'a> ComputePipelineBuilder<'a> {
             .push_constant_ranges(self.push_constants)
             .create(&engine.device)?;
         let handle = Pipeline::create_compute_pipeline(engine, layout, self)?;
-        Ok(Pipeline { handle, layout })
+        Ok(Pipeline {
+            device: Arc::clone(&engine.device),
+            handle,
+            layout,
+        })
     }
 }
 
@@ -336,25 +354,38 @@ impl PipelineMode {
     }
 }
 
-#[derive(Debug)]
 pub struct Shader {
+    device: Arc<VulkanDevice>,
     pub vert: vk::ShaderModule,
     pub frag: vk::ShaderModule,
 }
 
 impl Shader {
-    pub fn new(device: &VulkanDevice, vert_spv: &[u32], frag_spv: &[u32]) -> VulkanResult<Self> {
-        let vert = vk::ShaderModuleCreateInfo::default().code(vert_spv).create(device)?;
-        let frag = vk::ShaderModuleCreateInfo::default().code(frag_spv).create(device)?;
-        Ok(Self { vert, frag })
+    pub fn new(device: &Arc<VulkanDevice>, vert_spv: &[u32], frag_spv: &[u32]) -> VulkanResult<Self> {
+        let vert = vk::ShaderModuleCreateInfo::default().code(vert_spv).create(&device)?;
+        let frag = vk::ShaderModuleCreateInfo::default().code(frag_spv).create(&device)?;
+        Ok(Self {
+            device: Arc::clone(device),
+            vert,
+            frag,
+        })
     }
 }
 
-impl Cleanup<VulkanDevice> for Shader {
-    unsafe fn cleanup(&mut self, device: &VulkanDevice) {
+impl Drop for Shader {
+    fn drop(&mut self) {
         unsafe {
-            device.destroy_shader_module(self.vert, None);
-            device.destroy_shader_module(self.frag, None);
+            self.device.destroy_shader_module(self.vert, None);
+            self.device.destroy_shader_module(self.frag, None);
         }
+    }
+}
+
+impl std::fmt::Debug for Shader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Shader")
+            .field("vert", &self.vert)
+            .field("frag", &self.frag)
+            .finish_non_exhaustive()
     }
 }

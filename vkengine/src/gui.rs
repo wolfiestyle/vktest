@@ -3,7 +3,7 @@ use crate::device::{ImageData, VulkanDevice};
 use crate::engine::{CmdBufferRing, DrawPayload, UploadBuffer, VulkanEngine};
 use crate::pipeline::{Pipeline, PipelineMode, Shader};
 use crate::texture::{Texture, TextureOptions};
-use crate::types::{Cleanup, VulkanResult};
+use crate::types::VulkanResult;
 use ash::vk;
 use bytemuck::{Pod, Zeroable};
 use egui::epaint::{Primitive, Vertex};
@@ -133,7 +133,7 @@ impl UiRenderer {
 
             let cmd_buffer = self.cmd_buffers.get_current_buffer(engine)?;
             self.build_draw_commands(cmd_buffer, engine)?;
-            let payload = DrawPayload::new_with_callback(cmd_buffer, |dev| dev.dispose_of(drop_textures));
+            let payload = DrawPayload::new_with_callback(cmd_buffer, move |_dev| drop(drop_textures));
             Ok(payload)
         } else {
             // build a command buffer from the old primitives
@@ -186,7 +186,7 @@ impl UiRenderer {
                 }
                 Entry::Occupied(mut entry) => {
                     let pos = image.pos.unwrap_or([0, 0]).map(|v| v as _);
-                    entry.get_mut().update(&self.device, pos.into(), size.into(), bytes)?;
+                    entry.get_mut().update(pos.into(), size.into(), bytes)?;
                 }
             }
         }
@@ -210,7 +210,7 @@ impl UiRenderer {
         self.total_vert_size = total_vert_size as _;
         // allocate more buffer space if necessary
         let buffer = &mut self.buffers[self.local_frame];
-        let resized = buffer.ensure_capacity(&self.device, total_bytes as _, false)?;
+        let resized = buffer.ensure_capacity(total_bytes as _, false)?;
         if resized {
             self.device.debug(|d| d.set_object_name(buffer.handle, "UiRenderer buffer"))
         }
@@ -304,8 +304,7 @@ impl UiRenderer {
             .render_to_swapchain(&engine.swapchain)
             .mode(PipelineMode::Overlay)
             .build(engine)?;
-        let old_pipeline = std::mem::replace(&mut self.pipeline, pipeline);
-        self.device.dispose_of(old_pipeline);
+        self.pipeline = pipeline;
         Ok(())
     }
 }
@@ -314,12 +313,7 @@ impl Drop for UiRenderer {
     fn drop(&mut self) {
         unsafe {
             self.device.device_wait_idle().unwrap();
-            self.textures.cleanup(&self.device);
-            self.pipeline.cleanup(&self.device);
-            self.shader.cleanup(&self.device);
-            self.set_layout.cleanup(&self.device);
-            self.buffers.cleanup(&self.device);
-            self.cmd_buffers.cleanup(&self.device);
+            self.device.destroy_descriptor_set_layout(self.set_layout, None);
         }
     }
 }

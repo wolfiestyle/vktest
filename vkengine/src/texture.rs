@@ -1,7 +1,8 @@
 use crate::device::{ImageData, ImageParams, VkImage, VulkanDevice};
-use crate::types::*;
+use crate::types::VulkanResult;
 use ash::vk;
 use glam::UVec2;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct TextureOptions {
@@ -9,7 +10,6 @@ pub struct TextureOptions {
     pub swizzle: Option<vk::ComponentMapping>,
 }
 
-#[derive(Debug)]
 pub struct Texture {
     pub image: VkImage,
     pub info: vk::DescriptorImageInfo,
@@ -17,7 +17,7 @@ pub struct Texture {
 
 impl Texture {
     pub fn new(
-        device: &VulkanDevice, size: UVec2, format: vk::Format, data: ImageData, sampler: vk::Sampler, options: TextureOptions,
+        device: &Arc<VulkanDevice>, size: UVec2, format: vk::Format, data: ImageData, sampler: vk::Sampler, options: TextureOptions,
     ) -> VulkanResult<Self> {
         let params = ImageParams {
             width: size.x,
@@ -43,7 +43,9 @@ impl Texture {
         })
     }
 
-    pub fn new_empty(device: &VulkanDevice, params: ImageParams, flags: vk::ImageCreateFlags, sampler: vk::Sampler) -> VulkanResult<Self> {
+    pub fn new_empty(
+        device: &Arc<VulkanDevice>, params: ImageParams, flags: vk::ImageCreateFlags, sampler: vk::Sampler,
+    ) -> VulkanResult<Self> {
         let image = device.allocate_image(
             params,
             flags,
@@ -69,9 +71,14 @@ impl Texture {
         })
     }
 
+    #[inline]
+    pub fn device(&self) -> &Arc<VulkanDevice> {
+        self.image.device()
+    }
+
     #[allow(unused_assignments)]
     pub fn from_dynamicimage(
-        device: &VulkanDevice, image: &gltf_import::DynamicImage, is_srgb: bool, gen_mipmaps: bool, sampler: vk::Sampler,
+        device: &Arc<VulkanDevice>, image: &gltf_import::DynamicImage, is_srgb: bool, gen_mipmaps: bool, sampler: vk::Sampler,
     ) -> VulkanResult<Texture> {
         use gltf_import::DynamicImage::*;
 
@@ -151,12 +158,13 @@ impl Texture {
         )
     }
 
-    pub fn update(&mut self, device: &VulkanDevice, pos: UVec2, size: UVec2, data: &[u8]) -> VulkanResult<()> {
-        device.update_image_from_data(&self.image, pos, size, 0, ImageData::Single(data))
+    pub fn update(&mut self, pos: UVec2, size: UVec2, data: &[u8]) -> VulkanResult<()> {
+        self.device()
+            .update_image_from_data(&self.image, pos, size, 0, ImageData::Single(data))
     }
 
-    pub fn transition_layout(&mut self, device: &VulkanDevice, cmd_buffer: vk::CommandBuffer, new_layout: vk::ImageLayout) {
-        device.transition_image_layout(
+    pub fn transition_layout(&mut self, cmd_buffer: vk::CommandBuffer, new_layout: vk::ImageLayout) {
+        self.device().transition_image_layout(
             cmd_buffer,
             *self.image,
             self.image.props.subresource_range(),
@@ -167,11 +175,19 @@ impl Texture {
     }
 }
 
-impl Cleanup<VulkanDevice> for Texture {
-    unsafe fn cleanup(&mut self, device: &VulkanDevice) {
+impl Drop for Texture {
+    fn drop(&mut self) {
         unsafe {
-            self.info.image_view.cleanup(device);
-            self.image.cleanup(device);
+            self.device().destroy_image_view(self.info.image_view, None);
         }
+    }
+}
+
+impl std::fmt::Debug for Texture {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Texture")
+            .field("image", &self.image)
+            .field("info", &self.info)
+            .finish()
     }
 }

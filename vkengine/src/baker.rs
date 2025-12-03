@@ -197,7 +197,7 @@ impl Baker {
         let mut irrmap = Texture::new_empty(&self.device, params, vk::ImageCreateFlags::CUBE_COMPATIBLE, vk::Sampler::null())?;
         self.device.debug(|d| d.set_object_name(*irrmap.image, "Irradiance map"));
         let cmd_buffer = self.device.begin_one_time_commands()?;
-        irrmap.transition_layout(&self.device, cmd_buffer, vk::ImageLayout::GENERAL);
+        irrmap.transition_layout(cmd_buffer, vk::ImageLayout::GENERAL);
         unsafe {
             self.device
                 .cmd_bind_pipeline(cmd_buffer, vk::PipelineBindPoint::COMPUTE, *self.irrmap_pipeline);
@@ -219,7 +219,7 @@ impl Baker {
             );
             self.device.cmd_dispatch(cmd_buffer, IRRMAP_WG, IRRMAP_WG, 6);
         }
-        irrmap.transition_layout(&self.device, cmd_buffer, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
+        irrmap.transition_layout(cmd_buffer, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
         self.device.end_one_time_commands(cmd_buffer)?;
         Ok(irrmap)
     }
@@ -237,7 +237,7 @@ impl Baker {
         let mut prefmap = Texture::new_empty(&self.device, params, vk::ImageCreateFlags::CUBE_COMPATIBLE, vk::Sampler::null())?;
         self.device.debug(|d| d.set_object_name(*prefmap.image, "Prefiltered map"));
         let cmd_buffer = self.device.begin_one_time_commands()?;
-        prefmap.transition_layout(&self.device, cmd_buffer, vk::ImageLayout::GENERAL);
+        prefmap.transition_layout(cmd_buffer, vk::ImageLayout::GENERAL);
         let mip_infos = (0..PREFILTERED_MIP_LEVELS)
             .map(|level| {
                 let image_view = prefmap.image.create_view_subresource(
@@ -293,10 +293,10 @@ impl Baker {
                 wg_size = 1.max(wg_size / 2);
             }
         }
-        prefmap.transition_layout(&self.device, cmd_buffer, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
+        prefmap.transition_layout(cmd_buffer, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
         self.device.end_one_time_commands(cmd_buffer)?;
         for info in mip_infos {
-            self.device.dispose_of(info.image_view);
+            unsafe { self.device.destroy_image_view(info.image_view, None) };
         }
         Ok(prefmap)
     }
@@ -312,7 +312,7 @@ impl Baker {
         let mut brdf_lut = Texture::new_empty(&self.device, params, vk::ImageCreateFlags::empty(), vk::Sampler::null())?;
         self.device.debug(|d| d.set_object_name(*brdf_lut.image, "BRDF lut"));
         let cmd_buffer = self.device.begin_one_time_commands()?;
-        brdf_lut.transition_layout(&self.device, cmd_buffer, vk::ImageLayout::GENERAL);
+        brdf_lut.transition_layout(cmd_buffer, vk::ImageLayout::GENERAL);
         unsafe {
             self.device
                 .cmd_bind_pipeline(cmd_buffer, vk::PipelineBindPoint::COMPUTE, *self.brdf_pipeline);
@@ -328,7 +328,7 @@ impl Baker {
             );
             self.device.cmd_dispatch(cmd_buffer, BRDFLUT_WG, BRDFLUT_WG, 1);
         }
-        brdf_lut.transition_layout(&self.device, cmd_buffer, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
+        brdf_lut.transition_layout(cmd_buffer, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
         self.device.end_one_time_commands(cmd_buffer)?;
         Ok(brdf_lut)
     }
@@ -347,7 +347,7 @@ impl Baker {
         let mut cubemap = Texture::new_empty(&self.device, params, vk::ImageCreateFlags::CUBE_COMPATIBLE, vk::Sampler::null())?;
         self.device.debug(|d| d.set_object_name(*cubemap.image, "Cubemap image"));
         let cmd_buffer = self.device.begin_one_time_commands()?;
-        cubemap.transition_layout(&self.device, cmd_buffer, vk::ImageLayout::GENERAL);
+        cubemap.transition_layout(cmd_buffer, vk::ImageLayout::GENERAL);
         unsafe {
             self.device
                 .cmd_bind_pipeline(cmd_buffer, vk::PipelineBindPoint::COMPUTE, *self.eq2cube_pipeline);
@@ -371,13 +371,13 @@ impl Baker {
             self.device.cmd_dispatch(cmd_buffer, wg_size, wg_size, 6);
         }
         if gen_mipmaps {
-            cubemap.transition_layout(&self.device, cmd_buffer, vk::ImageLayout::TRANSFER_DST_OPTIMAL);
+            cubemap.transition_layout(cmd_buffer, vk::ImageLayout::TRANSFER_DST_OPTIMAL);
             unsafe {
                 self.device.generate_mipmaps(cmd_buffer, *cubemap.image, params);
             }
             cubemap.info.image_layout = vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL;
         } else {
-            cubemap.transition_layout(&self.device, cmd_buffer, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
+            cubemap.transition_layout(cmd_buffer, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
         }
         self.device.end_one_time_commands(cmd_buffer)?;
         Ok(cubemap)
@@ -387,14 +387,10 @@ impl Baker {
 impl Drop for Baker {
     fn drop(&mut self) {
         unsafe {
-            self.irrmap_pipeline.cleanup(&self.device);
-            self.irrmap_desc_layout.cleanup(&self.device);
-            self.prefilter_pipeline.cleanup(&self.device);
-            self.prefilter_desc_layout.cleanup(&self.device);
-            self.brdf_pipeline.cleanup(&self.device);
-            self.brdf_desc_layout.cleanup(&self.device);
-            self.eq2cube_pipeline.cleanup(&self.device);
-            self.eq2cube_desc_layout.cleanup(&self.device);
+            self.device.destroy_descriptor_set_layout(self.irrmap_desc_layout, None);
+            self.device.destroy_descriptor_set_layout(self.prefilter_desc_layout, None);
+            self.device.destroy_descriptor_set_layout(self.brdf_desc_layout, None);
+            self.device.destroy_descriptor_set_layout(self.eq2cube_desc_layout, None);
         }
     }
 }

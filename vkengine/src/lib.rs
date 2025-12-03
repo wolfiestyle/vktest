@@ -23,7 +23,7 @@ pub use instance::{DeviceInfo, DeviceSelection, DeviceType};
 pub use pipeline::{ComputePipelineBuilder, GraphicsPipelineBuilder, Pipeline, PipelineMode, Shader};
 pub use renderer::{LightData, MaterialData, MeshRenderData, MeshRenderer, SkyboxRenderer};
 pub use texture::{Texture, TextureOptions};
-pub use types::{Cleanup, VkError, VulkanResult};
+pub use types::{VkError, VulkanResult};
 pub use vertex::{IndexInput, VertexInput};
 
 #[cfg(feature = "egui")]

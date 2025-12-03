@@ -1,4 +1,3 @@
-use crate::types::Cleanup;
 use ash::ext;
 use ash::vk::{self, Handle};
 use std::ffi::{CStr, CString, c_void};
@@ -112,8 +111,8 @@ impl DebugUtilsInstance {
     }
 }
 
-impl Cleanup<()> for DebugUtilsInstance {
-    unsafe fn cleanup(&mut self, _: &()) {
+impl Drop for DebugUtilsInstance {
+    fn drop(&mut self) {
         unsafe {
             self.debug_ifn.destroy_debug_utils_messenger(self.messenger, None);
         }
