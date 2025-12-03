@@ -362,8 +362,8 @@ pub struct Shader {
 
 impl Shader {
     pub fn new(device: &Arc<VulkanDevice>, vert_spv: &[u32], frag_spv: &[u32]) -> VulkanResult<Self> {
-        let vert = vk::ShaderModuleCreateInfo::default().code(vert_spv).create(&device)?;
-        let frag = vk::ShaderModuleCreateInfo::default().code(frag_spv).create(&device)?;
+        let vert = vk::ShaderModuleCreateInfo::default().code(vert_spv).create(device)?;
+        let frag = vk::ShaderModuleCreateInfo::default().code(frag_spv).create(device)?;
         Ok(Self {
             device: Arc::clone(device),
             vert,

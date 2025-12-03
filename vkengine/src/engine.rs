@@ -600,14 +600,14 @@ impl CmdBufferRing {
         let pool = vk::CommandPoolCreateInfo::default()
             .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
             .queue_family_index(device.dev_info.graphics_idx)
-            .create(&device)?;
+            .create(device)?;
         device.debug(|d| d.set_object_name(pool, "CmdBufferRing pool"));
         // we use N + 1 command buffers so we can write on them right away without waiting for the previous frame
         let buffers = vk::CommandBufferAllocateInfo::default()
             .command_pool(pool)
             .level(level)
             .command_buffer_count(QUEUE_DEPTH as u32 + 1)
-            .create(&device)?;
+            .create(device)?;
         Ok(Self {
             device: Arc::clone(device),
             pool,
@@ -758,7 +758,7 @@ impl FrameState {
         let time_query = vk::QueryPoolCreateInfo::default()
             .query_type(vk::QueryType::TIMESTAMP)
             .query_count(2)
-            .create(&device)?;
+            .create(device)?;
         unsafe {
             device.reset_query_pool(time_query, 0, 2);
         }

@@ -110,7 +110,7 @@ impl Swapchain {
                     .format(surface_format.format)
                     .view_type(vk::ImageViewType::TYPE_2D)
                     .subresource_range(Self::SUBRESOURCE_RANGE)
-                    .create(&device)
+                    .create(device)
             })
             .collect::<Result<_, _>>()?;
 
