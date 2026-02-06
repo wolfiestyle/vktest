@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex};
 
 pub struct VulkanDevice {
     pub(crate) instance: VulkanInstance,
-    pub(crate) surface: vk::SurfaceKHR,
+    surface: Mutex<vk::SurfaceKHR>,
     pub dev_info: DeviceInfo,
     pub device: ash::Device,
     pub graphics_queue: vk::Queue,
@@ -66,7 +66,7 @@ impl VulkanDevice {
             #[cfg(debug_assertions)]
             debug_utils: DebugUtils::new(&instance, &device),
             instance,
-            surface,
+            surface: Mutex::new(surface),
             dev_info,
             device,
             graphics_queue,
@@ -85,6 +85,24 @@ impl VulkanDevice {
         });
 
         Ok(this)
+    }
+
+    pub(crate) fn surface(&self) -> vk::SurfaceKHR {
+        let surface = *self.surface.lock().unwrap();
+        assert_ne!(surface, vk::SurfaceKHR::null(), "surface already destroyed");
+        surface
+    }
+
+    /// Destroy the surface early. Must be called while the window is still valid.
+    pub(crate) fn destroy_surface(&self) {
+        let mut guard = self.surface.lock().unwrap();
+        let surface = *guard;
+        if surface != vk::SurfaceKHR::null() {
+            unsafe {
+                self.instance.surface_utils.destroy_surface(surface, None);
+            }
+            *guard = vk::SurfaceKHR::null();
+        }
     }
 
     pub fn make_semaphore(&self, sem_type: vk::SemaphoreType) -> VulkanResult<vk::Semaphore> {
@@ -692,7 +710,8 @@ impl Drop for VulkanDevice {
             ManuallyDrop::drop(&mut self.allocator);
             self.device.destroy_command_pool(self.onetime_pool, None);
             self.device.destroy_fence(self.onetime_fence, None);
-            self.instance.surface_utils.destroy_surface(self.surface, None);
+            // surface should already be destroyed by VulkanEngine::drop, but handle it just in case
+            self.destroy_surface();
             self.device.destroy_device(None);
         }
     }

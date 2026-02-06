@@ -60,7 +60,7 @@ impl Swapchain {
     fn create(
         device: &Arc<VulkanDevice>, width: u32, height: u32, image_count: u32, vsync: bool, old_swapchain: vk::SwapchainKHR,
     ) -> VulkanResult<Self> {
-        let surface_info = device.instance.query_surface_info(device.dev_info.phys_dev, device.surface)?;
+        let surface_info = device.instance.query_surface_info(device.dev_info.phys_dev, device.surface())?;
         let surface_format = surface_info.find_surface_format();
         let present_mode = surface_info.find_present_mode(vsync);
         eprintln!("present mode: {present_mode:?}");
@@ -73,7 +73,7 @@ impl Swapchain {
         };
 
         let swapchain_ci = vk::SwapchainCreateInfoKHR::default()
-            .surface(device.surface)
+            .surface(device.surface())
             .min_image_count(img_count)
             .image_format(surface_format.format)
             .image_color_space(surface_format.color_space)

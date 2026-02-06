@@ -10,6 +10,7 @@ use ash::vk;
 use glam::{Mat4, UVec2};
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use std::collections::HashMap;
+use std::mem::ManuallyDrop;
 use std::slice;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -23,7 +24,7 @@ pub struct VulkanEngine {
     pub(crate) device: Arc<VulkanDevice>,
     window_size: UVec2,
     window_resized: bool,
-    pub(crate) swapchain: Swapchain,
+    pub(crate) swapchain: ManuallyDrop<Swapchain>,
     pub(crate) reverse_depth: bool,
     main_cmd_buffers: CmdBufferRing,
     frame_state: Vec<FrameState>,
@@ -108,7 +109,7 @@ impl VulkanEngine {
             device,
             window_size,
             window_resized: false,
-            swapchain,
+            swapchain: ManuallyDrop::new(swapchain),
             reverse_depth,
             main_cmd_buffers,
             frame_state,
@@ -501,7 +502,7 @@ impl VulkanEngine {
             let acquire_res = self
                 .device
                 .swapchain_fn
-                .acquire_next_image(*self.swapchain, u64::MAX, image_avail_sem, vk::Fence::null());
+                .acquire_next_image(**self.swapchain, u64::MAX, image_avail_sem, vk::Fence::null());
             match acquire_res {
                 Ok((idx, _)) => idx,
                 Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
@@ -593,7 +594,11 @@ impl Drop for VulkanEngine {
             }
             self.device.destroy_pipeline_cache(self.pipeline_cache, None);
             self.device.destroy_descriptor_set_layout(self.pbr_desc_layout, None);
+            // swapchain must be destroyed before surface
+            ManuallyDrop::drop(&mut self.swapchain);
         }
+        // destroy surface while window is still valid (before other Arc<VulkanDevice> holders drop)
+        self.device.destroy_surface();
     }
 }
 
