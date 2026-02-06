@@ -18,6 +18,8 @@ struct Arguments {
     model: Option<PathBuf>,
     #[arg(short, long, help = "File with the HDR panorama skybox")]
     skybox: Option<PathBuf>,
+    #[arg(long, help = "Max skybox size for IBL (default: 1024, 0 = unlimited)")]
+    skybox_size: Option<u32>,
 }
 
 #[derive(Debug)]
@@ -122,7 +124,12 @@ fn main() -> VulkanResult<()> {
     let mut show_gui = true;
 
     let baker = Baker::new(&vk_app)?;
-    let skybox_tex = baker.equirect_to_cubemap(&skybox_equirect, true)?;
+    let skybox_max_size = match args.skybox_size {
+        Some(0) => None,
+        Some(size) => Some(size),
+        None => Some(1024),
+    };
+    let skybox_tex = baker.equirect_to_cubemap(&skybox_equirect, true, skybox_max_size)?;
     let irr_map = baker.generate_irradiance_map(&skybox_tex)?;
     let pref_map = baker.generate_prefilter_map(&skybox_tex)?;
     let brdf_lut = baker.generate_brdf_lut()?;

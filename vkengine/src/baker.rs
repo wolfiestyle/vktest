@@ -333,9 +333,12 @@ impl Baker {
         Ok(brdf_lut)
     }
 
-    pub fn equirect_to_cubemap(&self, equirect: &Texture, gen_mipmaps: bool) -> VulkanResult<Texture> {
-        eprintln!("converting equirect to cubemap..");
-        let size = equirect.image.props.size().min_element();
+    pub fn equirect_to_cubemap(&self, equirect: &Texture, gen_mipmaps: bool, max_size: Option<u32>) -> VulkanResult<Texture> {
+        let mut size = equirect.image.props.size().min_element();
+        if let Some(max) = max_size {
+            size = size.min(max);
+        }
+        eprintln!("converting equirect to cubemap ({size}x{size})..");
         let params = ImageParams {
             width: size,
             height: size,
