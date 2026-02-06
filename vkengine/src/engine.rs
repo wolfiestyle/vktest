@@ -27,6 +27,7 @@ pub struct VulkanEngine {
     pub(crate) reverse_depth: bool,
     main_cmd_buffers: CmdBufferRing,
     frame_state: Vec<FrameState>,
+    render_finished_sems: Vec<vk::Semaphore>, // indexed by swapchain image
     current_frame: u64,
     samplers: Mutex<HashMap<SamplerOptions, vk::Sampler>>,
     pub(crate) default_texture: Texture,
@@ -63,6 +64,14 @@ impl VulkanEngine {
 
         let main_cmd_buffers = CmdBufferRing::new_with_level(&device, vk::CommandBufferLevel::PRIMARY)?;
         let frame_state = (0..QUEUE_DEPTH).map(|_| FrameState::new(&device)).collect::<Result<Vec<_>, _>>()?;
+        // render_finished semaphores must be indexed by swapchain image, not frame-in-flight
+        let render_finished_sems = (0..SWAPCHAIN_IMAGE_COUNT)
+            .map(|i| {
+                let sem = device.make_semaphore(vk::SemaphoreType::BINARY)?;
+                device.debug(|d| d.set_object_name(sem, &format!("Render finished semaphore {i}")));
+                Ok(sem)
+            })
+            .collect::<VulkanResult<Vec<_>>>()?;
 
         let default_texture = Texture::new(
             &device,
@@ -103,6 +112,7 @@ impl VulkanEngine {
             reverse_depth,
             main_cmd_buffers,
             frame_state,
+            render_finished_sems,
             current_frame: 0,
             default_texture,
             default_normalmap,
@@ -470,7 +480,6 @@ impl VulkanEngine {
         let frame_idx = (self.current_frame % self.frame_state.len() as u64) as usize;
         let frame = &self.frame_state[frame_idx];
         let image_avail_sem = frame.image_avail_sem;
-        let render_finish_sem = frame.render_finished_sem;
         let in_flight_sem = frame.in_flight_sem;
         let command_buffer = self.main_cmd_buffers[self.current_frame];
         // we have to sample time here so presentation doesn't get in the way
@@ -503,6 +512,7 @@ impl VulkanEngine {
                 Err(e) => return Err(VkError::VulkanMsg("Failed to acquire swapchain image", e)),
             }
         };
+        let render_finish_sem = self.render_finished_sems[image_idx as usize];
 
         // ..that's all the info we need to record a new command buffer
         unsafe {
@@ -577,6 +587,9 @@ impl Drop for VulkanEngine {
             self.device.device_wait_idle().unwrap();
             for sampler in self.samplers.get_mut().unwrap().values() {
                 self.device.destroy_sampler(*sampler, None);
+            }
+            for &sem in &self.render_finished_sems {
+                self.device.destroy_semaphore(sem, None);
             }
             self.device.destroy_pipeline_cache(self.pipeline_cache, None);
             self.device.destroy_descriptor_set_layout(self.pbr_desc_layout, None);
@@ -742,9 +755,8 @@ impl DrawPayload {
 
 struct FrameState {
     device: Arc<VulkanDevice>,
-    image_avail_sem: vk::Semaphore,     // present -> image acquired
-    render_finished_sem: vk::Semaphore, // queue submit -> present
-    in_flight_sem: vk::Semaphore,       // queue submit -> frame finished
+    image_avail_sem: vk::Semaphore, // present -> image acquired
+    in_flight_sem: vk::Semaphore,   // queue submit -> frame finished
     wait_frame: u64,
     payload: Vec<DrawPayload>,
     time_query: vk::QueryPool,
@@ -753,7 +765,6 @@ struct FrameState {
 impl FrameState {
     fn new(device: &Arc<VulkanDevice>) -> VulkanResult<Self> {
         let image_avail_sem = device.make_semaphore(vk::SemaphoreType::BINARY)?;
-        let render_finished_sem = device.make_semaphore(vk::SemaphoreType::BINARY)?;
         let in_flight_sem = device.make_semaphore(vk::SemaphoreType::TIMELINE)?;
         let time_query = vk::QueryPoolCreateInfo::default()
             .query_type(vk::QueryType::TIMESTAMP)
@@ -764,14 +775,12 @@ impl FrameState {
         }
         device.debug(|d| {
             d.set_object_name(image_avail_sem, "Image available semaphore");
-            d.set_object_name(render_finished_sem, "Render finished semaphore");
             d.set_object_name(in_flight_sem, "In-flight semaphore");
             d.set_object_name(time_query, "Timestamp QueryPool");
         });
         Ok(Self {
             device: Arc::clone(device),
             image_avail_sem,
-            render_finished_sem,
             in_flight_sem,
             wait_frame: 0,
             payload: vec![],
@@ -792,7 +801,6 @@ impl Drop for FrameState {
     fn drop(&mut self) {
         unsafe {
             self.device.destroy_semaphore(self.image_avail_sem, None);
-            self.device.destroy_semaphore(self.render_finished_sem, None);
             self.device.destroy_semaphore(self.in_flight_sem, None);
             self.device.destroy_query_pool(self.time_query, None);
         }
@@ -803,7 +811,6 @@ impl std::fmt::Debug for FrameState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FrameState")
             .field("image_avail_sem", &self.image_avail_sem)
-            .field("render_finished_sem", &self.render_finished_sem)
             .field("in_flight_sem", &self.in_flight_sem)
             .field("wait_frame", &self.wait_frame)
             .field("time_query", &self.time_query)
