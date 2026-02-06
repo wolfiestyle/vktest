@@ -270,15 +270,27 @@ fn main() -> VulkanResult<()> {
                         ui.label("Camera:");
                         ui.horizontal(|ui| {
                             ui.label("X");
-                            ui.add(egui::DragValue::new(&mut vk_app.camera.position.x).speed(0.1));
+                            ui.add(
+                                egui::DragValue::new(&mut vk_app.camera.position.x)
+                                    .speed(0.1)
+                                    .range(-10000.0..=10000.0),
+                            );
                             ui.label("Y");
-                            ui.add(egui::DragValue::new(&mut vk_app.camera.position.y).speed(0.1));
+                            ui.add(
+                                egui::DragValue::new(&mut vk_app.camera.position.y)
+                                    .speed(0.1)
+                                    .range(-10000.0..=10000.0),
+                            );
                             ui.label("Z");
-                            ui.add(egui::DragValue::new(&mut vk_app.camera.position.z).speed(0.1));
+                            ui.add(
+                                egui::DragValue::new(&mut vk_app.camera.position.z)
+                                    .speed(0.1)
+                                    .range(-10000.0..=10000.0),
+                            );
                         });
                         ui.horizontal(|ui| {
                             ui.label("Roll");
-                            ui.add(egui::DragValue::new(&mut controller.roll));
+                            ui.add(egui::DragValue::new(&mut controller.roll).range(-360.0..=360.0));
                             ui.checkbox(&mut controller.flying, "Flying");
                         });
                         ui.horizontal(|ui| {
@@ -303,30 +315,30 @@ fn main() -> VulkanResult<()> {
                                 if !is_dir {
                                     ui.horizontal(|ui| {
                                         ui.label("X");
-                                        ui.add(egui::DragValue::new(&mut light.pos.x).speed(0.1));
+                                        ui.add(egui::DragValue::new(&mut light.pos.x).speed(0.1).range(-10000.0..=10000.0));
                                         ui.label("Y");
-                                        ui.add(egui::DragValue::new(&mut light.pos.y).speed(0.1));
+                                        ui.add(egui::DragValue::new(&mut light.pos.y).speed(0.1).range(-10000.0..=10000.0));
                                         ui.label("Z");
-                                        ui.add(egui::DragValue::new(&mut light.pos.z).speed(0.1));
+                                        ui.add(egui::DragValue::new(&mut light.pos.z).speed(0.1).range(-10000.0..=10000.0));
                                     });
                                 }
                                 if !is_point {
                                     ui.horizontal(|ui| {
                                         ui.label("DX");
-                                        ui.add(egui::DragValue::new(&mut light.direction.x).speed(0.1));
+                                        ui.add(egui::DragValue::new(&mut light.direction.x).speed(0.01).range(-1.0..=1.0));
                                         ui.label("DY");
-                                        ui.add(egui::DragValue::new(&mut light.direction.y).speed(0.1));
+                                        ui.add(egui::DragValue::new(&mut light.direction.y).speed(0.01).range(-1.0..=1.0));
                                         ui.label("DZ");
-                                        ui.add(egui::DragValue::new(&mut light.direction.z).speed(0.1));
+                                        ui.add(egui::DragValue::new(&mut light.direction.z).speed(0.01).range(-1.0..=1.0));
                                     });
                                 }
                                 ui.horizontal(|ui| {
                                     ui.label("R");
-                                    ui.add(egui::DragValue::new(&mut light.color.x).speed(0.1));
+                                    ui.add(egui::DragValue::new(&mut light.color.x).speed(0.1).range(0.0..=100.0));
                                     ui.label("G");
-                                    ui.add(egui::DragValue::new(&mut light.color.y).speed(0.1));
+                                    ui.add(egui::DragValue::new(&mut light.color.y).speed(0.1).range(0.0..=100.0));
                                     ui.label("B");
-                                    ui.add(egui::DragValue::new(&mut light.color.z).speed(0.1));
+                                    ui.add(egui::DragValue::new(&mut light.color.z).speed(0.1).range(0.0..=100.0));
                                 });
                                 ui.horizontal(|ui| {
                                     if ui.radio(is_dir, "Dir").clicked() {
