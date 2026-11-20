@@ -1,4 +1,4 @@
-use crate::create::CreateFromInfo;
+use crate::create::{CreateFromInfo, VkOwned};
 use crate::device::{ImageData, VulkanDevice};
 use crate::engine::{CmdBufferRing, DrawPayload, UploadBuffer, VulkanEngine};
 use crate::pipeline::{Pipeline, PipelineMode, Shader};
@@ -34,7 +34,7 @@ pub struct UiRenderer {
     textures: HashMap<TextureId, Texture>,
     shader: Shader,
     pipeline: Pipeline,
-    set_layout: vk::DescriptorSetLayout,
+    set_layout: VkOwned<vk::DescriptorSetLayout>,
     push_constants: vk::PushConstantRange,
     buffers: UploadBuffer,
     local_frame: u64,
@@ -60,8 +60,8 @@ impl UiRenderer {
                 .descriptor_count(1)
                 .stage_flags(vk::ShaderStageFlags::FRAGMENT)
                 .immutable_samplers(slice::from_ref(&sampler))])
-            .create(&device)?;
-        device.debug(|d| d.set_object_name(set_layout, "UiRenderer desc layout"));
+            .create_owned(&device)?;
+        device.debug(|d| d.set_object_name(*set_layout, "UiRenderer desc layout"));
         let push_constants = vk::PushConstantRange::default()
             .stage_flags(vk::ShaderStageFlags::VERTEX)
             .offset(0)
@@ -304,7 +304,6 @@ impl Drop for UiRenderer {
     fn drop(&mut self) {
         unsafe {
             self.device.device_wait_idle().unwrap();
-            self.device.destroy_descriptor_set_layout(self.set_layout, None);
         }
     }
 }

@@ -1,4 +1,4 @@
-use crate::create::CreateFromInfo;
+use crate::create::{CreateFromInfo, VkOwned};
 use crate::device::{ImageParams, VkImage, VulkanDevice};
 use crate::types::{ErrorDescription, VkError, VulkanResult};
 use ash::vk;
@@ -10,15 +10,15 @@ pub struct Swapchain {
     device: Arc<VulkanDevice>,
     pub handle: vk::SwapchainKHR,
     pub images: Vec<vk::Image>,
-    pub image_views: Vec<vk::ImageView>,
-    render_finished_sems: Vec<vk::Semaphore>,
+    image_views: Vec<VkOwned<vk::ImageView>>,
+    render_finished_sems: Vec<VkOwned<vk::Semaphore>>,
     pub format: vk::Format,
     pub extent: vk::Extent2D,
     pub samples: vk::SampleCountFlags,
     pub msaa_image: Option<VkImage>,
-    pub msaa_imgview: Option<vk::ImageView>,
+    msaa_imgview: Option<VkOwned<vk::ImageView>>,
     pub depth_image: Option<VkImage>,
-    pub depth_imgview: Option<vk::ImageView>,
+    depth_imgview: Option<VkOwned<vk::ImageView>>,
     pub depth_format: vk::Format,
     pub vsync: bool,
 }
@@ -126,12 +126,12 @@ impl Swapchain {
                 .format(surface_format.format)
                 .view_type(vk::ImageViewType::TYPE_2D)
                 .subresource_range(Self::SUBRESOURCE_RANGE)
-                .create(device)?;
+                .create_owned(device)?;
             swapchain.image_views.push(view);
 
             // Waiting on this image's next acquire signal makes its present wait semaphore reusable.
-            let sem = device.make_semaphore(vk::SemaphoreType::BINARY)?;
-            device.debug(|d| d.set_object_name(sem, &format!("Render finished semaphore {index}")));
+            let sem = vk::SemaphoreCreateInfo::default().create_owned(device)?;
+            device.debug(|d| d.set_object_name(*sem, &format!("Render finished semaphore {index}")));
             swapchain.render_finished_sems.push(sem);
         }
 
@@ -139,7 +139,7 @@ impl Swapchain {
     }
 
     pub(crate) fn render_finished_semaphore(&self, image_idx: usize) -> vk::Semaphore {
-        self.render_finished_sems[image_idx]
+        *self.render_finished_sems[image_idx]
     }
 
     fn create_msaa_attachment(&mut self, samples: vk::SampleCountFlags) -> VulkanResult<()> {
@@ -158,11 +158,13 @@ impl Swapchain {
             vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSIENT_ATTACHMENT,
             MemoryLocation::GpuOnly,
         )?;
-        let imgview = image.create_view(&self.device, vk::ImageViewType::TYPE_2D)?;
+        let imgview = image
+            .view_info(vk::ImageViewType::TYPE_2D, image.props.subresource_range())
+            .create_owned(&self.device)?;
 
         self.device.debug(|d| {
             d.set_object_name(*image, "MSAA color image");
-            d.set_object_name(imgview, "MSAA color image view");
+            d.set_object_name(*imgview, "MSAA color image view");
         });
         self.samples = samples;
         self.msaa_image = Some(image);
@@ -187,11 +189,13 @@ impl Swapchain {
             MemoryLocation::GpuOnly,
         )?;
 
-        let depth_imgview = depth_image.create_view(&self.device, vk::ImageViewType::TYPE_2D)?;
+        let depth_imgview = depth_image
+            .view_info(vk::ImageViewType::TYPE_2D, depth_image.props.subresource_range())
+            .create_owned(&self.device)?;
 
         self.device.debug(|d| {
             d.set_object_name(*depth_image, "Depth image");
-            d.set_object_name(depth_imgview, "Depth image view");
+            d.set_object_name(*depth_imgview, "Depth image view");
         });
 
         self.depth_image = Some(depth_image);
@@ -244,18 +248,18 @@ impl Swapchain {
     }
 
     pub(crate) fn color_attachment(&self, image_idx: usize) -> vk::RenderingAttachmentInfo<'_> {
-        if let Some(msaa_imgview) = self.msaa_imgview {
+        if let Some(msaa_imgview) = self.msaa_imgview.as_deref() {
             vk::RenderingAttachmentInfo::default()
-                .image_view(msaa_imgview)
+                .image_view(*msaa_imgview)
                 .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
                 .load_op(vk::AttachmentLoadOp::DONT_CARE)
                 .store_op(vk::AttachmentStoreOp::DONT_CARE)
                 .resolve_mode(vk::ResolveModeFlags::AVERAGE)
-                .resolve_image_view(self.image_views[image_idx])
+                .resolve_image_view(*self.image_views[image_idx])
                 .resolve_image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
         } else {
             vk::RenderingAttachmentInfo::default()
-                .image_view(self.image_views[image_idx])
+                .image_view(*self.image_views[image_idx])
                 .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
                 .load_op(vk::AttachmentLoadOp::DONT_CARE)
                 .store_op(vk::AttachmentStoreOp::STORE)
@@ -264,7 +268,7 @@ impl Swapchain {
 
     pub(crate) fn depth_attachment(&self, rev_depth: bool) -> vk::RenderingAttachmentInfo<'_> {
         vk::RenderingAttachmentInfo::default()
-            .image_view(self.depth_imgview.expect("missing depth image view"))
+            .image_view(*self.depth_imgview.as_deref().expect("missing depth image view"))
             .image_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
             .load_op(vk::AttachmentLoadOp::CLEAR)
             .store_op(vk::AttachmentStoreOp::DONT_CARE)
@@ -288,19 +292,12 @@ impl std::ops::Deref for Swapchain {
 
 impl Drop for Swapchain {
     fn drop(&mut self) {
+        self.render_finished_sems.clear();
+        // Release views before destroying the swapchain or dropping its attachments.
+        self.image_views.clear();
+        drop(self.msaa_imgview.take());
+        drop(self.depth_imgview.take());
         unsafe {
-            for &sem in &self.render_finished_sems {
-                self.device.destroy_semaphore(sem, None);
-            }
-            for view in &self.image_views {
-                self.device.destroy_image_view(*view, None);
-            }
-            if let Some(view) = self.msaa_imgview {
-                self.device.destroy_image_view(view, None);
-            }
-            if let Some(view) = self.depth_imgview {
-                self.device.destroy_image_view(view, None);
-            }
             self.device.swapchain_fn.destroy_swapchain(self.handle, None);
         }
     }

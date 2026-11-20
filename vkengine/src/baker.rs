@@ -1,4 +1,4 @@
-use crate::create::CreateFromInfo;
+use crate::create::{CreateFromInfo, VkOwned};
 use crate::device::{ImageParams, VulkanDevice};
 use crate::engine::{SamplerOptions, VulkanEngine};
 use crate::pipeline::Pipeline;
@@ -13,13 +13,13 @@ use std::sync::Arc;
 pub struct Baker {
     device: Arc<VulkanDevice>,
     irrmap_pipeline: Pipeline,
-    irrmap_desc_layout: vk::DescriptorSetLayout,
+    _irrmap_desc_layout: VkOwned<vk::DescriptorSetLayout>,
     prefilter_pipeline: Pipeline,
-    prefilter_desc_layout: vk::DescriptorSetLayout,
+    _prefilter_desc_layout: VkOwned<vk::DescriptorSetLayout>,
     brdf_pipeline: Pipeline,
-    brdf_desc_layout: vk::DescriptorSetLayout,
+    _brdf_desc_layout: VkOwned<vk::DescriptorSetLayout>,
     eq2cube_pipeline: Pipeline,
-    eq2cube_desc_layout: vk::DescriptorSetLayout,
+    _eq2cube_desc_layout: VkOwned<vk::DescriptorSetLayout>,
 }
 
 const IRRMAP_SIZE: u32 = 32;
@@ -40,21 +40,21 @@ impl Baker {
         Ok(Self {
             device: engine.device.clone(),
             irrmap_pipeline,
-            irrmap_desc_layout,
+            _irrmap_desc_layout: irrmap_desc_layout,
             prefilter_pipeline,
-            prefilter_desc_layout,
+            _prefilter_desc_layout: prefilter_desc_layout,
             brdf_pipeline,
-            brdf_desc_layout,
+            _brdf_desc_layout: brdf_desc_layout,
             eq2cube_pipeline,
-            eq2cube_desc_layout,
+            _eq2cube_desc_layout: eq2cube_desc_layout,
         })
     }
 
-    fn create_irrmap_pipeline(engine: &VulkanEngine) -> VulkanResult<(Pipeline, vk::DescriptorSetLayout)> {
-        let device = &*engine.device;
+    fn create_irrmap_pipeline(engine: &VulkanEngine) -> VulkanResult<(Pipeline, VkOwned<vk::DescriptorSetLayout>)> {
+        let device = &engine.device;
         let irrmap_shader = vk::ShaderModuleCreateInfo::default()
             .code(include_spirv!("src/shaders/irrmap.comp.glsl", comp, glsl))
-            .create(device)?;
+            .create_owned(device)?;
         let sampler = engine.get_sampler(vk::SamplerAddressMode::CLAMP_TO_EDGE.into())?;
         let desc_layout = vk::DescriptorSetLayoutCreateInfo::default()
             .flags(vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR)
@@ -71,22 +71,19 @@ impl Baker {
                     .descriptor_count(1)
                     .stage_flags(vk::ShaderStageFlags::COMPUTE),
             ])
-            .create(device)?;
-        device.debug(|d| d.set_object_name(desc_layout, "Baker irrmap desc layout"));
-        let irrmap_pipeline = Pipeline::builder_compute(irrmap_shader)
+            .create_owned(device)?;
+        device.debug(|d| d.set_object_name(*desc_layout, "Baker irrmap desc layout"));
+        let irrmap_pipeline = Pipeline::builder_compute(*irrmap_shader)
             .descriptor_layout(&desc_layout)
             .build(engine)?;
-        unsafe {
-            device.destroy_shader_module(irrmap_shader, None);
-        }
         Ok((irrmap_pipeline, desc_layout))
     }
 
-    fn create_prefilter_pipeline(engine: &VulkanEngine) -> VulkanResult<(Pipeline, vk::DescriptorSetLayout)> {
-        let device = &*engine.device;
+    fn create_prefilter_pipeline(engine: &VulkanEngine) -> VulkanResult<(Pipeline, VkOwned<vk::DescriptorSetLayout>)> {
+        let device = &engine.device;
         let prefilter_shader = vk::ShaderModuleCreateInfo::default()
             .code(include_spirv!("src/shaders/prefilter.comp.glsl", comp, glsl))
-            .create(device)?;
+            .create_owned(device)?;
         let sampler = engine.get_sampler(vk::SamplerAddressMode::CLAMP_TO_EDGE.into())?;
         let desc_layout = vk::DescriptorSetLayoutCreateInfo::default()
             .flags(vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR)
@@ -103,8 +100,8 @@ impl Baker {
                     .descriptor_count(1)
                     .stage_flags(vk::ShaderStageFlags::COMPUTE),
             ])
-            .create(device)?;
-        device.debug(|d| d.set_object_name(desc_layout, "Baker prefilter desc layout"));
+            .create_owned(device)?;
+        device.debug(|d| d.set_object_name(*desc_layout, "Baker prefilter desc layout"));
         let push_constants = vk::PushConstantRange {
             stage_flags: vk::ShaderStageFlags::COMPUTE,
             offset: 0,
@@ -115,22 +112,19 @@ impl Baker {
             offset: 0,
             size: size_of::<u32>(),
         };
-        let prefilter_pipeline = Pipeline::builder_compute(prefilter_shader)
+        let prefilter_pipeline = Pipeline::builder_compute(*prefilter_shader)
             .descriptor_layout(&desc_layout)
             .push_constants(&[push_constants])
             .spec_constants(slice::from_ref(&spec_constants), bytemuck::bytes_of(&PREFILTERED_MIP_LEVELS))
             .build(engine)?;
-        unsafe {
-            device.destroy_shader_module(prefilter_shader, None);
-        }
         Ok((prefilter_pipeline, desc_layout))
     }
 
-    fn create_brdf_lut_pipeline(engine: &VulkanEngine) -> VulkanResult<(Pipeline, vk::DescriptorSetLayout)> {
-        let device = &*engine.device;
+    fn create_brdf_lut_pipeline(engine: &VulkanEngine) -> VulkanResult<(Pipeline, VkOwned<vk::DescriptorSetLayout>)> {
+        let device = &engine.device;
         let brdf_shader = vk::ShaderModuleCreateInfo::default()
             .code(include_spirv!("src/shaders/brdf_lut.comp.glsl", comp, glsl))
-            .create(device)?;
+            .create_owned(device)?;
         let desc_layout = vk::DescriptorSetLayoutCreateInfo::default()
             .flags(vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR)
             .bindings(&[vk::DescriptorSetLayoutBinding::default()
@@ -138,22 +132,19 @@ impl Baker {
                 .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
                 .descriptor_count(1)
                 .stage_flags(vk::ShaderStageFlags::COMPUTE)])
-            .create(device)?;
-        device.debug(|d| d.set_object_name(desc_layout, "Baker BRDF LUT desc layout"));
-        let brdf_pipeline = Pipeline::builder_compute(brdf_shader)
+            .create_owned(device)?;
+        device.debug(|d| d.set_object_name(*desc_layout, "Baker BRDF LUT desc layout"));
+        let brdf_pipeline = Pipeline::builder_compute(*brdf_shader)
             .descriptor_layout(&desc_layout)
             .build(engine)?;
-        unsafe {
-            device.destroy_shader_module(brdf_shader, None);
-        }
         Ok((brdf_pipeline, desc_layout))
     }
 
-    fn create_eq2cube_pipeline(engine: &VulkanEngine) -> VulkanResult<(Pipeline, vk::DescriptorSetLayout)> {
-        let device = &*engine.device;
+    fn create_eq2cube_pipeline(engine: &VulkanEngine) -> VulkanResult<(Pipeline, VkOwned<vk::DescriptorSetLayout>)> {
+        let device = &engine.device;
         let eq2cube_shader = vk::ShaderModuleCreateInfo::default()
             .code(include_spirv!("src/shaders/equirect2cube.comp.glsl", comp, glsl))
-            .create(device)?;
+            .create_owned(device)?;
         let sampler = engine.get_sampler(SamplerOptions {
             wrap_u: vk::SamplerAddressMode::REPEAT,
             wrap_v: vk::SamplerAddressMode::CLAMP_TO_EDGE,
@@ -174,14 +165,11 @@ impl Baker {
                     .descriptor_count(1)
                     .stage_flags(vk::ShaderStageFlags::COMPUTE),
             ])
-            .create(device)?;
-        device.debug(|d| d.set_object_name(desc_layout, "Baker eq2cube desc layout"));
-        let eq2cube_pipeline = Pipeline::builder_compute(eq2cube_shader)
+            .create_owned(device)?;
+        device.debug(|d| d.set_object_name(*desc_layout, "Baker eq2cube desc layout"));
+        let eq2cube_pipeline = Pipeline::builder_compute(*eq2cube_shader)
             .descriptor_layout(&desc_layout)
             .build(engine)?;
-        unsafe {
-            device.destroy_shader_module(eq2cube_shader, None);
-        }
         Ok((eq2cube_pipeline, desc_layout))
     }
 
@@ -384,16 +372,5 @@ impl Baker {
         }
         self.device.end_one_time_commands(cmd_buffer)?;
         Ok(cubemap)
-    }
-}
-
-impl Drop for Baker {
-    fn drop(&mut self) {
-        unsafe {
-            self.device.destroy_descriptor_set_layout(self.irrmap_desc_layout, None);
-            self.device.destroy_descriptor_set_layout(self.prefilter_desc_layout, None);
-            self.device.destroy_descriptor_set_layout(self.brdf_desc_layout, None);
-            self.device.destroy_descriptor_set_layout(self.eq2cube_desc_layout, None);
-        }
     }
 }

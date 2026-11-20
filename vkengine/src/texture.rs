@@ -1,3 +1,4 @@
+use crate::create::{CreateFromInfo, VkOwned};
 use crate::device::{ImageData, ImageParams, VkImage, VulkanDevice};
 use crate::types::VulkanResult;
 use ash::vk;
@@ -11,6 +12,8 @@ pub struct TextureOptions {
 }
 
 pub struct Texture {
+    // The view must drop before the image it references.
+    _image_view: VkOwned<vk::ImageView>,
     pub image: VkImage,
     pub info: vk::DescriptorImageInfo,
 }
@@ -28,18 +31,18 @@ impl Texture {
             ..Default::default()
         };
         let image = device.create_image_from_data(params, data, data.image_create_flags())?;
-        let image_view = if let Some(swizzle) = options.swizzle {
-            image.create_view_swizzle(device, data.view_type(), swizzle)?
-        } else {
-            image.create_view(device, data.view_type())?
-        };
+        let image_view = image
+            .view_info(data.view_type(), image.props.subresource_range())
+            .components(options.swizzle.unwrap_or_default())
+            .create_owned(device)?;
         Ok(Self {
-            image,
             info: vk::DescriptorImageInfo {
                 sampler,
-                image_view,
+                image_view: *image_view,
                 image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
             },
+            _image_view: image_view,
+            image,
         })
     }
 
@@ -60,14 +63,15 @@ impl Texture {
         } else {
             vk::ImageViewType::TYPE_2D
         };
-        let image_view = image.create_view(device, view_type)?;
+        let image_view = image.view_info(view_type, image.props.subresource_range()).create_owned(device)?;
         Ok(Self {
-            image,
             info: vk::DescriptorImageInfo {
                 sampler,
-                image_view,
+                image_view: *image_view,
                 image_layout: vk::ImageLayout::UNDEFINED,
             },
+            _image_view: image_view,
+            image,
         })
     }
 
@@ -172,14 +176,6 @@ impl Texture {
             new_layout,
         );
         self.info.image_layout = new_layout;
-    }
-}
-
-impl Drop for Texture {
-    fn drop(&mut self) {
-        unsafe {
-            self.device().destroy_image_view(self.info.image_view, None);
-        }
     }
 }
 

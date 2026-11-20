@@ -29,11 +29,11 @@ pub struct VulkanEngine {
     main_cmd_buffers: CmdBufferRing,
     frame_state: Vec<FrameState>,
     current_frame: u64,
-    samplers: Mutex<HashMap<SamplerOptions, vk::Sampler>>,
     pub(crate) default_texture: Texture,
     pub(crate) default_normalmap: Texture,
     pub(crate) pipeline_cache: VkOwned<vk::PipelineCache>,
     pbr_desc_layout: VkOwned<vk::DescriptorSetLayout>,
+    samplers: Mutex<HashMap<SamplerOptions, VkOwned<vk::Sampler>>>,
     prev_frame_time: Instant,
     last_frame_time: Instant,
     cpu_time_start: Instant,
@@ -254,11 +254,10 @@ impl VulkanEngine {
             *aniso = (*aniso).min(self.device.dev_info.max_aniso as u8);
         }
         match self.samplers.lock().unwrap().entry(params) {
-            Entry::Occupied(entry) => Ok(*entry.get()),
+            Entry::Occupied(entry) => Ok(**entry.get()),
             Entry::Vacant(entry) => {
                 let sampler = params.create_sampler(&self.device)?;
-                entry.insert(sampler);
-                Ok(sampler)
+                Ok(**entry.insert(sampler))
             }
         }
     }
@@ -581,9 +580,6 @@ impl Drop for VulkanEngine {
     fn drop(&mut self) {
         unsafe {
             self.device.device_wait_idle().unwrap();
-            for sampler in self.samplers.get_mut().unwrap().values() {
-                self.device.destroy_sampler(*sampler, None);
-            }
             // swapchain must be destroyed before surface
             ManuallyDrop::drop(&mut self.swapchain);
         }
@@ -836,7 +832,7 @@ impl SamplerOptions {
         }
     }
 
-    fn create_sampler(&self, device: &VulkanDevice) -> VulkanResult<vk::Sampler> {
+    fn create_sampler(&self, device: &Arc<VulkanDevice>) -> VulkanResult<VkOwned<vk::Sampler>> {
         vk::SamplerCreateInfo::default()
             .mag_filter(self.mag_filter)
             .min_filter(self.min_filter)
@@ -852,7 +848,7 @@ impl SamplerOptions {
             .min_lod(0.0)
             .max_lod(vk::LOD_CLAMP_NONE)
             .mipmap_mode(self.mipmap_mode)
-            .create(device)
+            .create_owned(device)
     }
 }
 

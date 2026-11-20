@@ -1,4 +1,4 @@
-use crate::create::CreateFromInfo;
+use crate::create::{CreateFromInfo, VkOwned};
 use crate::device::{VkBuffer, VulkanDevice};
 use crate::engine::{CmdBufferRing, DrawPayload, UploadBuffer, VulkanEngine};
 use crate::pipeline::{Pipeline, PipelineMode, Shader};
@@ -18,7 +18,7 @@ use std::sync::Arc;
 #[derive(Debug)]
 pub struct MeshRenderer<V, I> {
     device: Arc<VulkanDevice>,
-    push_desc_layout: vk::DescriptorSetLayout,
+    push_desc_layout: VkOwned<vk::DescriptorSetLayout>,
     push_constants: vk::PushConstantRange,
     shader: Shader,
     pipeline: Pipeline,
@@ -72,8 +72,8 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
                     .stage_flags(vk::ShaderStageFlags::FRAGMENT)
                     .immutable_samplers(slice::from_ref(&sampler)),
             ])
-            .create(&device)?;
-        device.debug(|d| d.set_object_name(push_desc_layout, "MeshRenderer push desc layout"));
+            .create_owned(&device)?;
+        device.debug(|d| d.set_object_name(*push_desc_layout, "MeshRenderer push desc layout"));
         let push_constants = vk::PushConstantRange {
             stage_flags: vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
             offset: 0,
@@ -81,7 +81,7 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
         };
         let pipeline = Pipeline::builder_graphics(&shader)
             .vertex_input::<V>()
-            .descriptor_layouts(&[push_desc_layout, engine.pbr_desc_layout()])
+            .descriptor_layouts(&[*push_desc_layout, engine.pbr_desc_layout()])
             .push_constants(slice::from_ref(&push_constants))
             .render_to_swapchain(&engine.swapchain)
             .build(engine)?;
@@ -209,7 +209,7 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
     pub fn rebuild_pipeline(&mut self, engine: &VulkanEngine) -> VulkanResult<()> {
         let pipeline = Pipeline::builder_graphics(&self.shader)
             .vertex_input::<V>()
-            .descriptor_layouts(&[self.push_desc_layout, engine.pbr_desc_layout()])
+            .descriptor_layouts(&[*self.push_desc_layout, engine.pbr_desc_layout()])
             .push_constants(slice::from_ref(&self.push_constants))
             .render_to_swapchain(&engine.swapchain)
             .build(engine)?;
@@ -222,7 +222,6 @@ impl<V, I> Drop for MeshRenderer<V, I> {
     fn drop(&mut self) {
         unsafe {
             self.device.device_wait_idle().unwrap();
-            self.device.destroy_descriptor_set_layout(self.push_desc_layout, None);
         }
     }
 }
@@ -419,7 +418,7 @@ impl MaterialData {
 
 pub struct SkyboxRenderer {
     device: Arc<VulkanDevice>,
-    desc_layout: vk::DescriptorSetLayout,
+    desc_layout: VkOwned<vk::DescriptorSetLayout>,
     push_constants: vk::PushConstantRange,
     shader: Shader,
     pipeline: Pipeline,
@@ -444,8 +443,8 @@ impl SkyboxRenderer {
                 .descriptor_count(1)
                 .stage_flags(vk::ShaderStageFlags::FRAGMENT)
                 .immutable_samplers(slice::from_ref(&sampler))])
-            .create(&device)?;
-        device.debug(|d| d.set_object_name(desc_layout, "SkyboxRenderer desc layout"));
+            .create_owned(&device)?;
+        device.debug(|d| d.set_object_name(*desc_layout, "SkyboxRenderer desc layout"));
         let push_constants = vk::PushConstantRange::default()
             .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
             .offset(0)
@@ -527,7 +526,6 @@ impl Drop for SkyboxRenderer {
     fn drop(&mut self) {
         unsafe {
             self.device.device_wait_idle().unwrap();
-            self.device.destroy_descriptor_set_layout(self.desc_layout, None);
         }
     }
 }

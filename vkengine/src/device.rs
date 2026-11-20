@@ -784,6 +784,7 @@ macro_rules! impl_vulkan_handle {
 impl_vulkan_handle! {
     vk::Buffer => destroy_buffer,
     vk::Image => destroy_image,
+    vk::ImageView => destroy_image_view,
     vk::CommandPool => destroy_command_pool,
     vk::DescriptorPool => destroy_descriptor_pool,
     vk::DescriptorSetLayout => destroy_descriptor_set_layout,
@@ -793,6 +794,7 @@ impl_vulkan_handle! {
     vk::PipelineLayout => destroy_pipeline_layout,
     vk::QueryPool => destroy_query_pool,
     vk::Semaphore => destroy_semaphore,
+    vk::Sampler => destroy_sampler,
     vk::ShaderModule => destroy_shader_module,
 }
 
@@ -913,24 +915,25 @@ impl MemoryObject<vk::Image, ImageParams> {
     pub fn create_view_subresource(
         &self, device: &ash::Device, view_type: vk::ImageViewType, subresource: vk::ImageSubresourceRange,
     ) -> VulkanResult<vk::ImageView> {
-        vk::ImageViewCreateInfo::default()
-            .image(self.handle)
-            .format(self.props.format)
-            .view_type(view_type)
-            .subresource_range(subresource)
-            .create(device)
+        self.view_info(view_type, subresource).create(device)
     }
 
     pub fn create_view_swizzle(
         &self, device: &ash::Device, view_type: vk::ImageViewType, swizzle: vk::ComponentMapping,
     ) -> VulkanResult<vk::ImageView> {
+        self.view_info(view_type, self.props.subresource_range())
+            .components(swizzle)
+            .create(device)
+    }
+
+    pub(crate) fn view_info(
+        &self, view_type: vk::ImageViewType, subresource: vk::ImageSubresourceRange,
+    ) -> vk::ImageViewCreateInfo<'static> {
         vk::ImageViewCreateInfo::default()
             .image(self.handle)
             .format(self.props.format)
             .view_type(view_type)
-            .subresource_range(self.props.subresource_range())
-            .components(swizzle)
-            .create(device)
+            .subresource_range(subresource)
     }
 }
 
