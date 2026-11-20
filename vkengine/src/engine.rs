@@ -385,12 +385,14 @@ impl VulkanEngine {
             self.device.cmd_reset_query_pool(cmd_buffer, frame.time_query, 0, 2);
         }
 
-        self.device.transition_image_layout(
+        // Match the acquire semaphore's wait stage so the transition waits for the image.
+        self.device.transition_image_layout_with_src_stage(
             cmd_buffer,
             self.swapchain.images[image_idx],
             Swapchain::SUBRESOURCE_RANGE,
             vk::ImageLayout::UNDEFINED,
             vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            Some(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT),
         );
         self.device.image_reuse_barrier(
             cmd_buffer,

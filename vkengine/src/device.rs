@@ -306,6 +306,10 @@ impl VulkanDevice {
             vk::ImageLayout::TRANSFER_SRC_OPTIMAL => (vk::AccessFlags::TRANSFER_READ, vk::PipelineStageFlags::TRANSFER),
             vk::ImageLayout::TRANSFER_DST_OPTIMAL => (vk::AccessFlags::TRANSFER_WRITE, vk::PipelineStageFlags::TRANSFER),
             vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL => (vk::AccessFlags::SHADER_READ, vk::PipelineStageFlags::FRAGMENT_SHADER),
+            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL if is_dst => (
+                vk::AccessFlags::COLOR_ATTACHMENT_READ | vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            ),
             vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL => (
                 vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
                 vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
@@ -324,6 +328,14 @@ impl VulkanDevice {
         &self, cmd_buffer: vk::CommandBuffer, image: vk::Image, subresource: vk::ImageSubresourceRange, old_layout: vk::ImageLayout,
         new_layout: vk::ImageLayout,
     ) {
+        self.transition_image_layout_with_src_stage(cmd_buffer, image, subresource, old_layout, new_layout, None);
+    }
+
+    /// The source stage override must support the access mask implied by the old layout.
+    pub(crate) fn transition_image_layout_with_src_stage(
+        &self, cmd_buffer: vk::CommandBuffer, image: vk::Image, subresource: vk::ImageSubresourceRange, old_layout: vk::ImageLayout,
+        new_layout: vk::ImageLayout, src_stage_override: Option<vk::PipelineStageFlags>,
+    ) {
         let (src_access, src_stage) = Self::layout_to_access_and_stage(old_layout, false);
         let (dst_access, dst_stage) = Self::layout_to_access_and_stage(new_layout, true);
 
@@ -339,7 +351,7 @@ impl VulkanDevice {
         unsafe {
             self.device.cmd_pipeline_barrier(
                 cmd_buffer,
-                src_stage,
+                src_stage_override.unwrap_or(src_stage),
                 dst_stage,
                 vk::DependencyFlags::empty(),
                 &[],
