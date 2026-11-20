@@ -1,5 +1,5 @@
 use crate::camera::Camera;
-use crate::create::CreateFromInfo;
+use crate::create::{CreateFromInfo, guard_device_handle};
 use crate::device::{CubeData, ImageData, MappedMemory, VkBuffer, VulkanDevice};
 use crate::instance::DeviceSelection;
 use crate::renderer::LightData;
@@ -82,9 +82,9 @@ impl VulkanEngine {
             Default::default(),
         )?;
 
-        let pipeline_cache = vk::PipelineCacheCreateInfo::default().create(&device)?; //TODO: save/load cache data
-
-        let image_desc_layout = Self::pbr_descriptor_layout(&device)?;
+        // TODO: save/load cache data
+        let pipeline_cache = guard_device_handle(&device, vk::PipelineCacheCreateInfo::default().create(&device)?);
+        let image_desc_layout = guard_device_handle(&device, Self::pbr_descriptor_layout(&device)?);
 
         let camera = Camera::default();
         let now = Instant::now();
@@ -96,6 +96,8 @@ impl VulkanEngine {
             "LightData",
         )?;
 
+        let image_desc_layout = image_desc_layout.take();
+        let pipeline_cache = pipeline_cache.take();
         let mut this = Self {
             device,
             window_size,
@@ -292,13 +294,16 @@ impl VulkanEngine {
             ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
             descriptor_count: count * 5,
         }];
-        let desc_pool = vk::DescriptorPoolCreateInfo::default()
-            .max_sets(count)
-            .pool_sizes(&pool_sizes)
-            .create(&self.device)?;
-        self.device.debug(|d| d.set_object_name(desc_pool, "glTF materials pool"));
+        let desc_pool = guard_device_handle(
+            &self.device,
+            vk::DescriptorPoolCreateInfo::default()
+                .max_sets(count)
+                .pool_sizes(&pool_sizes)
+                .create(&self.device)?,
+        );
+        self.device.debug(|d| d.set_object_name(*desc_pool, "glTF materials pool"));
         let material_desc = vk::DescriptorSetAllocateInfo::default()
-            .descriptor_pool(desc_pool)
+            .descriptor_pool(*desc_pool)
             .set_layouts(&vec![self.pbr_desc_layout; count as usize])
             .create(&self.device)?;
 
@@ -323,7 +328,7 @@ impl VulkanEngine {
         Ok(ModelResources {
             device: self.device.clone(),
             textures,
-            desc_pool,
+            desc_pool: desc_pool.take(),
             material_desc,
         })
     }
@@ -604,21 +609,25 @@ impl CmdBufferRing {
     }
 
     fn new_with_level(device: &Arc<VulkanDevice>, level: vk::CommandBufferLevel) -> VulkanResult<Self> {
-        let pool = vk::CommandPoolCreateInfo::default()
-            .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
-            .queue_family_index(device.dev_info.graphics_idx)
-            .create(device)?;
-        device.debug(|d| d.set_object_name(pool, "CmdBufferRing pool"));
+        let pool = guard_device_handle(
+            device,
+            vk::CommandPoolCreateInfo::default()
+                .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
+                .queue_family_index(device.dev_info.graphics_idx)
+                .create(device)?,
+        );
+        device.debug(|d| d.set_object_name(*pool, "CmdBufferRing pool"));
         // we use N + 1 command buffers so we can write on them right away without waiting for the previous frame
         let buffers = vk::CommandBufferAllocateInfo::default()
-            .command_pool(pool)
+            .command_pool(*pool)
             .level(level)
             .command_buffer_count(QUEUE_DEPTH as u32 + 1)
             .create(device)?;
+        let buffers = buffers.try_into().unwrap();
         Ok(Self {
             device: Arc::clone(device),
-            pool,
-            buffers: buffers.try_into().unwrap(),
+            pool: pool.take(),
+            buffers,
         })
     }
 
@@ -758,27 +767,30 @@ struct FrameState {
 
 impl FrameState {
     fn new(device: &Arc<VulkanDevice>) -> VulkanResult<Self> {
-        let image_avail_sem = device.make_semaphore(vk::SemaphoreType::BINARY)?;
-        let in_flight_sem = device.make_semaphore(vk::SemaphoreType::TIMELINE)?;
-        let time_query = vk::QueryPoolCreateInfo::default()
-            .query_type(vk::QueryType::TIMESTAMP)
-            .query_count(2)
-            .create(device)?;
+        let image_avail_sem = guard_device_handle(device, device.make_semaphore(vk::SemaphoreType::BINARY)?);
+        let in_flight_sem = guard_device_handle(device, device.make_semaphore(vk::SemaphoreType::TIMELINE)?);
+        let time_query = guard_device_handle(
+            device,
+            vk::QueryPoolCreateInfo::default()
+                .query_type(vk::QueryType::TIMESTAMP)
+                .query_count(2)
+                .create(device)?,
+        );
         unsafe {
-            device.reset_query_pool(time_query, 0, 2);
+            device.reset_query_pool(*time_query, 0, 2);
         }
         device.debug(|d| {
-            d.set_object_name(image_avail_sem, "Image available semaphore");
-            d.set_object_name(in_flight_sem, "In-flight semaphore");
-            d.set_object_name(time_query, "Timestamp QueryPool");
+            d.set_object_name(*image_avail_sem, "Image available semaphore");
+            d.set_object_name(*in_flight_sem, "In-flight semaphore");
+            d.set_object_name(*time_query, "Timestamp QueryPool");
         });
         Ok(Self {
             device: Arc::clone(device),
-            image_avail_sem,
-            in_flight_sem,
+            image_avail_sem: image_avail_sem.take(),
+            in_flight_sem: in_flight_sem.take(),
             wait_frame: 0,
             payload: vec![],
-            time_query,
+            time_query: time_query.take(),
         })
     }
 

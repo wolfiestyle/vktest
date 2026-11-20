@@ -1,4 +1,4 @@
-use crate::create::CreateFromInfo;
+use crate::create::{CreateFromInfo, guard_device_handle};
 use crate::device::VulkanDevice;
 use crate::engine::VulkanEngine;
 use crate::swapchain::Swapchain;
@@ -115,7 +115,12 @@ impl Pipeline {
         let pipeline = unsafe {
             device
                 .create_graphics_pipelines(engine.pipeline_cache, slice::from_ref(&pipeline_ci), None)
-                .map_err(|(_, err)| VkError::VulkanMsg("Error creating pipeline", err))?
+                .map_err(|(pipelines, err)| {
+                    for pipeline in pipelines {
+                        device.destroy_pipeline(pipeline, None);
+                    }
+                    VkError::VulkanMsg("Error creating pipeline", err)
+                })?
         };
 
         Ok(pipeline[0])
@@ -139,7 +144,12 @@ impl Pipeline {
             engine
                 .device
                 .create_compute_pipelines(engine.pipeline_cache, slice::from_ref(&pipeline_ci), None)
-                .map_err(|(_, err)| VkError::VulkanMsg("Error creating compute pipeline", err))?
+                .map_err(|(pipelines, err)| {
+                    for pipeline in pipelines {
+                        engine.device.destroy_pipeline(pipeline, None);
+                    }
+                    VkError::VulkanMsg("Error creating compute pipeline", err)
+                })?
         };
 
         Ok(pipeline[0])
@@ -249,15 +259,18 @@ impl<'a> GraphicsPipelineBuilder<'a> {
     }
 
     pub fn build(self, engine: &VulkanEngine) -> VulkanResult<Pipeline> {
-        let layout = vk::PipelineLayoutCreateInfo::default()
-            .set_layouts(self.desc_layouts)
-            .push_constant_ranges(self.push_constants)
-            .create(&engine.device)?;
-        let handle = Pipeline::create_graphics_pipeline(engine, layout, self)?;
+        let layout = guard_device_handle(
+            &engine.device,
+            vk::PipelineLayoutCreateInfo::default()
+                .set_layouts(self.desc_layouts)
+                .push_constant_ranges(self.push_constants)
+                .create(&engine.device)?,
+        );
+        let handle = Pipeline::create_graphics_pipeline(engine, *layout, self)?;
         Ok(Pipeline {
             device: Arc::clone(&engine.device),
             handle,
-            layout,
+            layout: layout.take(),
         })
     }
 }
@@ -303,15 +316,18 @@ impl<'a> ComputePipelineBuilder<'a> {
     }
 
     pub fn build(self, engine: &VulkanEngine) -> VulkanResult<Pipeline> {
-        let layout = vk::PipelineLayoutCreateInfo::default()
-            .set_layouts(self.desc_layouts)
-            .push_constant_ranges(self.push_constants)
-            .create(&engine.device)?;
-        let handle = Pipeline::create_compute_pipeline(engine, layout, self)?;
+        let layout = guard_device_handle(
+            &engine.device,
+            vk::PipelineLayoutCreateInfo::default()
+                .set_layouts(self.desc_layouts)
+                .push_constant_ranges(self.push_constants)
+                .create(&engine.device)?,
+        );
+        let handle = Pipeline::create_compute_pipeline(engine, *layout, self)?;
         Ok(Pipeline {
             device: Arc::clone(&engine.device),
             handle,
-            layout,
+            layout: layout.take(),
         })
     }
 }
@@ -362,11 +378,11 @@ pub struct Shader {
 
 impl Shader {
     pub fn new(device: &Arc<VulkanDevice>, vert_spv: &[u32], frag_spv: &[u32]) -> VulkanResult<Self> {
-        let vert = vk::ShaderModuleCreateInfo::default().code(vert_spv).create(device)?;
+        let vert = guard_device_handle(device, vk::ShaderModuleCreateInfo::default().code(vert_spv).create(device)?);
         let frag = vk::ShaderModuleCreateInfo::default().code(frag_spv).create(device)?;
         Ok(Self {
             device: Arc::clone(device),
-            vert,
+            vert: vert.take(),
             frag,
         })
     }

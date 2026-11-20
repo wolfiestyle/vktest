@@ -1,5 +1,39 @@
+use crate::device::VulkanHandle;
 use crate::types::{ErrorDescription, VulkanResult};
 use ash::vk;
+
+#[must_use]
+pub(crate) struct CreationGuard<T, F: FnOnce(T)>(Option<(T, F)>);
+
+impl<T, F: FnOnce(T)> CreationGuard<T, F> {
+    pub(crate) fn new(value: T, cleanup: F) -> Self {
+        Self(Some((value, cleanup)))
+    }
+
+    pub(crate) fn take(mut self) -> T {
+        self.0.take().unwrap().0
+    }
+}
+
+impl<T, F: FnOnce(T)> std::ops::Deref for CreationGuard<T, F> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0.as_ref().unwrap().0
+    }
+}
+
+impl<T, F: FnOnce(T)> Drop for CreationGuard<T, F> {
+    fn drop(&mut self) {
+        if let Some((value, cleanup)) = self.0.take() {
+            cleanup(value);
+        }
+    }
+}
+
+pub(crate) fn guard_device_handle<T: VulkanHandle>(device: &ash::Device, handle: T) -> CreationGuard<T, impl FnOnce(T) + '_> {
+    CreationGuard::new(handle, |handle| unsafe { handle.destroy(device) })
+}
 
 pub trait CreateFromInfo {
     type Output;

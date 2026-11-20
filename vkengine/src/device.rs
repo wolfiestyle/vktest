@@ -1,4 +1,4 @@
-use crate::create::CreateFromInfo;
+use crate::create::{CreateFromInfo, CreationGuard, guard_device_handle};
 use crate::debug::DebugUtils;
 use crate::format::{FormatInfo, image_aspect_flags};
 use crate::instance::{DeviceInfo, DeviceSelection, VulkanInstance};
@@ -37,31 +37,42 @@ impl VulkanDevice {
         W: HasDisplayHandle + HasWindowHandle,
     {
         let instance = VulkanInstance::new(window, app_name)?;
-        let surface = instance.create_surface(window)?;
-        let dev_info = instance.pick_physical_device(surface, selection)?;
+        let surface = CreationGuard::new(instance.create_surface(window)?, |surface| unsafe {
+            instance.surface_utils.destroy_surface(surface, None)
+        });
+        let dev_info = instance.pick_physical_device(*surface, selection)?;
         eprintln!("Selected device: {}\nDriver: {}", dev_info.name, dev_info.driver);
-        let device = instance.create_logical_device(&dev_info)?;
+        let device = CreationGuard::new(instance.create_logical_device(&dev_info)?, |device| unsafe {
+            device.destroy_device(None)
+        });
         let graphics_queue = unsafe { device.get_device_queue(dev_info.graphics_idx, 0) };
         let present_queue = unsafe { device.get_device_queue(dev_info.present_idx, 0) };
         let swapchain_fn = khr::swapchain::Device::new(&instance, &device);
         let dynrender_fn = khr::dynamic_rendering::Device::new(&instance, &device);
         let pushdesc_fn = khr::push_descriptor::Device::new(&instance, &device);
 
-        let transfer_pool = vk::CommandPoolCreateInfo::default()
-            .flags(vk::CommandPoolCreateFlags::TRANSIENT)
-            .queue_family_index(dev_info.graphics_idx)
-            .create(&device)?;
-        let transfer_fence = vk::FenceCreateInfo::default().create(&device)?;
+        let transfer_pool = guard_device_handle(
+            &device,
+            vk::CommandPoolCreateInfo::default()
+                .flags(vk::CommandPoolCreateFlags::TRANSIENT)
+                .queue_family_index(dev_info.graphics_idx)
+                .create(&device)?,
+        );
+        let transfer_fence = guard_device_handle(&device, vk::FenceCreateInfo::default().create(&device)?);
 
         let allocator = Allocator::new(&AllocatorCreateDesc {
             instance: (*instance).clone(),
-            device: device.clone(),
+            device: (*device).clone(),
             physical_device: dev_info.phys_dev,
             debug_settings: Default::default(),
             buffer_device_address: false,
             allocation_sizes: Default::default(),
         })?;
 
+        let transfer_fence = transfer_fence.take();
+        let transfer_pool = transfer_pool.take();
+        let device = device.take();
+        let surface = surface.take();
         let this = Self {
             #[cfg(debug_assertions)]
             debug_utils: DebugUtils::new(&instance, &device),
@@ -151,20 +162,20 @@ impl VulkanDevice {
             .usage(params.usage)
             .sharing_mode(vk::SharingMode::EXCLUSIVE);
 
-        let buffer = unsafe {
+        let buffer = guard_device_handle(&self.device, unsafe {
             self.device
                 .create_buffer(&buffer_ci, None)
                 .describe_err("Failed to create buffer")?
-        };
+        });
 
-        let buffer_info = vk::BufferMemoryRequirementsInfo2::default().buffer(buffer);
+        let buffer_info = vk::BufferMemoryRequirementsInfo2::default().buffer(*buffer);
         let mut ded_reqs = vk::MemoryDedicatedRequirements::default();
         let mut mem_reqs = vk::MemoryRequirements2::default().push_next(&mut ded_reqs);
         unsafe { self.device.get_buffer_memory_requirements2(&buffer_info, &mut mem_reqs) };
 
         let requirements = mem_reqs.memory_requirements;
         let allocation_scheme = if ded_reqs.prefers_dedicated_allocation != vk::FALSE {
-            AllocationScheme::DedicatedBuffer(buffer)
+            AllocationScheme::DedicatedBuffer(*buffer)
         } else {
             AllocationScheme::GpuAllocatorManaged
         };
@@ -176,19 +187,21 @@ impl VulkanDevice {
             allocation_scheme,
         })?;
 
-        unsafe {
-            self.device
-                .bind_buffer_memory(buffer, allocation.memory(), allocation.offset())
-                .describe_err("Failed to bind buffer memory")?
-        };
-
-        Ok(MemoryObject {
+        let resource = MemoryObject {
             device: Arc::clone(self),
-            handle: buffer,
+            handle: buffer.take(),
             memory: ManuallyDrop::new(allocation),
             size,
             props: params,
-        })
+        };
+
+        unsafe {
+            self.device
+                .bind_buffer_memory(resource.handle, resource.memory.memory(), resource.memory.offset())
+                .describe_err("Failed to bind buffer memory")?
+        };
+
+        Ok(resource)
     }
 
     #[inline]
@@ -264,16 +277,18 @@ impl VulkanDevice {
             .flags(flags)
             .sharing_mode(vk::SharingMode::EXCLUSIVE);
 
-        let image = unsafe { self.device.create_image(&image_ci, None).describe_err("Failed to create image")? };
+        let image = guard_device_handle(&self.device, unsafe {
+            self.device.create_image(&image_ci, None).describe_err("Failed to create image")?
+        });
 
-        let image_info = vk::ImageMemoryRequirementsInfo2::default().image(image);
+        let image_info = vk::ImageMemoryRequirementsInfo2::default().image(*image);
         let mut ded_reqs = vk::MemoryDedicatedRequirements::default();
         let mut mem_reqs = vk::MemoryRequirements2::default().push_next(&mut ded_reqs);
         unsafe { self.device.get_image_memory_requirements2(&image_info, &mut mem_reqs) };
 
         let requirements = mem_reqs.memory_requirements;
         let allocation_scheme = if ded_reqs.prefers_dedicated_allocation != vk::FALSE {
-            AllocationScheme::DedicatedImage(image)
+            AllocationScheme::DedicatedImage(*image)
         } else {
             AllocationScheme::GpuAllocatorManaged
         };
@@ -285,19 +300,21 @@ impl VulkanDevice {
             allocation_scheme,
         })?;
 
-        unsafe {
-            self.device
-                .bind_image_memory(image, allocation.memory(), allocation.offset())
-                .describe_err("Failed to bind image memory")?;
-        }
-
-        Ok(VkImage {
+        let resource = VkImage {
             device: Arc::clone(self),
-            handle: image,
+            handle: image.take(),
             memory: ManuallyDrop::new(allocation),
             size: requirements.size,
             props: params,
-        })
+        };
+
+        unsafe {
+            self.device
+                .bind_image_memory(resource.handle, resource.memory.memory(), resource.memory.offset())
+                .describe_err("Failed to bind image memory")?;
+        }
+
+        Ok(resource)
     }
 
     fn layout_to_access_and_stage(layout: vk::ImageLayout, is_dst: bool) -> (vk::AccessFlags, vk::PipelineStageFlags) {
@@ -752,16 +769,30 @@ pub trait VulkanHandle: Copy {
     unsafe fn destroy(self, device: &ash::Device);
 }
 
-impl VulkanHandle for vk::Buffer {
-    unsafe fn destroy(self, device: &ash::Device) {
-        unsafe { device.destroy_buffer(self, None) };
-    }
+macro_rules! impl_vulkan_handle {
+    ($($handle:ty => $destroy:ident),+ $(,)?) => {
+        $(
+            impl VulkanHandle for $handle {
+                unsafe fn destroy(self, device: &ash::Device) {
+                    unsafe { device.$destroy(self, None) };
+                }
+            }
+        )+
+    };
 }
 
-impl VulkanHandle for vk::Image {
-    unsafe fn destroy(self, device: &ash::Device) {
-        unsafe { device.destroy_image(self, None) };
-    }
+impl_vulkan_handle! {
+    vk::Buffer => destroy_buffer,
+    vk::Image => destroy_image,
+    vk::CommandPool => destroy_command_pool,
+    vk::DescriptorPool => destroy_descriptor_pool,
+    vk::DescriptorSetLayout => destroy_descriptor_set_layout,
+    vk::Fence => destroy_fence,
+    vk::PipelineCache => destroy_pipeline_cache,
+    vk::PipelineLayout => destroy_pipeline_layout,
+    vk::QueryPool => destroy_query_pool,
+    vk::Semaphore => destroy_semaphore,
+    vk::ShaderModule => destroy_shader_module,
 }
 
 pub struct MemoryObject<T: VulkanHandle, P> {
