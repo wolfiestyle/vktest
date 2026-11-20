@@ -11,6 +11,7 @@ struct LightData {
 layout(set = 0, binding = 0) uniform ObjectUniforms {
     mat4 mvp;
     mat4 model;
+    mat4 normal_matrix;
     vec3 view_pos;
     uint num_lights;
 };
@@ -106,14 +107,15 @@ vec3 pbrLight(vec3 N, vec3 albedo, float metallic, float roughness, float ao) {
 void main() {
     vec4 albedo = texture(texColor, frag.uvColor) * material.base_color * frag.Color;
     vec2 metalrough = texture(texMetalRough, frag.uvMetalRough).bg * material.base_pbr.bg;
-    vec3 normal_map = normalize(texture(texNormal, frag.uvNormal).rgb * 2.0 - 1.0);
+    vec3 normal_map = texture(texNormal, frag.uvNormal).rgb * 2.0 - 1.0;
+    normal_map.xy *= material.base_pbr.w;
     vec3 emissive = texture(texEmissive, frag.uvEmissive).rgb * material.emissive;
     float occlusion = (texture(texOcclusion, frag.uvOcclusion).r - 1.0) * material.base_pbr.r + 1.0;
     vec3 N = normalize(frag.Normal);
     vec3 T = normalize(frag.Tangent.xyz);
     T = normalize(T - dot(T, N) * N); // Gram-Schmidt process
     vec3 B = cross(N, T) * frag.Tangent.w;
-    vec3 normal = normalize(mat3(T, B, N) * normal_map * vec3(material.base_pbr.ww, 1.0));
+    vec3 normal = normalize(mat3(T, B, N) * normal_map);
     vec3 radiance = pbrLight(normal, albedo.rgb, metalrough.r, metalrough.g, occlusion) + emissive;
     vec3 color = tonemapReinhard(radiance);
     outColor = vec4(color, albedo.a);

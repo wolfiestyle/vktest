@@ -5,6 +5,7 @@ const uint NumUVs = 1 << UVbits;
 layout(binding = 0) uniform ObjectUniforms {
     mat4 mvp;
     mat4 model;
+    mat4 normal_matrix;
     vec3 view_pos;
     uint num_lights;
 };
@@ -38,7 +39,7 @@ void main() {
     gl_Position = mvp * vec4(inPosition, 1.0);
     frag.Pos = (model * vec4(inPosition, 1.0)).xyz;
     frag.Color = vec4(pow(inColor.rgb, vec3(2.2)), inColor.a);
-    frag.Normal = normalize((model * vec4(inNormal, 0.0)).xyz);
+    frag.Normal = normalize(mat3(normal_matrix) * inNormal);
     frag.Tangent = vec4(normalize((model * vec4(inTangent.xyz, 0.0)).xyz), inTangent.w);
     uint color_uvset = bitfieldExtract(material.uv_sets, 0, UVbits);
     uint metrgh_uvset = bitfieldExtract(material.uv_sets, UVbits, UVbits);

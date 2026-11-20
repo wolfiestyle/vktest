@@ -7,7 +7,7 @@ use crate::types::VulkanResult;
 use crate::vertex::{IndexInput, VertexInput};
 use ash::vk;
 use bytemuck_derive::{Pod, Zeroable};
-use glam::{Affine3A, Mat4, Vec3, Vec4};
+use glam::{Affine3A, Mat3, Mat4, Vec3, Vec4};
 use gltf_import::LightType;
 use inline_spirv::include_spirv;
 use std::marker::PhantomData;
@@ -198,9 +198,15 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
     }
 
     fn calc_uniforms(&self, engine: &VulkanEngine) -> ObjectUniforms {
+        let linear_model = Mat3::from(self.model.matrix3);
+        let normal_matrix = linear_model
+            .try_inverse()
+            .map(|inverse| inverse.transpose())
+            .unwrap_or(linear_model);
         ObjectUniforms {
             mvp: engine.view_proj * self.model,
             model: self.model.into(),
+            normal_matrix: Mat4::from_mat3(normal_matrix),
             view_pos: engine.camera.position,
             num_lights: engine.uploaded_light_count,
         }
@@ -378,6 +384,7 @@ impl Default for LightData {
 struct ObjectUniforms {
     mvp: Mat4,
     model: Mat4,
+    normal_matrix: Mat4,
     view_pos: Vec3,
     num_lights: u32,
 }
