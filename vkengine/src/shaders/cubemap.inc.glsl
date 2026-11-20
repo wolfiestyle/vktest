@@ -16,8 +16,10 @@ vec3 getCubemapDir(uvec3 coord, vec2 img_size) {
 }
 
 vec2 cubemapDirToEquirect(vec3 dir) {
+    // Odd-sized faces can sample directly at a pole, where longitude is arbitrary.
+    float longitude = all(equal(dir.xz, vec2(0.0))) ? 0.0 : atan(dir.z, dir.x);
     return vec2(
-        0.5 + atan(dir.z, dir.x) / (2.0 * PI),
+        0.5 + longitude / TwoPI,
         acos(dir.y) / PI
     );
 }

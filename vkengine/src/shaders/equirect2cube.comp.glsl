@@ -6,7 +6,12 @@ layout(binding = 0) uniform sampler2D inputTex;
 layout(binding = 1) uniform writeonly imageCube outputTex;
 
 void main() {
-    vec3 dir = getCubemapDir(gl_GlobalInvocationID, imageSize(outputTex));
+    ivec2 size = imageSize(outputTex);
+    if (any(greaterThanEqual(gl_GlobalInvocationID.xy, uvec2(size)))) {
+        return;
+    }
+
+    vec3 dir = getCubemapDir(gl_GlobalInvocationID, size);
     vec2 uv = cubemapDirToEquirect(dir);
     vec4 color = texture(inputTex, uv);
     imageStore(outputTex, ivec3(gl_GlobalInvocationID), color);

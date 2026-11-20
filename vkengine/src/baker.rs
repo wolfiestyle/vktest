@@ -326,6 +326,9 @@ impl Baker {
         if let Some(max) = max_size {
             size = size.min(max);
         }
+        if size == 0 {
+            return Err(VkError::InvalidArgument("Cubemap face size must be nonzero"));
+        }
         eprintln!("converting equirect to cubemap ({size}x{size})..");
         let params = ImageParams {
             width: size,
@@ -358,7 +361,7 @@ impl Baker {
                         .image_info(slice::from_ref(&cubemap.info)),
                 ],
             );
-            let wg_size = size / EQ2CUBE_WG_SIZE;
+            let wg_size = size.div_ceil(EQ2CUBE_WG_SIZE);
             self.device.cmd_dispatch(cmd_buffer, wg_size, wg_size, 6);
         }
         if gen_mipmaps {
