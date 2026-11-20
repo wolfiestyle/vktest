@@ -11,6 +11,7 @@ pub struct Swapchain {
     pub handle: vk::SwapchainKHR,
     pub images: Vec<vk::Image>,
     pub image_views: Vec<vk::ImageView>,
+    render_finished_sems: Vec<vk::Semaphore>,
     pub format: vk::Format,
     pub extent: vk::Extent2D,
     pub samples: vk::SampleCountFlags,
@@ -95,30 +96,12 @@ impl Swapchain {
                 .describe_err("Failed to create swapchain")?
         };
 
-        let images = unsafe {
-            device
-                .swapchain_fn
-                .get_swapchain_images(swapchain)
-                .describe_err("Failed to get swapchain images")?
-        };
-
-        let image_views = images
-            .iter()
-            .map(|&image| {
-                vk::ImageViewCreateInfo::default()
-                    .image(image)
-                    .format(surface_format.format)
-                    .view_type(vk::ImageViewType::TYPE_2D)
-                    .subresource_range(Self::SUBRESOURCE_RANGE)
-                    .create(device)
-            })
-            .collect::<Result<_, _>>()?;
-
-        Ok(Self {
+        let mut swapchain = Self {
             device: Arc::clone(device),
             handle: swapchain,
-            images,
-            image_views,
+            images: Vec::new(),
+            image_views: Vec::new(),
+            render_finished_sems: Vec::new(),
             format: surface_format.format,
             extent,
             samples: vk::SampleCountFlags::TYPE_1,
@@ -128,7 +111,35 @@ impl Swapchain {
             depth_imgview: None,
             depth_format: vk::Format::UNDEFINED,
             vsync,
-        })
+        };
+
+        swapchain.images = unsafe {
+            device
+                .swapchain_fn
+                .get_swapchain_images(swapchain.handle)
+                .describe_err("Failed to get swapchain images")?
+        };
+
+        for (index, &image) in swapchain.images.iter().enumerate() {
+            let view = vk::ImageViewCreateInfo::default()
+                .image(image)
+                .format(surface_format.format)
+                .view_type(vk::ImageViewType::TYPE_2D)
+                .subresource_range(Self::SUBRESOURCE_RANGE)
+                .create(device)?;
+            swapchain.image_views.push(view);
+
+            // Waiting on this image's next acquire signal makes its present wait semaphore reusable.
+            let sem = device.make_semaphore(vk::SemaphoreType::BINARY)?;
+            device.debug(|d| d.set_object_name(sem, &format!("Render finished semaphore {index}")));
+            swapchain.render_finished_sems.push(sem);
+        }
+
+        Ok(swapchain)
+    }
+
+    pub(crate) fn render_finished_semaphore(&self, image_idx: usize) -> vk::Semaphore {
+        self.render_finished_sems[image_idx]
     }
 
     fn create_msaa_attachment(&mut self, samples: vk::SampleCountFlags) -> VulkanResult<()> {
@@ -278,6 +289,9 @@ impl std::ops::Deref for Swapchain {
 impl Drop for Swapchain {
     fn drop(&mut self) {
         unsafe {
+            for &sem in &self.render_finished_sems {
+                self.device.destroy_semaphore(sem, None);
+            }
             for view in &self.image_views {
                 self.device.destroy_image_view(*view, None);
             }

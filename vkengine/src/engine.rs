@@ -28,7 +28,6 @@ pub struct VulkanEngine {
     pub(crate) reverse_depth: bool,
     main_cmd_buffers: CmdBufferRing,
     frame_state: Vec<FrameState>,
-    render_finished_sems: Vec<vk::Semaphore>, // indexed by swapchain image
     current_frame: u64,
     samplers: Mutex<HashMap<SamplerOptions, vk::Sampler>>,
     pub(crate) default_texture: Texture,
@@ -65,14 +64,6 @@ impl VulkanEngine {
 
         let main_cmd_buffers = CmdBufferRing::new_with_level(&device, vk::CommandBufferLevel::PRIMARY)?;
         let frame_state = (0..QUEUE_DEPTH).map(|_| FrameState::new(&device)).collect::<Result<Vec<_>, _>>()?;
-        // render_finished semaphores must be indexed by swapchain image, not frame-in-flight
-        let render_finished_sems = (0..SWAPCHAIN_IMAGE_COUNT)
-            .map(|i| {
-                let sem = device.make_semaphore(vk::SemaphoreType::BINARY)?;
-                device.debug(|d| d.set_object_name(sem, &format!("Render finished semaphore {i}")));
-                Ok(sem)
-            })
-            .collect::<VulkanResult<Vec<_>>>()?;
 
         let default_texture = Texture::new(
             &device,
@@ -113,7 +104,6 @@ impl VulkanEngine {
             reverse_depth,
             main_cmd_buffers,
             frame_state,
-            render_finished_sems,
             current_frame: 0,
             default_texture,
             default_normalmap,
@@ -515,7 +505,7 @@ impl VulkanEngine {
                 Err(e) => return Err(VkError::VulkanMsg("Failed to acquire swapchain image", e)),
             }
         };
-        let render_finish_sem = self.render_finished_sems[image_idx as usize];
+        let render_finish_sem = self.swapchain.render_finished_semaphore(image_idx as usize);
 
         // ..that's all the info we need to record a new command buffer
         unsafe {
@@ -590,9 +580,6 @@ impl Drop for VulkanEngine {
             self.device.device_wait_idle().unwrap();
             for sampler in self.samplers.get_mut().unwrap().values() {
                 self.device.destroy_sampler(*sampler, None);
-            }
-            for &sem in &self.render_finished_sems {
-                self.device.destroy_semaphore(sem, None);
             }
             self.device.destroy_pipeline_cache(self.pipeline_cache, None);
             self.device.destroy_descriptor_set_layout(self.pbr_desc_layout, None);
