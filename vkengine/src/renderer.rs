@@ -202,7 +202,7 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
             mvp: engine.view_proj * self.model,
             model: self.model.into(),
             view_pos: engine.camera.position,
-            num_lights: engine.lights.len() as _,
+            num_lights: engine.uploaded_light_count,
         }
     }
 

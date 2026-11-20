@@ -43,6 +43,7 @@ pub struct VulkanEngine {
     pub projection: Mat4,
     pub view_proj: Mat4,
     pub lights: Vec<LightData>,
+    pub(crate) uploaded_light_count: u32,
     pub(crate) light_buffer: UploadBuffer,
 }
 
@@ -119,6 +120,7 @@ impl VulkanEngine {
             projection: Mat4::IDENTITY,
             view_proj: Mat4::IDENTITY,
             lights: vec![],
+            uploaded_light_count: 0,
             light_buffer,
         };
 
@@ -465,10 +467,9 @@ impl VulkanEngine {
         let view = self.camera.get_view_transform();
         self.projection = self.camera.get_projection(self.swapchain.aspect(), self.reverse_depth);
         self.view_proj = self.projection * view;
-        self.light_buffer[self.current_frame]
-            .map()
-            .unwrap()
-            .write_slice(&self.lights[0..self.lights.len().min(MAX_LIGHTS)], 0);
+        let lights = &self.lights[..self.lights.len().min(MAX_LIGHTS)];
+        self.light_buffer[self.current_frame].map().unwrap().write_slice(lights, 0);
+        self.uploaded_light_count = lights.len() as u32;
     }
 
     pub fn submit_draw_commands(&mut self, draw_commands: impl IntoIterator<Item = DrawPayload>) -> VulkanResult<bool> {
@@ -554,6 +555,7 @@ impl VulkanEngine {
         }
 
         self.current_frame += 1;
+        self.uploaded_light_count = 0;
 
         let present_info = vk::PresentInfoKHR::default()
             .wait_semaphores(slice::from_ref(&render_finish_sem))
