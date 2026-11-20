@@ -15,7 +15,7 @@ mod vertex;
 
 pub use baker::Baker;
 pub use camera::{Camera, CameraController};
-pub use create::CreateFromInfo;
+pub use create::{CreateFromInfo, VkOwned};
 pub use device::{CubeData, ImageData, VkBuffer, VkImage, VulkanDevice};
 pub use engine::{CmdBufferRing, DrawPayload, MAX_LIGHTS, UploadBuffer, VulkanEngine};
 pub use format::FormatInfo;

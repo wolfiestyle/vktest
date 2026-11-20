@@ -788,6 +788,7 @@ impl_vulkan_handle! {
     vk::DescriptorPool => destroy_descriptor_pool,
     vk::DescriptorSetLayout => destroy_descriptor_set_layout,
     vk::Fence => destroy_fence,
+    vk::Pipeline => destroy_pipeline,
     vk::PipelineCache => destroy_pipeline_cache,
     vk::PipelineLayout => destroy_pipeline_layout,
     vk::QueryPool => destroy_query_pool,

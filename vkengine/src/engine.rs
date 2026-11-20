@@ -1,5 +1,5 @@
 use crate::camera::Camera;
-use crate::create::{CreateFromInfo, guard_device_handle};
+use crate::create::{CreateFromInfo, VkOwned};
 use crate::device::{CubeData, ImageData, MappedMemory, VkBuffer, VulkanDevice};
 use crate::instance::DeviceSelection;
 use crate::renderer::LightData;
@@ -32,8 +32,8 @@ pub struct VulkanEngine {
     samplers: Mutex<HashMap<SamplerOptions, vk::Sampler>>,
     pub(crate) default_texture: Texture,
     pub(crate) default_normalmap: Texture,
-    pub(crate) pipeline_cache: vk::PipelineCache,
-    pub pbr_desc_layout: vk::DescriptorSetLayout,
+    pub(crate) pipeline_cache: VkOwned<vk::PipelineCache>,
+    pbr_desc_layout: VkOwned<vk::DescriptorSetLayout>,
     prev_frame_time: Instant,
     last_frame_time: Instant,
     cpu_time_start: Instant,
@@ -83,8 +83,8 @@ impl VulkanEngine {
         )?;
 
         // TODO: save/load cache data
-        let pipeline_cache = guard_device_handle(&device, vk::PipelineCacheCreateInfo::default().create(&device)?);
-        let image_desc_layout = guard_device_handle(&device, Self::pbr_descriptor_layout(&device)?);
+        let pipeline_cache = vk::PipelineCacheCreateInfo::default().create_owned(&device)?;
+        let image_desc_layout = Self::pbr_descriptor_layout(&device)?;
 
         let camera = Camera::default();
         let now = Instant::now();
@@ -96,8 +96,6 @@ impl VulkanEngine {
             "LightData",
         )?;
 
-        let image_desc_layout = image_desc_layout.take();
-        let pipeline_cache = pipeline_cache.take();
         let mut this = Self {
             device,
             window_size,
@@ -131,7 +129,7 @@ impl VulkanEngine {
         Ok(this)
     }
 
-    fn pbr_descriptor_layout(device: &VulkanDevice) -> VulkanResult<vk::DescriptorSetLayout> {
+    fn pbr_descriptor_layout(device: &Arc<VulkanDevice>) -> VulkanResult<VkOwned<vk::DescriptorSetLayout>> {
         let desc_layout = vk::DescriptorSetLayoutCreateInfo::default()
             .bindings(&[
                 // color
@@ -165,9 +163,13 @@ impl VulkanEngine {
                     .descriptor_count(1)
                     .stage_flags(vk::ShaderStageFlags::FRAGMENT),
             ])
-            .create(device)?;
-        device.debug(|d| d.set_object_name(desc_layout, "PBR desc layout"));
+            .create_owned(device)?;
+        device.debug(|d| d.set_object_name(*desc_layout, "PBR desc layout"));
         Ok(desc_layout)
+    }
+
+    pub fn pbr_desc_layout(&self) -> vk::DescriptorSetLayout {
+        *self.pbr_desc_layout
     }
 
     #[inline]
@@ -294,17 +296,14 @@ impl VulkanEngine {
             ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
             descriptor_count: count * 5,
         }];
-        let desc_pool = guard_device_handle(
-            &self.device,
-            vk::DescriptorPoolCreateInfo::default()
-                .max_sets(count)
-                .pool_sizes(&pool_sizes)
-                .create(&self.device)?,
-        );
+        let desc_pool = vk::DescriptorPoolCreateInfo::default()
+            .max_sets(count)
+            .pool_sizes(&pool_sizes)
+            .create_owned(&self.device)?;
         self.device.debug(|d| d.set_object_name(*desc_pool, "glTF materials pool"));
         let material_desc = vk::DescriptorSetAllocateInfo::default()
             .descriptor_pool(*desc_pool)
-            .set_layouts(&vec![self.pbr_desc_layout; count as usize])
+            .set_layouts(&vec![self.pbr_desc_layout(); count as usize])
             .create(&self.device)?;
 
         self.write_pbr_descriptor_set(material_desc[0], None, None, None, None, None);
@@ -326,9 +325,8 @@ impl VulkanEngine {
             });
         }
         Ok(ModelResources {
-            device: self.device.clone(),
             textures,
-            desc_pool: desc_pool.take(),
+            desc_pool,
             material_desc,
         })
     }
@@ -377,7 +375,7 @@ impl VulkanEngine {
             self.device
                 .begin_command_buffer(cmd_buffer, &begin_info)
                 .describe_err("Failed to begin recording command buffer")?;
-            self.device.cmd_reset_query_pool(cmd_buffer, frame.time_query, 0, 2);
+            self.device.cmd_reset_query_pool(cmd_buffer, *frame.time_query, 0, 2);
         }
 
         // Match the acquire semaphore's wait stage so the transition waits for the image.
@@ -415,14 +413,14 @@ impl VulkanEngine {
 
         unsafe {
             self.device
-                .cmd_write_timestamp(cmd_buffer, vk::PipelineStageFlags::BOTTOM_OF_PIPE, frame.time_query, 0);
+                .cmd_write_timestamp(cmd_buffer, vk::PipelineStageFlags::BOTTOM_OF_PIPE, *frame.time_query, 0);
             self.device.dynrender_fn.cmd_begin_rendering(cmd_buffer, &render_info);
             for cmdbuf in draw_cmds {
                 self.device.cmd_execute_commands(cmd_buffer, slice::from_ref(&cmdbuf.cmd_buffer));
             }
             self.device.dynrender_fn.cmd_end_rendering(cmd_buffer);
             self.device
-                .cmd_write_timestamp(cmd_buffer, vk::PipelineStageFlags::BOTTOM_OF_PIPE, frame.time_query, 1);
+                .cmd_write_timestamp(cmd_buffer, vk::PipelineStageFlags::BOTTOM_OF_PIPE, *frame.time_query, 1);
             self.device.transition_image_layout(
                 cmd_buffer,
                 self.swapchain.images[image_idx],
@@ -477,8 +475,8 @@ impl VulkanEngine {
     pub fn submit_draw_commands(&mut self, draw_commands: impl IntoIterator<Item = DrawPayload>) -> VulkanResult<bool> {
         let frame_idx = (self.current_frame % self.frame_state.len() as u64) as usize;
         let frame = &self.frame_state[frame_idx];
-        let image_avail_sem = frame.image_avail_sem;
-        let in_flight_sem = frame.in_flight_sem;
+        let image_avail_sem = *frame.image_avail_sem;
+        let in_flight_sem = *frame.in_flight_sem;
         let command_buffer = self.main_cmd_buffers[self.current_frame];
         // we have to sample time here so presentation doesn't get in the way
         self.cpu_time = Instant::now() - self.cpu_time_start;
@@ -529,7 +527,7 @@ impl VulkanEngine {
         let mut query_data = [0u64; 2];
         let query_res = unsafe {
             self.device
-                .get_query_pool_results(frame.time_query, 0, &mut query_data, vk::QueryResultFlags::TYPE_64)
+                .get_query_pool_results(*frame.time_query, 0, &mut query_data, vk::QueryResultFlags::TYPE_64)
         };
         if query_res.is_ok() {
             self.gpu_time = query_data[1].saturating_sub(query_data[0]);
@@ -586,8 +584,6 @@ impl Drop for VulkanEngine {
             for sampler in self.samplers.get_mut().unwrap().values() {
                 self.device.destroy_sampler(*sampler, None);
             }
-            self.device.destroy_pipeline_cache(self.pipeline_cache, None);
-            self.device.destroy_descriptor_set_layout(self.pbr_desc_layout, None);
             // swapchain must be destroyed before surface
             ManuallyDrop::drop(&mut self.swapchain);
         }
@@ -597,8 +593,7 @@ impl Drop for VulkanEngine {
 }
 
 pub struct CmdBufferRing {
-    device: Arc<VulkanDevice>,
-    pool: vk::CommandPool,
+    pool: VkOwned<vk::CommandPool>,
     buffers: [vk::CommandBuffer; QUEUE_DEPTH + 1],
 }
 
@@ -609,13 +604,10 @@ impl CmdBufferRing {
     }
 
     fn new_with_level(device: &Arc<VulkanDevice>, level: vk::CommandBufferLevel) -> VulkanResult<Self> {
-        let pool = guard_device_handle(
-            device,
-            vk::CommandPoolCreateInfo::default()
-                .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
-                .queue_family_index(device.dev_info.graphics_idx)
-                .create(device)?,
-        );
+        let pool = vk::CommandPoolCreateInfo::default()
+            .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
+            .queue_family_index(device.dev_info.graphics_idx)
+            .create_owned(device)?;
         device.debug(|d| d.set_object_name(*pool, "CmdBufferRing pool"));
         // we use N + 1 command buffers so we can write on them right away without waiting for the previous frame
         let buffers = vk::CommandBufferAllocateInfo::default()
@@ -624,11 +616,7 @@ impl CmdBufferRing {
             .command_buffer_count(QUEUE_DEPTH as u32 + 1)
             .create(device)?;
         let buffers = buffers.try_into().unwrap();
-        Ok(Self {
-            device: Arc::clone(device),
-            pool: pool.take(),
-            buffers,
-        })
+        Ok(Self { pool, buffers })
     }
 
     pub fn get_current_buffer(&self, engine: &VulkanEngine) -> VulkanResult<vk::CommandBuffer> {
@@ -644,14 +632,6 @@ impl std::ops::Index<u64> for CmdBufferRing {
     #[inline]
     fn index(&self, index: u64) -> &Self::Output {
         &self.buffers[(index % (QUEUE_DEPTH as u64 + 1)) as usize]
-    }
-}
-
-impl Drop for CmdBufferRing {
-    fn drop(&mut self) {
-        unsafe {
-            self.device.destroy_command_pool(self.pool, None);
-        }
     }
 }
 
@@ -758,24 +738,24 @@ impl DrawPayload {
 
 struct FrameState {
     device: Arc<VulkanDevice>,
-    image_avail_sem: vk::Semaphore, // present -> image acquired
-    in_flight_sem: vk::Semaphore,   // queue submit -> frame finished
+    image_avail_sem: VkOwned<vk::Semaphore>, // present -> image acquired
+    in_flight_sem: VkOwned<vk::Semaphore>,   // queue submit -> frame finished
+    time_query: VkOwned<vk::QueryPool>,
     wait_frame: u64,
     payload: Vec<DrawPayload>,
-    time_query: vk::QueryPool,
 }
 
 impl FrameState {
     fn new(device: &Arc<VulkanDevice>) -> VulkanResult<Self> {
-        let image_avail_sem = guard_device_handle(device, device.make_semaphore(vk::SemaphoreType::BINARY)?);
-        let in_flight_sem = guard_device_handle(device, device.make_semaphore(vk::SemaphoreType::TIMELINE)?);
-        let time_query = guard_device_handle(
-            device,
-            vk::QueryPoolCreateInfo::default()
-                .query_type(vk::QueryType::TIMESTAMP)
-                .query_count(2)
-                .create(device)?,
-        );
+        let image_avail_sem = vk::SemaphoreCreateInfo::default().create_owned(device)?;
+        let mut timeline_info = vk::SemaphoreTypeCreateInfo::default().semaphore_type(vk::SemaphoreType::TIMELINE);
+        let in_flight_sem = vk::SemaphoreCreateInfo::default()
+            .push_next(&mut timeline_info)
+            .create_owned(device)?;
+        let time_query = vk::QueryPoolCreateInfo::default()
+            .query_type(vk::QueryType::TIMESTAMP)
+            .query_count(2)
+            .create_owned(device)?;
         unsafe {
             device.reset_query_pool(*time_query, 0, 2);
         }
@@ -786,11 +766,11 @@ impl FrameState {
         });
         Ok(Self {
             device: Arc::clone(device),
-            image_avail_sem: image_avail_sem.take(),
-            in_flight_sem: in_flight_sem.take(),
+            image_avail_sem,
+            in_flight_sem,
             wait_frame: 0,
             payload: vec![],
-            time_query: time_query.take(),
+            time_query,
         })
     }
 
@@ -799,16 +779,6 @@ impl FrameState {
             if let Some(f) = pl.on_frame_finish {
                 f(&self.device)
             }
-        }
-    }
-}
-
-impl Drop for FrameState {
-    fn drop(&mut self) {
-        unsafe {
-            self.device.destroy_semaphore(self.image_avail_sem, None);
-            self.device.destroy_semaphore(self.in_flight_sem, None);
-            self.device.destroy_query_pool(self.time_query, None);
         }
     }
 }
@@ -920,16 +890,13 @@ impl From<vk::SamplerAddressMode> for SamplerOptions {
 }
 
 pub struct ModelResources {
-    device: Arc<VulkanDevice>,
+    desc_pool: VkOwned<vk::DescriptorPool>,
     pub textures: Vec<Texture>,
-    pub desc_pool: vk::DescriptorPool,
     pub material_desc: Vec<vk::DescriptorSet>,
 }
 
-impl Drop for ModelResources {
-    fn drop(&mut self) {
-        unsafe {
-            self.device.destroy_descriptor_pool(self.desc_pool, None);
-        }
+impl ModelResources {
+    pub fn desc_pool(&self) -> vk::DescriptorPool {
+        *self.desc_pool
     }
 }

@@ -244,7 +244,7 @@ impl UiRenderer {
         unsafe {
             device.cmd_push_constants(
                 cmd_buffer,
-                self.pipeline.layout,
+                *self.pipeline.layout,
                 vk::ShaderStageFlags::VERTEX,
                 0,
                 bytemuck::bytes_of(&constants),
@@ -268,7 +268,7 @@ impl UiRenderer {
                         device.pushdesc_fn.cmd_push_descriptor_set(
                             cmd_buffer,
                             vk::PipelineBindPoint::GRAPHICS,
-                            self.pipeline.layout,
+                            *self.pipeline.layout,
                             0,
                             slice::from_ref(&desc_writes),
                         );

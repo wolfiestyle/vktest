@@ -81,7 +81,7 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
         };
         let pipeline = Pipeline::builder_graphics(&shader)
             .vertex_input::<V>()
-            .descriptor_layouts(&[push_desc_layout, engine.pbr_desc_layout])
+            .descriptor_layouts(&[push_desc_layout, engine.pbr_desc_layout()])
             .push_constants(slice::from_ref(&push_constants))
             .render_to_swapchain(&engine.swapchain)
             .build(engine)?;
@@ -127,7 +127,7 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
             self.device
                 .debug(|d| d.cmd_begin_label(cmd_buffer, "3D object", [0.2, 0.6, 0.4, 1.0]));
             self.device
-                .cmd_bind_pipeline(cmd_buffer, vk::PipelineBindPoint::GRAPHICS, self.pipeline.handle);
+                .cmd_bind_pipeline(cmd_buffer, vk::PipelineBindPoint::GRAPHICS, *self.pipeline);
             self.device.cmd_set_viewport(cmd_buffer, 0, &[engine.swapchain.viewport_inv()]);
             self.device.cmd_set_scissor(cmd_buffer, 0, &[engine.swapchain.extent_rect()]);
             let obj_buffer_info = self.obj_uniforms.descriptor(engine);
@@ -135,7 +135,7 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
             self.device.pushdesc_fn.cmd_push_descriptor_set(
                 cmd_buffer,
                 vk::PipelineBindPoint::GRAPHICS,
-                self.pipeline.layout,
+                *self.pipeline.layout,
                 0,
                 &[
                     vk::WriteDescriptorSet::default()
@@ -169,14 +169,14 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
                 self.device.cmd_bind_descriptor_sets(
                     cmd_buffer,
                     vk::PipelineBindPoint::GRAPHICS,
-                    self.pipeline.layout,
+                    *self.pipeline.layout,
                     1,
                     slice::from_ref(&submesh.descriptor),
                     &[],
                 );
                 self.device.cmd_push_constants(
                     cmd_buffer,
-                    self.pipeline.layout,
+                    *self.pipeline.layout,
                     vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
                     0,
                     bytemuck::bytes_of(&submesh.material_data),
@@ -209,7 +209,7 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
     pub fn rebuild_pipeline(&mut self, engine: &VulkanEngine) -> VulkanResult<()> {
         let pipeline = Pipeline::builder_graphics(&self.shader)
             .vertex_input::<V>()
-            .descriptor_layouts(&[self.push_desc_layout, engine.pbr_desc_layout])
+            .descriptor_layouts(&[self.push_desc_layout, engine.pbr_desc_layout()])
             .push_constants(slice::from_ref(&self.push_constants))
             .render_to_swapchain(&engine.swapchain)
             .build(engine)?;
@@ -484,13 +484,13 @@ impl SkyboxRenderer {
             self.device
                 .debug(|d| d.cmd_begin_label(cmd_buffer, "Background", [0.2, 0.4, 0.6, 1.0]));
             self.device
-                .cmd_bind_pipeline(cmd_buffer, vk::PipelineBindPoint::GRAPHICS, self.pipeline.handle);
+                .cmd_bind_pipeline(cmd_buffer, vk::PipelineBindPoint::GRAPHICS, *self.pipeline);
             self.device.cmd_set_viewport(cmd_buffer, 0, &[engine.swapchain.viewport_inv()]);
             self.device.cmd_set_scissor(cmd_buffer, 0, &[engine.swapchain.extent_rect()]);
             self.device.pushdesc_fn.cmd_push_descriptor_set(
                 cmd_buffer,
                 vk::PipelineBindPoint::GRAPHICS,
-                self.pipeline.layout,
+                *self.pipeline.layout,
                 0,
                 &[vk::WriteDescriptorSet::default()
                     .dst_binding(0)
@@ -499,7 +499,7 @@ impl SkyboxRenderer {
             );
             self.device.cmd_push_constants(
                 cmd_buffer,
-                self.pipeline.layout,
+                *self.pipeline.layout,
                 vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
                 0,
                 bytemuck::bytes_of(&params),

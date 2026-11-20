@@ -1,6 +1,8 @@
-use crate::device::VulkanHandle;
+use crate::device::{VulkanDevice, VulkanHandle};
 use crate::types::{ErrorDescription, VulkanResult};
 use ash::vk;
+use std::fmt;
+use std::sync::Arc;
 
 #[must_use]
 pub(crate) struct CreationGuard<T, F: FnOnce(T)>(Option<(T, F)>);
@@ -35,13 +37,66 @@ pub(crate) fn guard_device_handle<T: VulkanHandle>(device: &ash::Device, handle:
     CreationGuard::new(handle, |handle| unsafe { handle.destroy(device) })
 }
 
-pub trait CreateFromInfo {
+/// Owns a Vulkan handle with an individual device-level destructor.
+pub struct VkOwned<H: VulkanHandle> {
+    handle: H,
+    device: Arc<VulkanDevice>,
+}
+
+impl<H: VulkanHandle> VkOwned<H> {
+    /// # Safety
+    ///
+    /// The handle must be live, uniquely owned, and created on this device.
+    pub(crate) unsafe fn from_raw(handle: H, device: &Arc<VulkanDevice>) -> Self {
+        Self {
+            handle,
+            device: Arc::clone(device),
+        }
+    }
+}
+
+impl<H: VulkanHandle> std::ops::Deref for VkOwned<H> {
+    type Target = H;
+
+    fn deref(&self) -> &Self::Target {
+        &self.handle
+    }
+}
+
+impl<H: VulkanHandle> Drop for VkOwned<H> {
+    fn drop(&mut self) {
+        unsafe { self.handle.destroy(&self.device) };
+    }
+}
+
+impl<H: VulkanHandle + fmt::Debug> fmt::Debug for VkOwned<H> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.handle.fmt(f)
+    }
+}
+
+/// Creates a Vulkan object or allocates Vulkan objects from a pool.
+///
+/// # Safety
+///
+/// If `Output` implements `VulkanHandle`, a successful `create` must return a
+/// live, individually destroyable handle created on the supplied device and
+/// transfer sole responsibility for its destruction to the caller.
+pub unsafe trait CreateFromInfo {
     type Output;
 
     fn create(&self, device: &ash::Device) -> VulkanResult<Self::Output>;
+
+    fn create_owned(&self, device: &Arc<VulkanDevice>) -> VulkanResult<VkOwned<Self::Output>>
+    where
+        Self::Output: VulkanHandle,
+    {
+        let handle = self.create(device)?;
+        Ok(unsafe { VkOwned::from_raw(handle, device) })
+    }
 }
 
-impl CreateFromInfo for vk::ShaderModuleCreateInfo<'_> {
+unsafe impl CreateFromInfo for vk::ShaderModuleCreateInfo<'_> {
     type Output = vk::ShaderModule;
 
     #[inline]
@@ -54,7 +109,7 @@ impl CreateFromInfo for vk::ShaderModuleCreateInfo<'_> {
     }
 }
 
-impl CreateFromInfo for vk::DescriptorSetLayoutCreateInfo<'_> {
+unsafe impl CreateFromInfo for vk::DescriptorSetLayoutCreateInfo<'_> {
     type Output = vk::DescriptorSetLayout;
 
     #[inline]
@@ -67,7 +122,7 @@ impl CreateFromInfo for vk::DescriptorSetLayoutCreateInfo<'_> {
     }
 }
 
-impl CreateFromInfo for vk::PipelineLayoutCreateInfo<'_> {
+unsafe impl CreateFromInfo for vk::PipelineLayoutCreateInfo<'_> {
     type Output = vk::PipelineLayout;
 
     #[inline]
@@ -80,7 +135,7 @@ impl CreateFromInfo for vk::PipelineLayoutCreateInfo<'_> {
     }
 }
 
-impl CreateFromInfo for vk::PipelineCacheCreateInfo<'_> {
+unsafe impl CreateFromInfo for vk::PipelineCacheCreateInfo<'_> {
     type Output = vk::PipelineCache;
 
     #[inline]
@@ -93,7 +148,7 @@ impl CreateFromInfo for vk::PipelineCacheCreateInfo<'_> {
     }
 }
 
-impl CreateFromInfo for vk::CommandPoolCreateInfo<'_> {
+unsafe impl CreateFromInfo for vk::CommandPoolCreateInfo<'_> {
     type Output = vk::CommandPool;
 
     #[inline]
@@ -102,7 +157,7 @@ impl CreateFromInfo for vk::CommandPoolCreateInfo<'_> {
     }
 }
 
-impl CreateFromInfo for vk::CommandBufferAllocateInfo<'_> {
+unsafe impl CreateFromInfo for vk::CommandBufferAllocateInfo<'_> {
     type Output = Vec<vk::CommandBuffer>;
 
     #[inline]
@@ -115,7 +170,7 @@ impl CreateFromInfo for vk::CommandBufferAllocateInfo<'_> {
     }
 }
 
-impl CreateFromInfo for vk::SemaphoreCreateInfo<'_> {
+unsafe impl CreateFromInfo for vk::SemaphoreCreateInfo<'_> {
     type Output = vk::Semaphore;
 
     #[inline]
@@ -124,7 +179,7 @@ impl CreateFromInfo for vk::SemaphoreCreateInfo<'_> {
     }
 }
 
-impl CreateFromInfo for vk::FenceCreateInfo<'_> {
+unsafe impl CreateFromInfo for vk::FenceCreateInfo<'_> {
     type Output = vk::Fence;
 
     #[inline]
@@ -133,7 +188,7 @@ impl CreateFromInfo for vk::FenceCreateInfo<'_> {
     }
 }
 
-impl CreateFromInfo for vk::ImageViewCreateInfo<'_> {
+unsafe impl CreateFromInfo for vk::ImageViewCreateInfo<'_> {
     type Output = vk::ImageView;
 
     #[inline]
@@ -142,7 +197,7 @@ impl CreateFromInfo for vk::ImageViewCreateInfo<'_> {
     }
 }
 
-impl CreateFromInfo for vk::SamplerCreateInfo<'_> {
+unsafe impl CreateFromInfo for vk::SamplerCreateInfo<'_> {
     type Output = vk::Sampler;
 
     #[inline]
@@ -151,7 +206,7 @@ impl CreateFromInfo for vk::SamplerCreateInfo<'_> {
     }
 }
 
-impl CreateFromInfo for vk::QueryPoolCreateInfo<'_> {
+unsafe impl CreateFromInfo for vk::QueryPoolCreateInfo<'_> {
     type Output = vk::QueryPool;
 
     #[inline]
@@ -160,7 +215,7 @@ impl CreateFromInfo for vk::QueryPoolCreateInfo<'_> {
     }
 }
 
-impl CreateFromInfo for vk::DescriptorPoolCreateInfo<'_> {
+unsafe impl CreateFromInfo for vk::DescriptorPoolCreateInfo<'_> {
     type Output = vk::DescriptorPool;
 
     fn create(&self, device: &ash::Device) -> VulkanResult<Self::Output> {
@@ -172,7 +227,7 @@ impl CreateFromInfo for vk::DescriptorPoolCreateInfo<'_> {
     }
 }
 
-impl CreateFromInfo for vk::DescriptorSetAllocateInfo<'_> {
+unsafe impl CreateFromInfo for vk::DescriptorSetAllocateInfo<'_> {
     type Output = Vec<vk::DescriptorSet>;
 
     fn create(&self, device: &ash::Device) -> VulkanResult<Self::Output> {

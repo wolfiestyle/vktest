@@ -204,7 +204,7 @@ impl Baker {
             self.device.pushdesc_fn.cmd_push_descriptor_set(
                 cmd_buffer,
                 vk::PipelineBindPoint::COMPUTE,
-                self.irrmap_pipeline.layout,
+                *self.irrmap_pipeline.layout,
                 0,
                 &[
                     vk::WriteDescriptorSet::default()
@@ -263,7 +263,7 @@ impl Baker {
             self.device.pushdesc_fn.cmd_push_descriptor_set(
                 cmd_buffer,
                 vk::PipelineBindPoint::COMPUTE,
-                self.prefilter_pipeline.layout,
+                *self.prefilter_pipeline.layout,
                 0,
                 &[vk::WriteDescriptorSet::default()
                     .dst_binding(0)
@@ -274,7 +274,7 @@ impl Baker {
             for level in 0..PREFILTERED_MIP_LEVELS {
                 self.device.cmd_push_constants(
                     cmd_buffer,
-                    self.prefilter_pipeline.layout,
+                    *self.prefilter_pipeline.layout,
                     vk::ShaderStageFlags::COMPUTE,
                     0,
                     bytemuck::bytes_of(&level),
@@ -282,7 +282,7 @@ impl Baker {
                 self.device.pushdesc_fn.cmd_push_descriptor_set(
                     cmd_buffer,
                     vk::PipelineBindPoint::COMPUTE,
-                    self.prefilter_pipeline.layout,
+                    *self.prefilter_pipeline.layout,
                     0,
                     &[vk::WriteDescriptorSet::default()
                         .dst_binding(1)
@@ -319,7 +319,7 @@ impl Baker {
             self.device.pushdesc_fn.cmd_push_descriptor_set(
                 cmd_buffer,
                 vk::PipelineBindPoint::COMPUTE,
-                self.brdf_pipeline.layout,
+                *self.brdf_pipeline.layout,
                 0,
                 &[vk::WriteDescriptorSet::default()
                     .dst_binding(0)
@@ -357,7 +357,7 @@ impl Baker {
             self.device.pushdesc_fn.cmd_push_descriptor_set(
                 cmd_buffer,
                 vk::PipelineBindPoint::COMPUTE,
-                self.eq2cube_pipeline.layout,
+                *self.eq2cube_pipeline.layout,
                 0,
                 &[
                     vk::WriteDescriptorSet::default()
