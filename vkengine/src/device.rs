@@ -615,9 +615,7 @@ impl VulkanDevice {
         if base_layer + layers > image.props.layers {
             return VkError::InvalidArgument("Data layer count out of bounds").into();
         }
-        let my_dims = UVec2::new(image.props.width, image.props.height);
-        // the update rect is half-open, so it may end right at the image edge
-        if pos.cmpge(my_dims).any() || (pos + dims).cmpgt(my_dims).any() {
+        if !image.props.contains_update_rect(pos, dims) {
             return VkError::InvalidArgument("Image update rect out of bounds").into();
         }
         let fmt_info = FormatInfo::try_from(image.props.format)?;
@@ -1108,6 +1106,12 @@ impl ImageParams {
         }
     }
 
+    fn contains_update_rect(&self, pos: UVec2, dims: UVec2) -> bool {
+        let size = self.size();
+        // The update rectangle is half-open, so it may end at the image edge.
+        pos.cmplt(size).all() && (pos + dims).cmple(size).all()
+    }
+
     #[inline]
     pub fn extent(&self) -> vk::Extent3D {
         vk::Extent3D {
@@ -1130,6 +1134,53 @@ impl ImageParams {
             level_count: self.mip_levels,
             base_array_layer: 0,
             layer_count: self.layers,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepts_image_updates_that_end_at_the_right_and_bottom_edges() {
+        let image = ImageParams {
+            width: 8,
+            height: 6,
+            ..ImageParams::default()
+        };
+
+        for (pos, dims) in [
+            (UVec2::new(6, 2), UVec2::new(2, 1)),
+            (UVec2::new(2, 4), UVec2::new(1, 2)),
+            (UVec2::new(7, 5), UVec2::ONE),
+            (UVec2::ZERO, UVec2::new(8, 6)),
+        ] {
+            assert!(
+                image.contains_update_rect(pos, dims),
+                "rejected update at {pos:?} with size {dims:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_image_updates_that_extend_past_an_edge() {
+        let image = ImageParams {
+            width: 8,
+            height: 6,
+            ..ImageParams::default()
+        };
+
+        for (pos, dims) in [
+            (UVec2::new(6, 2), UVec2::new(3, 1)),
+            (UVec2::new(2, 4), UVec2::new(1, 3)),
+            (UVec2::new(8, 2), UVec2::ONE),
+            (UVec2::new(2, 6), UVec2::ONE),
+        ] {
+            assert!(
+                !image.contains_update_rect(pos, dims),
+                "accepted update at {pos:?} with size {dims:?}"
+            );
         }
     }
 }
