@@ -44,7 +44,7 @@ impl GltfData {
     fn import_gltf(gltf: gltf::Gltf, base_path: Option<&Path>) -> ImportResult<Self> {
         let buffers = BufferData::import_buffers(&gltf.document, gltf.blob, base_path)?;
         let images = Image::import_images(&gltf.document, &buffers, base_path);
-        let meshes = MeshData::import_meshes(&gltf.document, &buffers);
+        let meshes = MeshData::import_meshes(&gltf.document, &buffers)?;
         let materials = gltf.document.materials().map(From::from).collect();
         let textures = gltf.document.textures().map(From::from).collect();
         let nodes = gltf.document.nodes().map(From::from).collect();

@@ -1,5 +1,6 @@
 use crate::import::BufferData;
 use crate::material::MaterialId;
+use crate::types::{ImportError, ImportResult};
 use bevy_mikktspace::{Geometry, generate_tangents};
 use glam::{Vec3, Vec3A};
 use gltf::Semantic;
@@ -79,13 +80,14 @@ pub struct MeshData {
 }
 
 impl MeshData {
-    pub(crate) fn import_meshes(document: &gltf::Document, buffers: &[BufferData]) -> Vec<Self> {
-        std::thread::scope(|scope| {
+    pub(crate) fn import_meshes(document: &gltf::Document, buffers: &[BufferData]) -> ImportResult<Vec<Self>> {
+        let meshes = std::thread::scope(|scope| {
             let threads: Vec<_> = document
                 .meshes()
                 .map(|mesh| {
+                    let mesh_id = mesh.index();
                     mesh.primitives()
-                        .map(|prim| scope.spawn(|| PrimData::read_primitive(buffers, prim)))
+                        .map(|prim| scope.spawn(move || PrimData::read_primitive(buffers, mesh_id, prim)))
                         .collect::<Vec<_>>()
                 })
                 .collect();
@@ -94,18 +96,31 @@ impl MeshData {
                 .into_iter()
                 .zip(document.meshes())
                 .map(|(prim_jhs, mesh)| {
-                    let prims = prim_jhs.into_iter().map(|jh| jh.join().unwrap());
+                    // Join every worker even when a primitive failed, so a later
+                    // worker panic cannot escape through the thread scope.
+                    let prims: Vec<_> = prim_jhs
+                        .into_iter()
+                        .enumerate()
+                        .map(|(primitive, jh)| {
+                            jh.join().map_err(|_| ImportError::InvalidPrimitive {
+                                mesh: mesh.index(),
+                                primitive,
+                                reason: "mesh import worker panicked".into(),
+                            })?
+                        })
+                        .collect();
                     let mut data = MeshData {
                         name: mesh.name().map(str::to_string),
                         ..Default::default()
                     };
                     for primdata in prims {
-                        data.append_primitives(primdata);
+                        data.append_primitives(primdata?);
                     }
-                    data
+                    Ok(data)
                 })
-                .collect()
-        })
+                .collect::<Vec<_>>()
+        });
+        meshes.into_iter().collect()
     }
 
     fn append_primitives(&mut self, prims: PrimData) {
@@ -162,10 +177,24 @@ struct PrimData {
 }
 
 impl PrimData {
-    fn read_primitive(buffers: &[BufferData], prim: gltf::mesh::Primitive) -> Self {
+    fn read_primitive(buffers: &[BufferData], mesh: usize, prim: gltf::mesh::Primitive) -> ImportResult<Self> {
+        let invalid = |reason| ImportError::InvalidPrimitive {
+            mesh,
+            primitive: prim.index(),
+            reason,
+        };
+        let vert_count = prim
+            .get(&Semantic::Positions)
+            .ok_or_else(|| invalid("missing POSITION accessor".into()))?
+            .count();
         let mut attribs = VertexAttribs::default();
-        let mut vert_count = 0;
         for (semantic, accessor) in prim.attributes() {
+            if accessor.count() != vert_count {
+                return Err(invalid(format!(
+                    "{semantic:?} has {} elements, expected {vert_count}",
+                    accessor.count()
+                )));
+            }
             match semantic {
                 Semantic::Positions => attribs.position = true,
                 Semantic::Normals => attribs.normal = true,
@@ -174,23 +203,43 @@ impl PrimData {
                 Semantic::Colors(n) => attribs.color = attribs.color.max(n + 1),
                 _ => (),
             }
-            vert_count = vert_count.max(accessor.count());
         }
         let mode = prim.mode();
         let material = prim.material().index().map(MaterialId);
 
         let reader = prim.reader(|buffer| buffers.get(buffer.index()).map(|buf| buf.data.as_slice()));
 
-        let indices: Vec<_> = if let Some(iter) = reader.read_indices() {
-            iter.into_u32().collect()
+        let indices: Vec<_> = if let Some(accessor) = prim.indices() {
+            let indices: Vec<_> = reader
+                .read_indices()
+                .ok_or_else(|| invalid("unreadable index accessor".into()))?
+                .into_u32()
+                .collect();
+            if indices.len() != accessor.count() {
+                return Err(invalid(format!("decoded {} indices, expected {}", indices.len(), accessor.count())));
+            }
+            indices
         } else {
             (0..vert_count as u32).collect()
         };
-        let positions = if let Some(iter) = reader.read_positions() {
-            iter.collect()
-        } else {
-            vec![[0.0; 3]; vert_count]
-        };
+        if mode == Mode::Triangles && (indices.is_empty() || indices.len() % 3 != 0) {
+            return Err(invalid(format!(
+                "triangle list has {} indices or vertices, expected a positive multiple of 3",
+                indices.len()
+            )));
+        }
+        if let Some((offset, index)) = indices.iter().copied().enumerate().find(|&(_, index)| index as usize >= vert_count) {
+            return Err(invalid(format!(
+                "index {index} at element {offset} is outside the {vert_count} vertices"
+            )));
+        }
+        let positions: Vec<_> = reader
+            .read_positions()
+            .ok_or_else(|| invalid("unreadable POSITION accessor".into()))?
+            .collect();
+        if positions.len() != vert_count {
+            return Err(invalid(format!("decoded {} positions, expected {vert_count}", positions.len())));
+        }
         let normals = if let Some(iter) = reader.read_normals() {
             iter.collect()
         } else if mode == Mode::Triangles {
@@ -233,6 +282,19 @@ impl PrimData {
             indices,
         };
 
+        if [
+            primdata.normals.len(),
+            primdata.tangents.len(),
+            primdata.texcoords0.len(),
+            primdata.texcoords1.len(),
+            primdata.colors.len(),
+        ]
+        .into_iter()
+        .any(|count| count != vert_count)
+        {
+            return Err(invalid("decoded vertex attributes have inconsistent lengths".into()));
+        }
+
         if mode == Mode::Triangles && !attribs.tangent {
             if attribs.texcoord > 0 {
                 eprintln!("Generating MikkTSpace tangents for {vert_count} vertices");
@@ -242,7 +304,7 @@ impl PrimData {
                 primdata.generate_tangents_fallback();
             }
         }
-        primdata
+        Ok(primdata)
     }
 
     fn generate_tangents_fallback(&mut self) {
@@ -281,10 +343,10 @@ impl Geometry for PrimData {
 
 fn generate_normals(positions: &[[f32; 3]], indices: &[u32]) -> Vec<[f32; 3]> {
     let mut normals = vec![Vec3A::ZERO; positions.len()];
-    for i in (0..indices.len()).step_by(3) {
-        let ia = indices[i] as usize;
-        let ib = indices[i + 1] as usize;
-        let ic = indices[i + 2] as usize;
+    for triangle in indices.chunks_exact(3) {
+        let ia = triangle[0] as usize;
+        let ib = triangle[1] as usize;
+        let ic = triangle[2] as usize;
         let posa = Vec3A::from_array(positions[ia]);
         let posb = Vec3A::from_array(positions[ib]);
         let posc = Vec3A::from_array(positions[ic]);

@@ -34,4 +34,7 @@ pub enum ImportError {
 
     #[error("Incorrect buffer {id} size (actual: {actual}, expected: {expected})")]
     BufferSize { id: usize, actual: usize, expected: usize },
+
+    #[error("Invalid mesh {mesh} primitive {primitive}: {reason}")]
+    InvalidPrimitive { mesh: usize, primitive: usize, reason: String },
 }
