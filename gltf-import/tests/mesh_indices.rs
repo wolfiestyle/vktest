@@ -1,7 +1,7 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use gltf_import::{GltfData, ImportError};
 
-fn triangle(indices: &[u8], count: usize, attributes: &str) -> String {
+fn triangle_model(indices: &[u8], count: usize, primitives: &str) -> String {
     let positions = [0.0f32, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
     let normals = [0.0f32, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0];
     let uvs = [0.0f32, 0.0, 1.0, 0.0, 0.0, 1.0];
@@ -31,7 +31,7 @@ fn triangle(indices: &[u8], count: usize, attributes: &str) -> String {
                 {{"bufferView": 2, "componentType": 5126, "count": 3, "type": "VEC2"}},
                 {{"bufferView": 3, "componentType": 5121, "count": {count}, "type": "SCALAR"}}
             ],
-            "meshes": [{{"primitives": [{{"attributes": {{"POSITION": 0{attributes}}}, "indices": 3}}]}}]
+            "meshes": [{{"primitives": [{primitives}]}}]
         }}"#
     )
 }
@@ -44,7 +44,8 @@ fn reports_malformed_triangle_indices() {
         (&[0, 1, 99][..], 3, r#", "NORMAL": 1, "TEXCOORD_0": 2"#, "index 99 at element 2"),
         (&[0, 1][..], 3, "", "unreadable index accessor"),
     ] {
-        let model = triangle(indices, count, attributes);
+        let primitive = format!(r#"{{"attributes": {{"POSITION": 0{attributes}}}, "indices": 3}}"#);
+        let model = triangle_model(indices, count, &primitive);
         let error = GltfData::from_memory(model.as_bytes()).unwrap_err();
         assert!(
             matches!(&error, ImportError::InvalidPrimitive { mesh: 0, primitive: 0, reason } if reason.contains(expected)),
@@ -56,8 +57,62 @@ fn reports_malformed_triangle_indices() {
 #[test]
 fn imports_valid_indexed_triangle() {
     let indices = [0, 2, 1];
-    let model = triangle(&indices, indices.len(), r#", "NORMAL": 1, "TEXCOORD_0": 2"#);
+    let model = triangle_model(
+        &indices,
+        indices.len(),
+        r#"{"attributes": {"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2}, "indices": 3}"#,
+    );
     let data = GltfData::from_memory(model.as_bytes()).unwrap();
     assert_eq!(data.meshes[0].indices, indices.map(u32::from));
     assert_eq!(data.meshes[0].vertices.len(), 3);
+}
+
+#[test]
+fn generates_indices_normals_and_tangents_for_an_unindexed_triangle() {
+    // The indexed primitive in the same fixture exercises normal generation with reversed winding.
+    let model = triangle_model(
+        &[0, 2, 1],
+        3,
+        r#"{"attributes": {"POSITION": 0, "TEXCOORD_0": 2}},
+           {"attributes": {"POSITION": 0}, "indices": 3}"#,
+    );
+    let data = GltfData::from_memory(model.as_bytes()).unwrap();
+    let mesh = &data.meshes[0];
+    let unindexed = &mesh.primitives[0];
+    assert_eq!(mesh.indices[unindexed.index_range()], [0, 1, 2]);
+    for vertex in &mesh.vertices[unindexed.vertex_range()] {
+        assert_eq!(vertex.normal, [0, 0, i16::MAX, 0]);
+        assert_eq!(vertex.tangent[..3], [i16::MAX, 0, 0]);
+        assert_eq!(vertex.tangent[3].unsigned_abs(), i16::MAX as u16);
+    }
+
+    let reversed = &mesh.primitives[1];
+    for vertex in &mesh.vertices[reversed.vertex_range()] {
+        assert_eq!(vertex.normal, [0, 0, -i16::MAX, 0]);
+    }
+}
+
+#[test]
+fn keeps_indices_local_to_each_primitive_in_a_shared_mesh() {
+    let indices = [2, 0, 1, 1, 2, 0];
+    let model = triangle_model(
+        &indices,
+        indices.len(),
+        r#"{"attributes": {"POSITION": 0}},
+           {"attributes": {"POSITION": 0}, "indices": 3}"#,
+    );
+    let data = GltfData::from_memory(model.as_bytes()).unwrap();
+    let mesh = &data.meshes[0];
+    let [first, second] = mesh.primitives.as_slice() else {
+        panic!("expected two primitives, got {}", mesh.primitives.len());
+    };
+
+    assert_eq!(first.vertex_range(), 0..3);
+    assert_eq!(second.vertex_range(), 3..6);
+    assert_eq!(first.index_range(), 0..3);
+    assert_eq!(second.index_range(), 3..9);
+    assert_eq!(mesh.vertices.len(), 6);
+    assert_eq!(mesh.indices.len(), 9);
+    assert_eq!(mesh.indices[first.index_range()], [0, 1, 2]);
+    assert_eq!(mesh.indices[second.index_range()], indices.map(u32::from));
 }
