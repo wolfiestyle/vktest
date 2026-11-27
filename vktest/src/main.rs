@@ -1,11 +1,10 @@
 use clap::Parser;
 use gltf_import::{GltfData, LightType, Material, Vertex};
+use std::error::Error;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use vkengine::gui::{UiRenderer, egui};
-use vkengine::{
-    Baker, Camera, CameraController, LightData, MeshRenderData, MeshRenderer, SkyboxRenderer, Texture, VkError, VulkanEngine, VulkanResult,
-};
+use vkengine::{Baker, Camera, CameraController, LightData, MeshRenderData, MeshRenderer, SkyboxRenderer, Texture, VkError, VulkanEngine};
 use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, Event, KeyEvent, WindowEvent};
 use winit::event_loop::EventLoop;
@@ -30,10 +29,10 @@ pub struct MeshNode {
     enabled: bool,
 }
 
-fn main() -> VulkanResult<()> {
+fn main() -> Result<(), Box<dyn Error>> {
     let args = Arguments::parse();
 
-    let gltf = GltfData::from_file(args.model.unwrap_or_else(|| "data/model.glb".into())).unwrap();
+    let gltf = GltfData::from_file(args.model.unwrap_or_else(|| "data/model.glb".into()))?;
     println!(
         "loaded model: meshes: {} images: {}, materials: {} cameras: {}, lights: {}",
         gltf.meshes.len(),
