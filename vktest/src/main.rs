@@ -435,3 +435,49 @@ enum DebugMode {
     ShowIrradiance,
     ShowPrefilter,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Arguments;
+    use clap::{Parser, error::ErrorKind};
+    use std::path::Path;
+
+    #[test]
+    fn leaves_unspecified_options_unset() {
+        let args = Arguments::try_parse_from(["vktest"]).unwrap();
+
+        assert_eq!(args.model, None);
+        assert_eq!(args.skybox, None);
+        assert_eq!(args.skybox_size, None);
+    }
+
+    #[test]
+    fn accepts_short_and_long_paths_and_a_zero_skybox_limit() {
+        for (model_flag, skybox_flag, size, expected_size) in [("-m", "-s", "0", 0), ("--model", "--skybox", "512", 512)] {
+            let args = Arguments::try_parse_from([
+                "vktest",
+                model_flag,
+                "example scene.glb",
+                skybox_flag,
+                "panorama.exr",
+                "--skybox-size",
+                size,
+            ])
+            .unwrap();
+
+            assert_eq!(args.model.as_deref(), Some(Path::new("example scene.glb")));
+            assert_eq!(args.skybox.as_deref(), Some(Path::new("panorama.exr")));
+            assert_eq!(args.skybox_size, Some(expected_size));
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_skybox_sizes() {
+        for option in ["--skybox-size=invalid", "--skybox-size=-1", "--skybox-size=4294967296"] {
+            let error = Arguments::try_parse_from(["vktest", option])
+                .err()
+                .expect("expected an invalid size error");
+            assert_eq!(error.kind(), ErrorKind::ValueValidation, "{option}");
+        }
+    }
+}
