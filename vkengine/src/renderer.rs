@@ -543,3 +543,82 @@ struct SkyboxParams {
     viewproj_inv: Mat4,
     params: Vec4,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gltf_import::{Material, TextureInfo};
+
+    #[test]
+    fn packs_each_material_texture_uv_set_into_its_shader_bit() {
+        let uv1 = Some(TextureInfo { id: 9, uv_set: 1 });
+        for (material, expected) in [
+            (Material::DEFAULT, 0b00000),
+            (
+                Material {
+                    color_tex: uv1,
+                    ..Material::DEFAULT
+                },
+                0b00001,
+            ),
+            (
+                Material {
+                    metallic_roughness_tex: uv1,
+                    ..Material::DEFAULT
+                },
+                0b00010,
+            ),
+            (
+                Material {
+                    normal_tex: uv1,
+                    ..Material::DEFAULT
+                },
+                0b00100,
+            ),
+            (
+                Material {
+                    emissive_tex: uv1,
+                    ..Material::DEFAULT
+                },
+                0b01000,
+            ),
+            (
+                Material {
+                    occlusion_tex: uv1,
+                    ..Material::DEFAULT
+                },
+                0b10000,
+            ),
+        ] {
+            assert_eq!(MaterialData::from_gltf(&material).uv_sets, expected, "{material:?}");
+        }
+        let material = Material {
+            color_tex: Some(TextureInfo { id: 9, uv_set: 0 }),
+            normal_tex: uv1,
+            occlusion_tex: uv1,
+            ..Material::DEFAULT
+        };
+        assert_eq!(MaterialData::from_gltf(&material).uv_sets, 0b10100);
+    }
+
+    #[test]
+    fn spotlight_coefficients_map_outer_and_inner_cone_edges_to_zero_and_one() {
+        let inner = 15.0_f32.to_radians();
+        let outer = 35.0_f32.to_radians();
+        let light = LightData::spot(Vec3::ZERO, Vec3::NEG_Z, Vec3::ONE, inner, outer);
+
+        for (angle, expected) in [(outer, 0.0), (inner, 1.0)] {
+            let weight = angle.cos() * light.spot_scale + light.spot_offset;
+            assert!((weight - expected).abs() < 1e-5, "expected cone weight {expected}, got {weight}");
+        }
+    }
+
+    #[test]
+    fn spotlight_coefficients_remain_finite_when_cone_angles_coincide() {
+        let angle = 25.0_f32.to_radians();
+        let light = LightData::spot(Vec3::ZERO, Vec3::NEG_Z, Vec3::ONE, angle, angle);
+
+        assert!(light.spot_scale.is_finite() && light.spot_scale > 0.0);
+        assert!(light.spot_offset.is_finite());
+    }
+}

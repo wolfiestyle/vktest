@@ -213,3 +213,51 @@ trait LensFormat {
 }
 
 impl<T> LensFormat for T {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vk::Format;
+
+    fn assert_vertex_layout<V: VertexInput>(expected: &[(Format, usize)]) {
+        let binding = V::binding_desc(2);
+        assert_eq!(binding.binding, 2);
+        assert_eq!(binding.stride as usize, size_of::<V>());
+        assert_eq!(binding.input_rate, vk::VertexInputRate::VERTEX);
+
+        let attributes = V::attr_desc(binding.binding);
+        assert_eq!(attributes.len(), expected.len());
+        for (location, (attribute, &(format, offset))) in attributes.iter().zip(expected).enumerate() {
+            assert_eq!(attribute.binding, binding.binding);
+            assert_eq!(attribute.location as usize, location);
+            assert_eq!(attribute.format, format, "attribute at location {location}");
+            assert_eq!(attribute.offset as usize, offset, "attribute at location {location}");
+        }
+    }
+
+    #[test]
+    fn describes_pbr_vertex_attributes_in_shader_location_order() {
+        use gltf_import::Vertex;
+
+        assert_vertex_layout::<Vertex>(&[
+            (Format::R32G32B32_SFLOAT, offset_of!(Vertex, position)),
+            (Format::R16G16B16A16_SNORM, offset_of!(Vertex, normal)),
+            (Format::R16G16B16A16_SNORM, offset_of!(Vertex, tangent)),
+            (Format::R32G32_SFLOAT, offset_of!(Vertex, texcoord0)),
+            (Format::R32G32_SFLOAT, offset_of!(Vertex, texcoord1)),
+            (Format::R8G8B8A8_UNORM, offset_of!(Vertex, color)),
+        ]);
+    }
+
+    #[cfg(feature = "egui")]
+    #[test]
+    fn describes_ui_vertex_attributes_in_shader_location_order() {
+        use egui::epaint::Vertex;
+
+        assert_vertex_layout::<Vertex>(&[
+            (Format::R32G32_SFLOAT, offset_of!(Vertex, pos)),
+            (Format::R32G32_SFLOAT, offset_of!(Vertex, uv)),
+            (Format::R8G8B8A8_UNORM, offset_of!(Vertex, color)),
+        ]);
+    }
+}

@@ -555,6 +555,75 @@ mod tests {
     use super::*;
 
     #[test]
+    fn prefers_the_srgb_surface_format_and_color_space_pair() {
+        use vk::{ColorSpaceKHR, Format, SurfaceFormatKHR};
+
+        let mut surface = SurfaceInfo {
+            capabilities: vk::SurfaceCapabilitiesKHR::default(),
+            formats: vec![
+                SurfaceFormatKHR::default()
+                    .format(Format::B8G8R8A8_UNORM)
+                    .color_space(ColorSpaceKHR::SRGB_NONLINEAR),
+                SurfaceFormatKHR::default()
+                    .format(Format::B8G8R8A8_SRGB)
+                    .color_space(ColorSpaceKHR::DISPLAY_P3_NONLINEAR_EXT),
+                SurfaceFormatKHR::default()
+                    .format(Format::B8G8R8A8_SRGB)
+                    .color_space(ColorSpaceKHR::SRGB_NONLINEAR),
+            ],
+            present_modes: vec![],
+        };
+
+        let preferred = surface.find_surface_format();
+        assert_eq!(
+            (preferred.format, preferred.color_space),
+            (Format::B8G8R8A8_SRGB, ColorSpaceKHR::SRGB_NONLINEAR)
+        );
+
+        surface.formats.pop();
+        let fallback = surface.find_surface_format();
+        assert_eq!(
+            (fallback.format, fallback.color_space),
+            (Format::B8G8R8A8_UNORM, ColorSpaceKHR::SRGB_NONLINEAR)
+        );
+    }
+
+    #[test]
+    fn selects_the_present_mode_for_vsync_with_a_fifo_fallback() {
+        use vk::PresentModeKHR as Mode;
+
+        let mut surface = SurfaceInfo {
+            capabilities: vk::SurfaceCapabilitiesKHR::default(),
+            formats: vec![],
+            present_modes: vec![Mode::FIFO, Mode::FIFO_RELAXED, Mode::IMMEDIATE],
+        };
+
+        assert_eq!(surface.find_present_mode(true), Mode::FIFO_RELAXED);
+        assert_eq!(surface.find_present_mode(false), Mode::IMMEDIATE);
+
+        surface.present_modes.truncate(1);
+        assert_eq!(surface.find_present_mode(true), Mode::FIFO);
+        assert_eq!(surface.find_present_mode(false), Mode::FIFO);
+    }
+
+    #[test]
+    fn respects_surface_image_count_limits() {
+        let mut surface = SurfaceInfo {
+            capabilities: vk::SurfaceCapabilitiesKHR::default().min_image_count(2).max_image_count(4),
+            formats: vec![],
+            present_modes: vec![],
+        };
+
+        assert_eq!(surface.calc_image_count(1), 2);
+        assert_eq!(surface.calc_image_count(3), 3);
+        assert_eq!(surface.calc_image_count(5), 4);
+
+        surface.capabilities.max_image_count = 0;
+        assert_eq!(surface.calc_image_count(1), 2);
+        assert_eq!(surface.calc_image_count(5), 5);
+    }
+
+    #[test]
     fn swapchain_extent_requires_a_drawable_window_and_surface() {
         let mut surface = SurfaceInfo {
             capabilities: vk::SurfaceCapabilitiesKHR::default()

@@ -227,3 +227,35 @@ pub fn image_aspect_flags(format: vk::Format) -> vk::ImageAspectFlags {
         _ => vk::ImageAspectFlags::COLOR,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vk::{Format, ImageAspectFlags as Aspect};
+
+    #[test]
+    fn reports_storage_sizes_and_channel_counts_for_upload_formats() {
+        for (format, size, channels) in [
+            (Format::R8_UNORM, 1, 1),
+            (Format::R8G8B8A8_SRGB, 4, 4),
+            (Format::R16G16B16A16_SFLOAT, 8, 4),
+            (Format::B10G11R11_UFLOAT_PACK32, 4, 3),
+            (Format::D32_SFLOAT, 4, 1),
+        ] {
+            assert_eq!(FormatInfo::try_from(format).unwrap(), FormatInfo { size, channels }, "{format:?}");
+        }
+        assert!(matches!(FormatInfo::try_from(Format::UNDEFINED), Err(VkError::InvalidArgument(_))));
+    }
+
+    #[test]
+    fn selects_the_aspects_present_in_each_image_format() {
+        for (format, expected) in [
+            (Format::R8G8B8A8_SRGB, Aspect::COLOR),
+            (Format::D32_SFLOAT, Aspect::DEPTH),
+            (Format::S8_UINT, Aspect::STENCIL),
+            (Format::D24_UNORM_S8_UINT, Aspect::DEPTH | Aspect::STENCIL),
+        ] {
+            assert_eq!(image_aspect_flags(format), expected, "{format:?}");
+        }
+    }
+}
