@@ -35,37 +35,36 @@ impl Swapchain {
     pub fn new(
         device: &Arc<VulkanDevice>, win_size: UVec2, image_count: u32, depth_format: vk::Format, samples: vk::SampleCountFlags, vsync: bool,
     ) -> VulkanResult<Self> {
-        let mut swapchain = Swapchain::create(device, win_size.x, win_size.y, image_count, vsync, vk::SwapchainKHR::null())?;
+        let mut swapchain = Swapchain::create(device, win_size.x, win_size.y, image_count, vsync, None)?;
         swapchain.create_msaa_attachment(samples)?;
         swapchain.create_depth_attachment(depth_format)?;
         Ok(swapchain)
     }
 
-    pub fn recreate(&mut self, win_size: UVec2) -> VulkanResult<()> {
-        let mut swapchain = Swapchain::create(
-            &self.device,
-            win_size.x,
-            win_size.y,
-            self.images.len() as _,
-            self.vsync,
-            self.handle,
-        )?;
-        swapchain.create_msaa_attachment(self.samples)?;
+    pub(crate) fn recreate(&mut self, win_size: UVec2, samples: vk::SampleCountFlags, vsync: bool) -> VulkanResult<()> {
+        let device = Arc::clone(&self.device);
+        let mut swapchain = Swapchain::create(&device, win_size.x, win_size.y, self.images.len() as _, vsync, Some(self))?;
+        swapchain.create_msaa_attachment(samples)?;
         swapchain.create_depth_attachment(self.depth_format)?;
-        let _old_swapchain = std::mem::replace(self, swapchain);
-        unsafe { self.device.device_wait_idle()? };
-        // old_swapchain is dropped here
+        *self = swapchain;
         Ok(())
     }
 
     fn create(
-        device: &Arc<VulkanDevice>, width: u32, height: u32, image_count: u32, vsync: bool, old_swapchain: vk::SwapchainKHR,
+        device: &Arc<VulkanDevice>, width: u32, height: u32, image_count: u32, vsync: bool, old_swapchain: Option<&mut Self>,
     ) -> VulkanResult<Self> {
+        if width == 0 || height == 0 {
+            return Err(VkError::SurfaceNotDrawable);
+        }
+        let old_handle = old_swapchain.as_ref().map_or(vk::SwapchainKHR::null(), |old| old.handle);
+        if old_handle != vk::SwapchainKHR::null() {
+            unsafe { device.device_wait_idle()? };
+        }
         let surface_info = device.instance.query_surface_info(device.dev_info.phys_dev, device.surface())?;
+        let extent = surface_info.calc_extent(width, height).ok_or(VkError::SurfaceNotDrawable)?;
         let surface_format = surface_info.find_surface_format();
         let present_mode = surface_info.find_present_mode(vsync);
         eprintln!("present mode: {present_mode:?}");
-        let extent = surface_info.calc_extent(width, height);
         let img_count = surface_info.calc_image_count(image_count);
         let img_sharing_mode = if device.dev_info.unique_families.len() > 1 {
             vk::SharingMode::CONCURRENT
@@ -87,14 +86,21 @@ impl Swapchain {
             .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
             .present_mode(present_mode)
             .clipped(true)
-            .old_swapchain(old_swapchain);
+            .old_swapchain(old_handle);
 
-        let swapchain = unsafe {
-            device
-                .swapchain_fn
-                .create_swapchain(&swapchain_ci, None)
-                .describe_err("Failed to create swapchain")?
-        };
+        let result = unsafe { device.swapchain_fn.create_swapchain(&swapchain_ci, None) };
+        // Vulkan retires the old handle even when creation fails.
+        if let Some(old) = old_swapchain {
+            old.destroy_handle();
+        }
+        if result == Err(vk::Result::ERROR_INITIALIZATION_FAILED) {
+            // The window may have been minimized between the capability query and creation.
+            let surface = device.instance.query_surface_info(device.dev_info.phys_dev, device.surface())?;
+            if surface.calc_extent(width, height).is_none() {
+                return Err(VkError::SurfaceNotDrawable);
+            }
+        }
+        let swapchain = result.describe_err("Failed to create swapchain")?;
 
         let mut swapchain = Self {
             device: Arc::clone(device),
@@ -136,6 +142,15 @@ impl Swapchain {
         }
 
         Ok(swapchain)
+    }
+
+    fn destroy_handle(&mut self) {
+        self.render_finished_sems.clear();
+        self.image_views.clear();
+        let handle = std::mem::replace(&mut self.handle, vk::SwapchainKHR::null());
+        if handle != vk::SwapchainKHR::null() {
+            unsafe { self.device.swapchain_fn.destroy_swapchain(handle, None) };
+        }
     }
 
     pub(crate) fn render_finished_semaphore(&self, image_idx: usize) -> vk::Semaphore {
@@ -292,14 +307,10 @@ impl std::ops::Deref for Swapchain {
 
 impl Drop for Swapchain {
     fn drop(&mut self) {
-        self.render_finished_sems.clear();
-        // Release views before destroying the swapchain or dropping its attachments.
-        self.image_views.clear();
+        self.destroy_handle();
+        // Release views before dropping their attachments.
         drop(self.msaa_imgview.take());
         drop(self.depth_imgview.take());
-        unsafe {
-            self.device.swapchain_fn.destroy_swapchain(self.handle, None);
-        }
     }
 }
 

@@ -155,6 +155,10 @@ fn main() -> VulkanResult<()> {
     #[allow(deprecated)]
     event_loop.run(move |event, elwt| match event {
         Event::WindowEvent { event, .. } => {
+            if let WindowEvent::Resized(size) = &event {
+                vk_app.resize(size.width, size.height);
+                window.request_redraw();
+            }
             if gui.event_input(&window, &event).consumed {
                 return;
             }
@@ -182,10 +186,11 @@ fn main() -> VulkanResult<()> {
                     }
                     _ => controller.update_from_window_event(&event),
                 },
-                WindowEvent::Resized(size) => {
-                    vk_app.resize(size.width, size.height);
-                }
+                WindowEvent::Resized(_) => {}
                 WindowEvent::RedrawRequested => {
+                    if !vk_app.prepare_frame().unwrap() {
+                        return;
+                    }
                     vk_app.update();
 
                     let objects = &mut scenes[cur_scene];
@@ -239,6 +244,9 @@ fn main() -> VulkanResult<()> {
                 // Wait for GPU to finish, resources will be dropped when the closure ends
                 unsafe { vk_app.device().device_wait_idle().unwrap() };
                 elwt.exit();
+                return;
+            }
+            if vk_app.is_window_hidden() {
                 return;
             }
 
@@ -393,20 +401,26 @@ fn main() -> VulkanResult<()> {
             gui.event_output(&window);
 
             if msaa_samples != vk_app.get_msaa_samples() {
-                vk_app.set_msaa_samples(msaa_samples).unwrap();
-
-                for scene in &mut scenes {
-                    for mesh in scene {
-                        mesh.renderer.rebuild_pipeline(&vk_app).unwrap();
+                match vk_app.set_msaa_samples(msaa_samples) {
+                    Ok(()) => {
+                        for scene in &mut scenes {
+                            for mesh in scene {
+                                mesh.renderer.rebuild_pipeline(&vk_app).unwrap();
+                            }
+                        }
+                        skybox.rebuild_pipeline(&vk_app).unwrap();
+                        gui.rebuild_pipeline(&vk_app).unwrap();
                     }
+                    Err(VkError::SurfaceNotDrawable) => (),
+                    Err(err) => panic!("Failed to change MSAA samples: {err}"),
                 }
-
-                skybox.rebuild_pipeline(&vk_app).unwrap();
-                gui.rebuild_pipeline(&vk_app).unwrap();
             }
 
             if vsync != vk_app.is_vsync_on() {
-                vk_app.set_vsync(vsync).unwrap();
+                match vk_app.set_vsync(vsync) {
+                    Ok(()) | Err(VkError::SurfaceNotDrawable) => (),
+                    Err(err) => panic!("Failed to change VSync: {err}"),
+                }
             }
 
             window.request_redraw();

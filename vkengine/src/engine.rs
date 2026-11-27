@@ -23,7 +23,7 @@ pub const MAX_LIGHTS: usize = 16;
 pub struct VulkanEngine {
     pub(crate) device: Arc<VulkanDevice>,
     window_size: UVec2,
-    window_resized: bool,
+    swapchain_needs_recreate: bool,
     pub(crate) swapchain: ManuallyDrop<Swapchain>,
     pub(crate) reverse_depth: bool,
     main_cmd_buffers: CmdBufferRing,
@@ -100,7 +100,7 @@ impl VulkanEngine {
         let mut this = Self {
             device,
             window_size,
-            window_resized: false,
+            swapchain_needs_recreate: false,
             swapchain: ManuallyDrop::new(swapchain),
             reverse_depth,
             main_cmd_buffers,
@@ -189,8 +189,33 @@ impl VulkanEngine {
         eprintln!("window size: {new_size}");
         if new_size != self.window_size {
             self.window_size = new_size;
-            self.window_resized = true;
+            self.swapchain_needs_recreate = true;
         }
+    }
+
+    /// Whether the last reported window size has a zero dimension.
+    pub fn is_window_hidden(&self) -> bool {
+        self.window_size.x == 0 || self.window_size.y == 0
+    }
+
+    /// Refreshes the swapchain before recording draw commands. Returns false when
+    /// the surface has no drawable extent yet.
+    pub fn prepare_frame(&mut self) -> VulkanResult<bool> {
+        if self.swapchain_needs_recreate {
+            match self.recreate_swapchain(self.swapchain.samples, self.swapchain.vsync) {
+                Ok(()) => (),
+                Err(VkError::SurfaceNotDrawable) => return Ok(false),
+                Err(err) => return Err(err),
+            }
+        }
+        Ok(true)
+    }
+
+    fn recreate_swapchain(&mut self, samples: vk::SampleCountFlags, vsync: bool) -> VulkanResult<()> {
+        self.swapchain_needs_recreate = true;
+        self.swapchain.recreate(self.window_size, samples, vsync)?;
+        self.swapchain_needs_recreate = false;
+        Ok(())
     }
 
     #[inline]
@@ -198,6 +223,7 @@ impl VulkanEngine {
         self.swapchain.samples.as_raw()
     }
 
+    /// Changes the active sample count. Retry on `SurfaceNotDrawable` after the surface recovers.
     pub fn set_msaa_samples(&mut self, samples: u32) -> VulkanResult<()> {
         if !samples.is_power_of_two() {
             return VkError::InvalidArgument("Sample count is not power of two").into();
@@ -207,8 +233,7 @@ impl VulkanEngine {
             return VkError::InvalidArgument("Unsupported sample count").into();
         }
         if samples != self.swapchain.samples {
-            self.swapchain.samples = samples;
-            self.swapchain.recreate(self.window_size)?;
+            self.recreate_swapchain(samples, self.swapchain.vsync)?;
         }
         Ok(())
     }
@@ -218,10 +243,10 @@ impl VulkanEngine {
         self.swapchain.vsync
     }
 
+    /// Changes the active VSync setting. Retry on `SurfaceNotDrawable` after the surface recovers.
     pub fn set_vsync(&mut self, vsync: bool) -> VulkanResult<()> {
         if vsync != self.swapchain.vsync {
-            self.swapchain.vsync = vsync;
-            self.swapchain.recreate(self.window_size)?;
+            self.recreate_swapchain(self.swapchain.samples, vsync)?;
         }
         Ok(())
     }
@@ -473,6 +498,12 @@ impl VulkanEngine {
     }
 
     pub fn submit_draw_commands(&mut self, draw_commands: impl IntoIterator<Item = DrawPayload>) -> VulkanResult<bool> {
+        if self.swapchain_needs_recreate {
+            // Callers that skipped prepare_frame may have recorded with the old extent.
+            self.prepare_frame()?;
+            self.discard_draw_commands(draw_commands)?;
+            return Ok(false);
+        }
         let frame_idx = (self.current_frame % self.frame_state.len() as u64) as usize;
         let frame = &self.frame_state[frame_idx];
         let image_avail_sem = *frame.image_avail_sem;
@@ -482,27 +513,20 @@ impl VulkanEngine {
         self.cpu_time = Instant::now() - self.cpu_time_start;
 
         // wait for previous frame finished, so we can modify or reuse resources
-        let wait_info = vk::SemaphoreWaitInfo::default()
-            .semaphores(slice::from_ref(&in_flight_sem))
-            .values(slice::from_ref(&frame.wait_frame));
-        unsafe {
-            self.device
-                .wait_semaphores(&wait_info, u64::MAX)
-                .describe_err("Failed waiting semaphore")?;
-        }
+        frame.wait_for_completion()?;
 
         // the swapchain image id is available before it's actually ready to use, but we still
         // need to wait for a free semaphore
-        let image_idx = unsafe {
+        let (image_idx, acquire_suboptimal) = unsafe {
             let acquire_res = self
                 .device
                 .swapchain_fn
                 .acquire_next_image(**self.swapchain, u64::MAX, image_avail_sem, vk::Fence::null());
             match acquire_res {
-                Ok((idx, _)) => idx,
+                Ok(image) => image,
                 Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
-                    eprintln!("swapchain out of date");
-                    self.swapchain.recreate(self.window_size)?;
+                    self.swapchain_needs_recreate = true;
+                    self.discard_draw_commands(draw_commands)?;
                     return Ok(false);
                 }
                 Err(e) => return Err(VkError::VulkanMsg("Failed to acquire swapchain image", e)),
@@ -561,20 +585,28 @@ impl VulkanEngine {
             .wait_semaphores(slice::from_ref(&render_finish_sem))
             .swapchains(slice::from_ref(&*self.swapchain))
             .image_indices(slice::from_ref(&image_idx));
-        let suboptimal = unsafe {
-            self.device
-                .swapchain_fn
-                .queue_present(self.device.present_queue, &present_info)
-                .describe_err("Failed to present queue")?
-        };
-
-        if suboptimal || self.window_resized {
-            eprintln!("swapchain suboptimal");
-            self.swapchain.recreate(self.window_size)?;
-            self.window_resized = false;
+        let present_result = unsafe { self.device.swapchain_fn.queue_present(self.device.present_queue, &present_info) };
+        match present_result {
+            Ok(suboptimal) => {
+                self.swapchain_needs_recreate = suboptimal || acquire_suboptimal;
+                Ok(true)
+            }
+            Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
+                self.swapchain_needs_recreate = true;
+                Ok(false)
+            }
+            Err(err) => Err(VkError::VulkanMsg("Failed to present queue", err)),
         }
+    }
 
-        Ok(true)
+    fn discard_draw_commands(&self, draw_commands: impl IntoIterator<Item = DrawPayload>) -> VulkanResult<()> {
+        // Dropping an unsubmitted payload also drops its captures. Earlier graphics
+        // submissions may still be using resources owned by those captures.
+        if let Some(last_frame) = self.current_frame.checked_sub(1) {
+            self.frame_state[(last_frame % self.frame_state.len() as u64) as usize].wait_for_completion()?;
+        }
+        drop(draw_commands);
+        Ok(())
     }
 }
 
@@ -770,6 +802,17 @@ impl FrameState {
             payload: vec![],
             time_query,
         })
+    }
+
+    fn wait_for_completion(&self) -> VulkanResult<()> {
+        let wait_info = vk::SemaphoreWaitInfo::default()
+            .semaphores(slice::from_ref(&self.in_flight_sem))
+            .values(slice::from_ref(&self.wait_frame));
+        unsafe {
+            self.device
+                .wait_semaphores(&wait_info, u64::MAX)
+                .describe_err("Failed waiting semaphore")
+        }
     }
 
     fn execute_on_finish(&mut self) {

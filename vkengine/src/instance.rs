@@ -445,15 +445,21 @@ impl SurfaceInfo {
             .unwrap_or(vk::PresentModeKHR::FIFO)
     }
 
-    pub fn calc_extent(&self, width: u32, height: u32) -> vk::Extent2D {
-        if self.capabilities.current_extent.width != u32::MAX {
+    pub fn calc_extent(&self, width: u32, height: u32) -> Option<vk::Extent2D> {
+        let max = self.capabilities.max_image_extent;
+        if width == 0 || height == 0 || max.width == 0 || max.height == 0 {
+            return None;
+        }
+        let extent = if self.capabilities.current_extent.width != u32::MAX {
             self.capabilities.current_extent
         } else {
+            let min = self.capabilities.min_image_extent;
             vk::Extent2D {
-                width: width.clamp(self.capabilities.min_image_extent.width, self.capabilities.max_image_extent.width),
-                height: height.clamp(self.capabilities.min_image_extent.height, self.capabilities.max_image_extent.height),
+                width: width.clamp(min.width, max.width),
+                height: height.clamp(min.height, max.height),
             }
-        }
+        };
+        (extent.width != 0 && extent.height != 0).then_some(extent)
     }
 
     pub fn calc_image_count(&self, count: u32) -> u32 {
@@ -541,5 +547,36 @@ impl std::fmt::Display for VkVersion {
             vk::api_version_minor(self.0),
             vk::api_version_patch(self.0)
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn swapchain_extent_requires_a_drawable_window_and_surface() {
+        let mut surface = SurfaceInfo {
+            capabilities: vk::SurfaceCapabilitiesKHR::default()
+                .current_extent(vk::Extent2D { width: 800, height: 600 })
+                .min_image_extent(vk::Extent2D { width: 1, height: 1 })
+                .max_image_extent(vk::Extent2D { width: 1024, height: 768 }),
+            formats: vec![],
+            present_modes: vec![],
+        };
+        assert_eq!(surface.calc_extent(0, 600), None);
+        assert_eq!(surface.calc_extent(800, 0), None);
+        assert_eq!(surface.calc_extent(800, 600), Some(vk::Extent2D { width: 800, height: 600 }));
+
+        surface.capabilities.current_extent.height = 0;
+        assert_eq!(surface.calc_extent(800, 600), None);
+
+        surface.capabilities.current_extent = vk::Extent2D {
+            width: u32::MAX,
+            height: u32::MAX,
+        };
+        assert_eq!(surface.calc_extent(1200, 600), Some(vk::Extent2D { width: 1024, height: 600 }));
+        surface.capabilities.max_image_extent.height = 0;
+        assert_eq!(surface.calc_extent(800, 600), None);
     }
 }

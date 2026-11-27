@@ -35,6 +35,9 @@ pub enum VkError {
     #[error("Invalid argument: {0}")]
     InvalidArgument(&'static str),
 
+    #[error("Window surface has no drawable extent")]
+    SurfaceNotDrawable,
+
     #[error("{0}")]
     EngineError(&'static str),
 
