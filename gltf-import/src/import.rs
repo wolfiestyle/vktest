@@ -6,6 +6,7 @@ use crate::uri::Uri;
 use gltf::Document;
 use image::{DynamicImage, ImageFormat};
 use std::borrow::Cow;
+use std::collections::VecDeque;
 use std::fs::File;
 use std::io::BufReader;
 use std::ops;
@@ -79,7 +80,11 @@ impl GltfData {
         let mut parents = vec![None; self.nodes.len()];
         for node in &self.nodes {
             for child_id in &node.children {
-                parents[child_id.0] = Some(node.id);
+                // a malformed file may name a child node that isn't in the node array
+                match parents.get_mut(child_id.0) {
+                    Some(parent) => *parent = Some(node.id),
+                    None => eprintln!("Node {} references unknown child node {}", node.id.0, child_id.0),
+                }
             }
         }
         for (node, parent) in self.nodes.iter_mut().zip(parents) {
@@ -88,29 +93,35 @@ impl GltfData {
     }
 
     fn update_transforms(&mut self) {
-        let pending: Vec<_> = (0..self.nodes.len())
-            .filter(|&i| {
-                if let Some(NodeId(parent_id)) = self.nodes[i].parent {
-                    if parent_id < i {
-                        let parent_transform = self.nodes[parent_id].transform;
-                        let node = &mut self.nodes[i];
-                        node.transform = parent_transform * node.local_transform;
-                    } else {
-                        return true;
-                    }
-                }
-                false
-            })
-            .collect();
-        for &i in pending.iter().rev() {
-            let NodeId(parent_id) = self.nodes[i].parent.unwrap();
-            if parent_id > i && pending.binary_search(&parent_id).is_err() {
-                let parent_transform = self.nodes[parent_id].transform;
-                let node = &mut self.nodes[i];
-                node.transform = parent_transform * node.local_transform;
-            } else {
-                eprintln!("Couldn't compute transform for Node {i} with parent {parent_id}");
+        // glTF only recommends that parent nodes come before their children in the node array,
+        // so world transforms are resolved in parent-first order instead of relying on indices.
+        let node_count = self.nodes.len();
+        let mut children: Vec<Vec<usize>> = vec![Vec::new(); node_count];
+        let mut ready: VecDeque<usize> = VecDeque::new();
+        for (i, node) in self.nodes.iter().enumerate() {
+            match node.parent {
+                Some(NodeId(parent_id)) => children[parent_id].push(i),
+                None => ready.push_back(i),
             }
+        }
+
+        let mut resolved = 0;
+        while let Some(i) = ready.pop_front() {
+            resolved += 1;
+            let local_transform = self.nodes[i].local_transform;
+            let parent_transform = match self.nodes[i].parent {
+                Some(NodeId(parent_id)) => Some(self.nodes[parent_id].transform),
+                None => None,
+            };
+            self.nodes[i].transform = parent_transform.map_or(local_transform, |parent| parent * local_transform);
+            ready.extend(children[i].iter().copied());
+        }
+        if resolved < node_count {
+            // nodes in a parenting cycle can't have a world transform, they keep their own
+            eprintln!(
+                "Couldn't compute transforms for {} circularly parented node(s)",
+                node_count - resolved
+            );
         }
     }
 
