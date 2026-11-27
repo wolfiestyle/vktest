@@ -202,3 +202,111 @@ impl CameraController {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const EPSILON: f32 = 1e-5;
+
+    fn assert_depth(projection: Mat4, distance: f32, expected: f32) {
+        let depth = projection.project_point3(Vec3::NEG_Z * distance).z;
+        assert!(
+            (depth - expected).abs() < EPSILON,
+            "depth at distance {distance}: expected {expected}, got {depth}"
+        );
+    }
+
+    #[test]
+    fn view_transform_places_the_eye_at_the_origin_and_target_in_front() {
+        let mut camera = Camera {
+            position: Vec3::new(3.0, -2.0, 5.0),
+            ..Camera::default()
+        };
+        let offset = Vec3::new(2.0, 3.0, -4.0);
+        let target = camera.position + offset;
+        camera.look_at(target);
+
+        let view = camera.get_view_transform();
+        assert!(view.transform_point3(camera.position).abs_diff_eq(Vec3::ZERO, EPSILON));
+        assert!(view.transform_point3(target).abs_diff_eq(Vec3::NEG_Z * offset.length(), EPSILON));
+    }
+
+    #[test]
+    fn finite_projection_maps_near_and_far_to_zero_and_one() {
+        let camera = Camera {
+            near: 0.5,
+            far: Some(64.0),
+            ..Camera::default()
+        };
+        let projection = camera.get_projection(1.5, false);
+
+        assert_depth(projection, 0.5, 0.0);
+        assert_depth(projection, 64.0, 1.0);
+    }
+
+    #[test]
+    fn infinite_projections_map_depth_in_opposite_directions() {
+        let camera = Camera {
+            near: 0.5,
+            ..Camera::default()
+        };
+        let forward = camera.get_projection(1.5, false);
+        let reverse = camera.get_projection(1.5, true);
+
+        assert_depth(forward, 0.5, 0.0);
+        assert_depth(forward, 8.0, 0.9375);
+        assert_depth(reverse, 0.5, 1.0);
+        assert_depth(reverse, 8.0, 0.0625);
+    }
+
+    #[test]
+    fn walking_stays_level_while_flying_follows_the_camera_pitch() {
+        let start = Vec3::new(0.0, 3.0, 0.0);
+        let mut walking = Camera {
+            position: start,
+            ..Camera::default()
+        };
+        walking.set_rotation(30.0_f32.to_radians(), 0.0, 0.0);
+        let mut flying = walking;
+        let mut controller = CameraController::new(&walking);
+        controller.forward_speed = -4.0;
+
+        controller.update_camera(&mut walking, 0.5);
+        assert!(walking.position.abs_diff_eq(start + Vec3::new(0.0, 0.0, -2.0), EPSILON));
+
+        controller.flying = true;
+        controller.update_camera(&mut flying, 0.5);
+        assert!(flying.position.abs_diff_eq(start + Vec3::new(0.0, 1.0, -3.0_f32.sqrt()), EPSILON));
+    }
+
+    #[cfg(feature = "winit")]
+    #[test]
+    fn mouse_look_responds_while_held_and_clamps_pitch() {
+        use winit::event::{DeviceId, ElementState, MouseButton};
+
+        let mut controller = CameraController::new(&Camera::default());
+        controller.sensitivity = 0.5;
+        let motion = DeviceEvent::MouseMotion { delta: (-30.0, -20.0) };
+        let left_button = |state| WindowEvent::MouseInput {
+            device_id: DeviceId::dummy(),
+            state,
+            button: MouseButton::Left,
+        };
+
+        controller.update_from_device_event(&motion);
+        assert_eq!((controller.yaw, controller.pitch), (0.0, 0.0));
+
+        controller.update_from_window_event(&left_button(ElementState::Pressed));
+        controller.update_from_device_event(&motion);
+        assert_eq!((controller.yaw, controller.pitch), (15.0, 10.0));
+        controller.update_from_device_event(&DeviceEvent::MouseMotion { delta: (0.0, -400.0) });
+        assert_eq!(controller.pitch, 89.0);
+        controller.update_from_device_event(&DeviceEvent::MouseMotion { delta: (0.0, 400.0) });
+        assert_eq!(controller.pitch, -89.0);
+
+        controller.update_from_window_event(&left_button(ElementState::Released));
+        controller.update_from_device_event(&motion);
+        assert_eq!((controller.yaw, controller.pitch), (15.0, -89.0));
+    }
+}
