@@ -209,7 +209,13 @@ fn main() -> VulkanResult<()> {
                         scope.execute(|| gui_cmds = gui.draw(&vk_app));
                     });
 
-                    let draw_cmds = draw_buffer.drain(..).chain([skybox_cmds, gui_cmds]).filter_map(|res| res.ok());
+                    let draw_cmds = draw_buffer.drain(..).chain([skybox_cmds, gui_cmds]).filter_map(|res| match res {
+                        Ok(payload) => Some(payload),
+                        Err(err) => {
+                            eprintln!("Skipping draw commands: {err}");
+                            None
+                        }
+                    });
 
                     vk_app.submit_draw_commands(draw_cmds).unwrap();
 

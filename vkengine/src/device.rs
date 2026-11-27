@@ -616,7 +616,8 @@ impl VulkanDevice {
             return VkError::InvalidArgument("Data layer count out of bounds").into();
         }
         let my_dims = UVec2::new(image.props.width, image.props.height);
-        if pos.cmpge(my_dims).any() || (pos + dims).cmpge(my_dims).any() {
+        // the update rect is half-open, so it may end right at the image edge
+        if pos.cmpge(my_dims).any() || (pos + dims).cmpgt(my_dims).any() {
             return VkError::InvalidArgument("Image update rect out of bounds").into();
         }
         let fmt_info = FormatInfo::try_from(image.props.format)?;
