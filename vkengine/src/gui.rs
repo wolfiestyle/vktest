@@ -6,12 +6,12 @@ use crate::texture::{Texture, TextureOptions};
 use crate::types::VulkanResult;
 use ash::vk;
 use bytemuck::{Pod, Zeroable};
-use egui::epaint::{Primitive, Vertex};
-use egui::{ClippedPrimitive, Context, FullOutput, PlatformOutput, TextureId, TexturesDelta, ViewportId};
+use egui::epaint::{ImageDelta, Primitive, Vertex};
+use egui::{ClippedPrimitive, Context, FullOutput, PlatformOutput, TextureId, TexturesDelta, Ui, ViewportId};
 use egui_winit::{EventResponse, State};
 use glam::{Mat4, camera::rh::proj::vulkan};
 use inline_spirv::include_spirv;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::mem::size_of;
 use std::slice;
 use std::sync::Arc;
@@ -32,11 +32,13 @@ pub struct UiRenderer {
     platform_output: Option<PlatformOutput>,
     primitives: Vec<ClippedPrimitive>,
     textures: HashMap<TextureId, Texture>,
+    textures_to_free: HashSet<TextureId>,
     shader: Shader,
     pipeline: Pipeline,
     set_layout: VkOwned<vk::DescriptorSetLayout>,
     push_constants: vk::PushConstantRange,
     buffers: UploadBuffer,
+    buffers_dirty: bool,
     local_frame: u64,
     total_vert_size: vk::DeviceSize,
     cmd_buffers: CmdBufferRing,
@@ -94,11 +96,13 @@ impl UiRenderer {
             platform_output: None,
             primitives: vec![],
             textures: Default::default(),
+            textures_to_free: HashSet::new(),
             shader,
             pipeline,
             set_layout,
             push_constants,
             buffers,
+            buffers_dirty: false,
             local_frame: 0,
             total_vert_size: 0,
             cmd_buffers,
@@ -110,7 +114,7 @@ impl UiRenderer {
         self.winit_state.on_window_event(window, event)
     }
 
-    pub fn run(&mut self, window: &Window, mut run_ui: impl FnMut(&Context)) {
+    pub fn run(&mut self, window: &Window, run_ui: impl FnMut(&mut Ui)) {
         let now = Instant::now();
         if let Some(last_draw) = self.last_draw_time {
             if now - last_draw < MIN_FRAME_TIME {
@@ -119,27 +123,61 @@ impl UiRenderer {
         }
         self.last_draw_time = Some(now);
         let raw_input = self.winit_state.take_egui_input(window);
-        self.frame_output = self.context.run(raw_input, &mut run_ui).into();
+        let output = self.context.run_ui(raw_input, run_ui);
+        if let Some(pending) = &mut self.frame_output {
+            pending.append(output);
+        } else {
+            self.frame_output = Some(output);
+        }
     }
 
     pub fn draw(&mut self, engine: &VulkanEngine) -> VulkanResult<DrawPayload> {
-        if let Some(run_output) = self.frame_output.take() {
-            // process a new set of primitives
+        if let Some(output) = &mut self.frame_output {
+            let device = &self.device;
+            let textures = &mut self.textures;
+            apply_texture_updates(&mut output.textures_delta, |id, image| {
+                Self::update_texture(device, textures, id, image)
+            })?;
+        }
+        if let Some(mut output) = self.frame_output.take() {
             self.local_frame += 1;
-            self.platform_output = Some(run_output.platform_output);
-            self.primitives = self.context.tessellate(run_output.shapes, run_output.pixels_per_point);
-            let drop_textures = self.update_textures(run_output.textures_delta)?;
+            self.platform_output = Some(output.platform_output);
+            self.primitives = self.context.tessellate(output.shapes, output.pixels_per_point);
+            self.textures_to_free.extend(output.textures_delta.free.drain());
+            self.buffers_dirty = true;
+        }
+        if self.buffers_dirty {
             self.update_buffers()?;
+            self.buffers_dirty = false;
+        }
 
-            let cmd_buffer = self.cmd_buffers.get_current_buffer(engine)?;
-            self.build_draw_commands(cmd_buffer, engine)?;
-            let payload = DrawPayload::new_with_callback(cmd_buffer, move |_dev| drop(drop_textures));
-            Ok(payload)
-        } else {
-            // build a command buffer from the old primitives
-            let cmd_buffer = self.cmd_buffers.get_current_buffer(engine)?;
-            self.build_draw_commands(cmd_buffer, engine)?;
+        let cmd_buffer = self.cmd_buffers.get_current_buffer(engine)?;
+        self.build_draw_commands(cmd_buffer, engine)?;
+        if self.textures_to_free.is_empty() {
+            return Ok(DrawPayload::new(cmd_buffer));
+        }
+
+        // Draws between egui frames reuse these primitives, so keep their textures available.
+        let referenced_textures: HashSet<_> = self
+            .primitives
+            .iter()
+            .filter_map(|primitive| match &primitive.primitive {
+                Primitive::Mesh(mesh) => Some(mesh.texture_id),
+                Primitive::Callback(_) => None,
+            })
+            .collect();
+        let mut drop_textures = Vec::new();
+        self.textures_to_free.retain(|id| {
+            let referenced = referenced_textures.contains(id);
+            if !referenced {
+                drop_textures.extend(self.textures.remove(id));
+            }
+            referenced
+        });
+        if drop_textures.is_empty() {
             Ok(DrawPayload::new(cmd_buffer))
+        } else {
+            Ok(DrawPayload::new_with_callback(cmd_buffer, move |_dev| drop(drop_textures)))
         }
     }
 
@@ -149,45 +187,36 @@ impl UiRenderer {
         }
     }
 
-    fn update_textures(&mut self, tex_delta: TexturesDelta) -> VulkanResult<Vec<Texture>> {
-        // create or update textures
-        for (id, image) in tex_delta.set {
-            let egui::ImageData::Color(img) = &image.image;
-            let bytes = bytemuck::cast_slice::<egui::Color32, u8>(&img.pixels);
-            let size = img.size.map(|v| v as u32).into();
-            match image.pos {
-                None => {
-                    self.textures.insert(
-                        id,
-                        Texture::new(
-                            &self.device,
-                            size,
-                            vk::Format::R8G8B8A8_SRGB,
-                            ImageData::Single(bytes),
-                            vk::Sampler::null(),
-                            TextureOptions {
-                                gen_mipmaps: false,
-                                swizzle: None,
-                            },
-                        )?,
-                    );
-                }
-                Some(pos) => {
-                    if let Some(tex) = self.textures.get_mut(&id) {
-                        tex.update(pos.map(|n| n as u32).into(), size, bytes)?;
-                    } else {
-                        eprintln!("Error: received ImageDelta update on undefined texture {id:?}");
-                    }
+    fn update_texture(
+        device: &Arc<VulkanDevice>, textures: &mut HashMap<TextureId, Texture>, id: TextureId, image: &ImageDelta,
+    ) -> VulkanResult<()> {
+        let egui::ImageData::Color(img) = &image.image;
+        let bytes = bytemuck::cast_slice::<egui::Color32, u8>(&img.pixels);
+        let size = img.size.map(|v| v as u32).into();
+        match image.pos {
+            None => {
+                let texture = Texture::new(
+                    device,
+                    size,
+                    vk::Format::R8G8B8A8_SRGB,
+                    ImageData::Single(bytes),
+                    vk::Sampler::null(),
+                    TextureOptions {
+                        gen_mipmaps: false,
+                        swizzle: None,
+                    },
+                )?;
+                textures.insert(id, texture);
+            }
+            Some(pos) => {
+                if let Some(tex) = textures.get_mut(&id) {
+                    tex.update(pos.map(|n| n as u32).into(), size, bytes)?;
+                } else {
+                    eprintln!("Error: received ImageDelta update on undefined texture {id:?}");
                 }
             }
         }
-        // return textures to be deleted in next frame
-        let drop_textures = tex_delta
-            .free
-            .into_iter()
-            .filter_map(|tex_id| self.textures.remove(&tex_id))
-            .collect();
-        Ok(drop_textures)
+        Ok(())
     }
 
     fn update_buffers(&mut self) -> VulkanResult<()> {
@@ -301,10 +330,29 @@ impl UiRenderer {
 
 impl Drop for UiRenderer {
     fn drop(&mut self) {
+        if let Some(output) = self.frame_output.take() {
+            output.drop_without_applying_deltas();
+        }
         unsafe {
             self.device.device_wait_idle().unwrap();
         }
     }
+}
+
+fn apply_texture_updates(delta: &mut TexturesDelta, mut apply: impl FnMut(TextureId, &ImageDelta) -> VulkanResult<()>) -> VulkanResult<()> {
+    for (&id, images) in &mut delta.set {
+        let mut applied = 0;
+        let result: VulkanResult<()> = images.iter().try_for_each(|image| {
+            apply(id, image)?;
+            applied += 1;
+            Ok(())
+        });
+        // Preserve the failed update and any later patches for the next draw.
+        images.drain(..applied);
+        result?;
+    }
+    delta.set.clear();
+    Ok(())
 }
 
 #[repr(C)]
@@ -338,6 +386,7 @@ fn vk_rect(rect: egui::Rect, scale: f32) -> vk::Rect2D {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::VkError;
     use glam::Vec3;
 
     #[test]
@@ -355,5 +404,89 @@ mod tests {
                 "expected {pixel:?} to project to {ndc:?}, got {projected:?}"
             );
         }
+    }
+
+    #[test]
+    fn applies_texture_patches_in_order_when_ui_frames_are_combined() {
+        let id = TextureId::Managed(1);
+        let mut pending = FullOutput::default();
+        pending.textures_delta.push(
+            id,
+            ImageDelta::full(egui::ColorImage::filled([2, 2], egui::Color32::BLACK), egui::TextureOptions::LINEAR),
+        );
+        let mut next = FullOutput::default();
+        for pos in [[1, 0], [1, 1]] {
+            next.textures_delta.push(
+                id,
+                ImageDelta::partial(
+                    pos,
+                    egui::ColorImage::filled([1, 1], egui::Color32::WHITE),
+                    egui::TextureOptions::LINEAR,
+                ),
+            );
+        }
+        pending.append(next);
+
+        let mut applied = Vec::new();
+        apply_texture_updates(&mut pending.textures_delta, |id, delta| {
+            applied.push((id, delta.pos));
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(applied, [(id, None), (id, Some([1, 0])), (id, Some([1, 1]))]);
+        assert!(pending.textures_delta.is_empty());
+    }
+
+    #[test]
+    fn retries_texture_uploads_from_the_failed_patch() {
+        let id = TextureId::Managed(1);
+        let mut delta = TexturesDelta::default();
+        for pos in [[0, 0], [1, 0], [1, 1]] {
+            delta.push(
+                id,
+                ImageDelta::partial(
+                    pos,
+                    egui::ColorImage::filled([1, 1], egui::Color32::WHITE),
+                    egui::TextureOptions::LINEAR,
+                ),
+            );
+        }
+        let first_attempt = apply_texture_updates(&mut delta, |_, image| {
+            if image.pos == Some([1, 0]) {
+                return Err(VkError::InvalidArgument("test upload failure"));
+            }
+            Ok(())
+        });
+        let mut applied_on_retry = Vec::new();
+        apply_texture_updates(&mut delta, |_, image| {
+            applied_on_retry.push(image.pos);
+            Ok(())
+        })
+        .unwrap();
+
+        assert!(first_attempt.is_err());
+        assert_eq!(applied_on_retry, [Some([1, 0]), Some([1, 1])]);
+    }
+
+    #[test]
+    fn bundled_fonts_produce_an_atlas_upload_and_text_mesh() {
+        let context = Context::default();
+        let mut output = context.run_ui(egui::RawInput::default(), |ui| {
+            ui.label("Vulkan test");
+        });
+        let mut uploaded_atlas = false;
+        apply_texture_updates(&mut output.textures_delta, |id, image| {
+            uploaded_atlas |= id == TextureId::default() && image.pos.is_none();
+            Ok(())
+        })
+        .unwrap();
+        let primitives = context.tessellate(output.shapes, output.pixels_per_point);
+        output.textures_delta.clear();
+
+        assert!(uploaded_atlas);
+        assert!(primitives.iter().any(|primitive| {
+            matches!(&primitive.primitive, Primitive::Mesh(mesh) if mesh.texture_id == TextureId::default() && !mesh.indices.is_empty())
+        }));
     }
 }

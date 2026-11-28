@@ -252,11 +252,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             let dt = (vk_app.get_frame_time().as_micros() as f64 / 1e6) as f32;
             controller.update_camera(&mut vk_app.camera, dt);
 
-            gui.run(&window, |ctx| {
-                egui::panel::SidePanel::left("main")
+            gui.run(&window, |ui| {
+                egui::Panel::left("main")
                     .frame(egui::Frame::default().fill(egui::Color32::from_black_alpha(225)))
                     .resizable(false)
-                    .show_animated(ctx, show_gui, |ui| {
+                    .show_collapsible(ui, &mut show_gui, |ui| {
                         ui.heading("VKtest 3D engine");
                         ui.label(format!("{fps} fps"));
                         ui.label(format!("cpu time: {:?}", cpu_time));

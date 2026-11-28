@@ -3,7 +3,7 @@ name = "vkengine"
 version = "0.1.0"
 authors = ["SnowDerg <slayerbeast@gmail.com>"]
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.95"
 
 [dependencies]
 ash = { workspace = true }
@@ -17,7 +17,7 @@ gpu-allocator = { workspace = true, features = ["vulkan"] }
 thiserror = { workspace = true }
 
 winit = { workspace = true, optional = true }
-egui = { workspace = true, features = ["bytemuck"], optional = true }
+egui = { workspace = true, features = ["bytemuck", "default_fonts"], optional = true }
 gltf-import = { path = "../gltf-import" }
 #TODO: remove these or turn them optional
 egui-winit = { workspace = true }
