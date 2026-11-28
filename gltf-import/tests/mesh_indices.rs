@@ -2,13 +2,16 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use gltf_import::{GltfData, ImportError};
 
 fn triangle_model(indices: &[u8], count: usize, primitives: &str) -> String {
+    triangle_model_with_uvs(indices, count, primitives, [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]])
+}
+
+fn triangle_model_with_uvs(indices: &[u8], count: usize, primitives: &str, uvs: [[f32; 2]; 3]) -> String {
     let positions = [0.0f32, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
     let normals = [0.0f32, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0];
-    let uvs = [0.0f32, 0.0, 1.0, 0.0, 0.0, 1.0];
     let bytes: Vec<_> = positions
         .into_iter()
         .chain(normals)
-        .chain(uvs)
+        .chain(uvs.into_iter().flatten())
         .flat_map(f32::to_le_bytes)
         .chain(indices.iter().copied())
         .collect();
@@ -82,13 +85,54 @@ fn generates_indices_normals_and_tangents_for_an_unindexed_triangle() {
     assert_eq!(mesh.indices[unindexed.index_range()], [0, 1, 2]);
     for vertex in &mesh.vertices[unindexed.vertex_range()] {
         assert_eq!(vertex.normal, [0, 0, i16::MAX, 0]);
-        assert_eq!(vertex.tangent[..3], [i16::MAX, 0, 0]);
-        assert_eq!(vertex.tangent[3].unsigned_abs(), i16::MAX as u16);
+        assert_eq!(vertex.tangent, [i16::MAX, 0, 0, -i16::MAX]);
     }
 
     let reversed = &mesh.primitives[1];
     for vertex in &mesh.vertices[reversed.vertex_range()] {
         assert_eq!(vertex.normal, [0, 0, -i16::MAX, 0]);
+    }
+}
+
+#[test]
+fn generates_the_opposite_tangent_sign_for_mirrored_uvs() {
+    let model = triangle_model_with_uvs(
+        &[0, 1, 2],
+        3,
+        r#"{"attributes": {"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2}, "indices": 3}"#,
+        [[0.0, 1.0], [1.0, 1.0], [0.0, 0.0]],
+    );
+    let data = GltfData::from_memory(model.as_bytes()).unwrap();
+
+    for vertex in &data.meshes[0].vertices {
+        assert_eq!(vertex.tangent, [i16::MAX, 0, 0, i16::MAX]);
+    }
+}
+
+#[test]
+fn leaves_tangents_zero_when_all_triangles_have_repeated_positions() {
+    let model = triangle_model(
+        &[0, 0, 1],
+        3,
+        r#"{"attributes": {"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2}, "indices": 3}"#,
+    );
+    let data = GltfData::from_memory(model.as_bytes()).unwrap();
+    let tangents: Vec<_> = data.meshes[0].vertices.iter().map(|vertex| vertex.tangent).collect();
+    assert_eq!(tangents, [[0; 4]; 3]);
+}
+
+#[test]
+fn uses_the_default_tangent_for_collapsed_uvs() {
+    let model = triangle_model_with_uvs(
+        &[0, 1, 2],
+        3,
+        r#"{"attributes": {"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2}, "indices": 3}"#,
+        [[0.0, 0.0]; 3],
+    );
+    let data = GltfData::from_memory(model.as_bytes()).unwrap();
+
+    for vertex in &data.meshes[0].vertices {
+        assert_eq!(vertex.tangent, [i16::MAX, 0, 0, i16::MAX]);
     }
 }
 

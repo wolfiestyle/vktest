@@ -290,12 +290,9 @@ checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
 
 [[package]]
 name = "bevy_mikktspace"
-version = "0.16.1"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8bb60c753b968a2de0fd279b76a3d19517695e771edb4c23575c7f92156315de"
-dependencies = [
- "glam 0.29.3",
-]
+checksum = "bff34eb29ff4b8a8688bc7299f14fb6b597461ca80fec03ed7d22939ab33e48f"
 
 [[package]]
 name = "bit_field"
@@ -1015,12 +1012,6 @@ dependencies = [
 
 [[package]]
 name = "glam"
-version = "0.29.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8babf46d4c1c9d92deac9f7be466f76dfc4482b6452fc5024b5e8daf6ffeb3ee"
-
-[[package]]
-name = "glam"
 version = "0.34.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "627003914c6057c9c8f0832ee4f870b5a4f599d0cfa83f4072675114860cd0ff"
@@ -1061,7 +1052,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
  "bevy_mikktspace",
- "glam 0.34.3",
+ "glam",
  "gltf",
  "image",
  "thiserror 2.0.21",
@@ -3030,7 +3021,7 @@ dependencies = [
  "bytemuck_derive",
  "egui",
  "egui-winit",
- "glam 0.34.3",
+ "glam",
  "gltf-import",
  "gpu-allocator",
  "inline-spirv",

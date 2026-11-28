@@ -1,7 +1,7 @@
 use crate::import::BufferData;
 use crate::material::MaterialId;
 use crate::types::{ImportError, ImportResult};
-use bevy_mikktspace::{Geometry, generate_tangents};
+use bevy_mikktspace::{Geometry, TangentSpace, generate_tangents};
 use glam::{Vec3, Vec3A};
 use gltf::Semantic;
 use gltf::mesh::Mode;
@@ -296,15 +296,25 @@ impl PrimData {
         }
 
         if mode == Mode::Triangles && !attribs.tangent {
-            if attribs.texcoord > 0 {
-                eprintln!("Generating MikkTSpace tangents for {vert_count} vertices");
-                generate_tangents(&mut primdata);
-            } else {
+            if attribs.texcoord == 0 {
                 eprintln!("Generating improvised tangents for {vert_count} vertices");
                 primdata.generate_tangents_fallback();
+            } else if primdata.has_triangle_with_distinct_positions() {
+                eprintln!("Generating MikkTSpace tangents for {vert_count} vertices");
+                generate_tangents(&mut primdata).map_err(|err| invalid(format!("MikkTSpace tangent generation failed: {err}")))?;
             }
         }
         Ok(primdata)
+    }
+
+    fn has_triangle_with_distinct_positions(&self) -> bool {
+        // MikkTSpace previously left tangents at zero when every triangle repeated a position.
+        self.indices.chunks_exact(3).any(|triangle| {
+            let a = self.positions[triangle[0] as usize];
+            let b = self.positions[triangle[1] as usize];
+            let c = self.positions[triangle[2] as usize];
+            a != b && a != c && b != c
+        })
     }
 
     fn generate_tangents_fallback(&mut self) {
@@ -336,7 +346,8 @@ impl Geometry for PrimData {
         self.texcoords0[self.indices[face * 3 + vert] as usize]
     }
 
-    fn set_tangent_encoded(&mut self, [x, y, z, w]: [f32; 4], face: usize, vert: usize) {
+    fn set_tangent(&mut self, tangent_space: Option<TangentSpace>, face: usize, vert: usize) {
+        let [x, y, z, w] = tangent_space.unwrap_or_default().tangent_encoded();
         self.tangents[self.indices[face * 3 + vert] as usize] = [x, y, z, -w]; // flip bitangent to match glTF coordinates
     }
 }
