@@ -1,4 +1,4 @@
-use base64::{Engine as _, engine::general_purpose::STANDARD};
+use base64::{DecodeError, Engine as _, engine::general_purpose::STANDARD};
 use gltf_import::{GltfData, ImageData, ImportError};
 use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
 use std::{io::Cursor, path::Path};
@@ -17,6 +17,35 @@ fn decodes_embedded_buffer_data_uris() {
     assert_eq!(data.buffers.len(), 2);
     for buffer in data.buffers {
         assert_eq!(buffer.data, [0, 1, b',', 255]);
+    }
+}
+
+#[test]
+fn reports_decode_errors_for_malformed_base64_data_uris() {
+    for (encoded, expected) in [
+        ("AAEs/w", DecodeError::InvalidPadding),
+        ("AAEs!w==", DecodeError::InvalidByte(4, b'!')),
+        (
+            "AAEs/x==",
+            DecodeError::InvalidLastSymbol {
+                offset: 5,
+                symbol: b'x',
+                symbol_value: 49,
+            },
+        ),
+    ] {
+        let model = format!(
+            r#"{{
+                "asset": {{"version": "2.0"}},
+                "buffers": [{{"byteLength": 4, "uri": "data:application/octet-stream;base64,{encoded}"}}]
+            }}"#
+        );
+        let error = GltfData::from_memory(model.as_bytes()).unwrap_err();
+
+        let ImportError::Base64(actual) = error else {
+            panic!("expected a base64 decode error for {encoded}, got {error:?}");
+        };
+        assert_eq!(actual, expected, "{encoded}");
     }
 }
 

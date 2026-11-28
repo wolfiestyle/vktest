@@ -9,7 +9,7 @@ resolver = "2"
 [workspace.dependencies]
 ash = "0.38.0"
 ash-window = "0.13.0"
-base64 = "0.22.0"
+base64 = "0.23.1"
 bevy_mikktspace = "0.16.1"
 bytemuck = "1.24.0"
 bytemuck_derive = "1.10.2"

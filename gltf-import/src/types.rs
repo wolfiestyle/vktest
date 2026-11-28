@@ -11,6 +11,9 @@ pub enum ImportError {
     #[error("{0}")]
     Utf8(#[from] std::string::FromUtf8Error),
 
+    /// A Base64 data URI could not be decoded.
+    /// With `base64` 0.23, match invalid trailing bits using
+    /// `DecodeError::InvalidLastSymbol { offset, symbol, .. }`.
     #[error("{0}")]
     Base64(#[from] base64::DecodeError),
 
