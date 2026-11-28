@@ -110,19 +110,21 @@ fn generates_the_opposite_tangent_sign_for_mirrored_uvs() {
 }
 
 #[test]
-fn leaves_tangents_zero_when_all_triangles_have_repeated_positions() {
+fn supplies_fallback_tangents_only_for_referenced_vertices_with_normals() {
     let model = triangle_model(
         &[0, 0, 1],
         3,
-        r#"{"attributes": {"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2}, "indices": 3}"#,
+        r#"{"attributes": {"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2}, "indices": 3},
+           {"attributes": {"POSITION": 0, "TEXCOORD_0": 2}, "indices": 3}"#,
     );
     let data = GltfData::from_memory(model.as_bytes()).unwrap();
     let tangents: Vec<_> = data.meshes[0].vertices.iter().map(|vertex| vertex.tangent).collect();
-    assert_eq!(tangents, [[0; 4]; 3]);
+    let fallback = [0, -i16::MAX, 0, i16::MAX];
+    assert_eq!(tangents, [fallback, fallback, [0; 4], [0; 4], [0; 4], [0; 4]]);
 }
 
 #[test]
-fn uses_the_default_tangent_for_collapsed_uvs() {
+fn uses_a_tangent_orthogonal_to_the_normal_for_collapsed_uvs() {
     let model = triangle_model_with_uvs(
         &[0, 1, 2],
         3,
@@ -132,7 +134,21 @@ fn uses_the_default_tangent_for_collapsed_uvs() {
     let data = GltfData::from_memory(model.as_bytes()).unwrap();
 
     for vertex in &data.meshes[0].vertices {
-        assert_eq!(vertex.tangent, [i16::MAX, 0, 0, i16::MAX]);
+        assert_eq!(vertex.tangent, [0, -i16::MAX, 0, i16::MAX]);
+    }
+}
+
+#[test]
+fn keeps_generated_tangents_on_vertices_shared_with_a_degenerate_triangle() {
+    let model = triangle_model(
+        &[0, 1, 2, 0, 0, 1],
+        6,
+        r#"{"attributes": {"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2}, "indices": 3}"#,
+    );
+    let data = GltfData::from_memory(model.as_bytes()).unwrap();
+
+    for vertex in &data.meshes[0].vertices {
+        assert_eq!(vertex.tangent, [i16::MAX, 0, 0, -i16::MAX]);
     }
 }
 

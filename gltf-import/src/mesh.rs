@@ -299,7 +299,7 @@ impl PrimData {
             if attribs.texcoord == 0 {
                 eprintln!("Generating improvised tangents for {vert_count} vertices");
                 primdata.generate_tangents_fallback();
-            } else if primdata.has_triangle_with_distinct_positions() {
+            } else {
                 eprintln!("Generating MikkTSpace tangents for {vert_count} vertices");
                 generate_tangents(&mut primdata).map_err(|err| invalid(format!("MikkTSpace tangent generation failed: {err}")))?;
             }
@@ -307,22 +307,17 @@ impl PrimData {
         Ok(primdata)
     }
 
-    fn has_triangle_with_distinct_positions(&self) -> bool {
-        // MikkTSpace previously left tangents at zero when every triangle repeated a position.
-        self.indices.chunks_exact(3).any(|triangle| {
-            let a = self.positions[triangle[0] as usize];
-            let b = self.positions[triangle[1] as usize];
-            let c = self.positions[triangle[2] as usize];
-            a != b && a != c && b != c
-        })
-    }
-
     fn generate_tangents_fallback(&mut self) {
-        for (i, normal) in self.normals.iter().copied().map(Vec3::from_array).enumerate() {
-            let up = if normal.z.abs() < 0.999 { Vec3::Z } else { Vec3::X };
-            self.tangents[i] = up.cross(normal).normalize_or_zero().extend(1.0).to_array();
+        for (tangent, &normal) in self.tangents.iter_mut().zip(&self.normals) {
+            *tangent = orthogonal_tangent(normal).unwrap_or(Vec3::ZERO).extend(1.0).to_array();
         }
     }
+}
+
+fn orthogonal_tangent(normal: [f32; 3]) -> Option<Vec3> {
+    let normal = Vec3::from_array(normal);
+    let up = if normal.z.abs() < 0.999 { Vec3::Z } else { Vec3::X };
+    up.cross(normal).try_normalize()
 }
 
 impl Geometry for PrimData {
@@ -347,8 +342,17 @@ impl Geometry for PrimData {
     }
 
     fn set_tangent(&mut self, tangent_space: Option<TangentSpace>, face: usize, vert: usize) {
-        let [x, y, z, w] = tangent_space.unwrap_or_default().tangent_encoded();
-        self.tangents[self.indices[face * 3 + vert] as usize] = [x, y, z, -w]; // flip bitangent to match glTF coordinates
+        let index = self.indices[face * 3 + vert] as usize;
+        let tangent = &mut self.tangents[index];
+        if let Some(tangent_space) = tangent_space {
+            let [x, y, z, w] = tangent_space.tangent_encoded();
+            *tangent = [x, y, z, -w]; // flip bitangent to match glTF coordinates
+        } else if tangent[3] == 0.0 {
+            // A different corner sharing this vertex may already have supplied a tangent.
+            if let Some(axis) = orthogonal_tangent(self.normals[index]) {
+                *tangent = axis.extend(1.0).to_array();
+            }
+        }
     }
 }
 
