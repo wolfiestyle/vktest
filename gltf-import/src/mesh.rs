@@ -358,10 +358,8 @@ impl Geometry for PrimData {
 
 fn generate_normals(positions: &[[f32; 3]], indices: &[u32]) -> Vec<[f32; 3]> {
     let mut normals = vec![Vec3A::ZERO; positions.len()];
-    for triangle in indices.chunks_exact(3) {
-        let ia = triangle[0] as usize;
-        let ib = triangle[1] as usize;
-        let ic = triangle[2] as usize;
+    for &[ia, ib, ic] in indices.as_chunks::<3>().0 {
+        let [ia, ib, ic] = [ia, ib, ic].map(|index| index as usize);
         let posa = Vec3A::from_array(positions[ia]);
         let posb = Vec3A::from_array(positions[ib]);
         let posc = Vec3A::from_array(positions[ic]);

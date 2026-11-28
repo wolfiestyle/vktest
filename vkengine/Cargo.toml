@@ -5,10 +5,13 @@ authors = ["SnowDerg <slayerbeast@gmail.com>"]
 edition = "2024"
 rust-version = "1.95"
 
+[features]
+egui = ["dep:egui", "dep:egui-winit", "winit"]
+
 [dependencies]
 ash = { workspace = true }
 ash-window = { workspace = true }
-raw-window-handle = { workspace = true }
+raw-window-handle = { workspace = true, features = ["std"] }
 inline-spirv = { workspace = true }
 glam = { workspace = true, features = ["bytemuck"] }
 bytemuck = { workspace = true }
@@ -18,6 +21,5 @@ thiserror = { workspace = true }
 
 winit = { workspace = true, optional = true }
 egui = { workspace = true, features = ["bytemuck", "default_fonts"], optional = true }
+egui-winit = { workspace = true, optional = true }
 gltf-import = { path = "../gltf-import" }
-#TODO: remove these or turn them optional
-egui-winit = { workspace = true }

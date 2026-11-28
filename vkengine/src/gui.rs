@@ -116,10 +116,8 @@ impl UiRenderer {
 
     pub fn run(&mut self, window: &Window, run_ui: impl FnMut(&mut Ui)) {
         let now = Instant::now();
-        if let Some(last_draw) = self.last_draw_time {
-            if now - last_draw < MIN_FRAME_TIME {
-                return;
-            }
+        if self.last_draw_time.is_some_and(|last_draw| now - last_draw < MIN_FRAME_TIME) {
+            return;
         }
         self.last_draw_time = Some(now);
         let raw_input = self.winit_state.take_egui_input(window);

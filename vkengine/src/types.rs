@@ -66,7 +66,7 @@ impl<T> ErrorDescription<&'static str> for Option<T> {
     type Output = T;
 
     fn describe_err(self, msg: &'static str) -> VulkanResult<Self::Output> {
-        self.ok_or_else(|| VkError::EngineError(msg))
+        self.ok_or(VkError::EngineError(msg))
     }
 }
 
