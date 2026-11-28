@@ -128,7 +128,7 @@ impl<V: VertexInput, I: IndexInput> MeshRenderer<V, I> {
                 .debug(|d| d.cmd_begin_label(cmd_buffer, "3D object", [0.2, 0.6, 0.4, 1.0]));
             self.device
                 .cmd_bind_pipeline(cmd_buffer, vk::PipelineBindPoint::GRAPHICS, *self.pipeline);
-            self.device.cmd_set_viewport(cmd_buffer, 0, &[engine.swapchain.viewport_inv()]);
+            self.device.cmd_set_viewport(cmd_buffer, 0, &[engine.swapchain.viewport()]);
             self.device.cmd_set_scissor(cmd_buffer, 0, &[engine.swapchain.extent_rect()]);
             let obj_buffer_info = self.obj_uniforms.descriptor(engine);
             let light_buffer_info = engine.light_buffer.descriptor(engine);
@@ -491,7 +491,7 @@ impl SkyboxRenderer {
                 .debug(|d| d.cmd_begin_label(cmd_buffer, "Background", [0.2, 0.4, 0.6, 1.0]));
             self.device
                 .cmd_bind_pipeline(cmd_buffer, vk::PipelineBindPoint::GRAPHICS, *self.pipeline);
-            self.device.cmd_set_viewport(cmd_buffer, 0, &[engine.swapchain.viewport_inv()]);
+            self.device.cmd_set_viewport(cmd_buffer, 0, &[engine.swapchain.viewport()]);
             self.device.cmd_set_scissor(cmd_buffer, 0, &[engine.swapchain.extent_rect()]);
             self.device.pushdesc_fn.cmd_push_descriptor_set(
                 cmd_buffer,

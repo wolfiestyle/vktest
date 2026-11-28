@@ -1,4 +1,4 @@
-use glam::{Affine3A, EulerRot, Mat4, Quat, Vec3, camera::rh::proj::directx};
+use glam::{Affine3A, EulerRot, Mat4, Quat, Vec3, camera::rh::proj::vulkan};
 #[cfg(feature = "winit")]
 use winit::event::{DeviceEvent, WindowEvent};
 
@@ -67,13 +67,12 @@ impl Camera {
     }
 
     pub(crate) fn get_projection(&self, aspect: f32, reverse_depth: bool) -> Mat4 {
-        // The negative-height Vulkan viewport flips Y, so the projection stays Y-up.
         if reverse_depth {
-            directx::perspective_infinite_reverse(self.fov, aspect, self.near)
+            vulkan::perspective_infinite_reverse(self.fov, aspect, self.near)
         } else if let Some(far) = self.far {
-            directx::perspective(self.fov, aspect, self.near, far)
+            vulkan::perspective(self.fov, aspect, self.near, far)
         } else {
-            directx::perspective_infinite(self.fov, aspect, self.near)
+            vulkan::perspective_infinite(self.fov, aspect, self.near)
         }
     }
 }
@@ -262,7 +261,7 @@ mod tests {
     }
 
     #[test]
-    fn camera_projections_keep_y_up_for_the_negative_height_viewport() {
+    fn camera_projections_map_view_space_up_to_negative_ndc_y() {
         let mut camera = Camera::default();
         let above_center = Vec3::new(0.0, 1.0, -4.0);
         let infinite = camera.get_projection(1.5, false);
@@ -271,7 +270,7 @@ mod tests {
         let finite = camera.get_projection(1.5, false);
 
         for projection in [infinite, reverse, finite] {
-            assert!(projection.project_point3(above_center).y > 0.0);
+            assert!(projection.project_point3(above_center).y < 0.0);
         }
     }
 

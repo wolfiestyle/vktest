@@ -9,7 +9,7 @@ use bytemuck::{Pod, Zeroable};
 use egui::epaint::{Primitive, Vertex};
 use egui::{ClippedPrimitive, Context, FullOutput, PlatformOutput, TextureId, TexturesDelta, ViewportId};
 use egui_winit::{EventResponse, State};
-use glam::{Mat4, camera::rh::proj::directx};
+use glam::{Mat4, camera::rh::proj::vulkan};
 use inline_spirv::include_spirv;
 use std::collections::HashMap;
 use std::mem::size_of;
@@ -316,8 +316,8 @@ struct PushConstants {
 }
 
 fn gui_projection(extent: vk::Extent2D) -> Mat4 {
-    // GUI pixel coordinates and the positive-height viewport both increase Y down the screen.
-    directx::orthographic(0.0, extent.width as f32, 0.0, extent.height as f32, 0.0, 1.0)
+    // GUI pixels start at the top, so pass the bottom bound before the top bound.
+    vulkan::orthographic(0.0, extent.width as f32, extent.height as f32, 0.0, 0.0, 1.0)
 }
 
 fn vk_rect(rect: egui::Rect, scale: f32) -> vk::Rect2D {
