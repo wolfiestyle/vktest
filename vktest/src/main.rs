@@ -195,8 +195,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     let objects = &mut scenes[cur_scene];
                     draw_buffer.resize_with(objects.len(), || VkError::UnfinishedJob.into());
                     let mut skybox_cmds = VkError::UnfinishedJob.into();
-                    let mut gui_cmds = VkError::UnfinishedJob.into();
-                    thread_pool.scoped(|scope| {
+                    let gui_cmds = thread_pool.scoped(|scope| {
                         for (obj, draw_ret) in objects.iter_mut().zip(draw_buffer.iter_mut()) {
                             if obj.enabled {
                                 scope.execute(|| {
@@ -210,7 +209,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                             _ => &skybox_tex,
                         };
                         scope.execute(|| skybox_cmds = skybox.render(&vk_app, cubemap));
-                        scope.execute(|| gui_cmds = gui.draw(&vk_app));
+                        // The GUI owns an AppKit event monitor on macOS, so keep it on the event-loop thread.
+                        gui.draw(&vk_app)
                     });
 
                     let draw_cmds = draw_buffer.drain(..).chain([skybox_cmds, gui_cmds]).filter_map(|res| match res {
