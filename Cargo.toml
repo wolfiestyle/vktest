@@ -16,7 +16,7 @@ bytemuck_derive = "1.10.2"
 clap = "4.5.57"
 egui = "0.33.3"
 egui-winit = "0.33.3"
-glam = "0.31.0"
+glam = "0.34.3"
 gltf = "1.4.1"
 gpu-allocator = { version = "0.28.0", default-features = false, features = ["std", "vulkan"] }
 image = "0.25.9"

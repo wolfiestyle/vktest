@@ -9,7 +9,7 @@ use bytemuck::{Pod, Zeroable};
 use egui::epaint::{Primitive, Vertex};
 use egui::{ClippedPrimitive, Context, FullOutput, PlatformOutput, TextureId, TexturesDelta, ViewportId};
 use egui_winit::{EventResponse, State};
-use glam::Mat4;
+use glam::{Mat4, camera::rh::proj::directx};
 use inline_spirv::include_spirv;
 use std::collections::HashMap;
 use std::mem::size_of;
@@ -234,10 +234,9 @@ impl UiRenderer {
             device.cmd_bind_index_buffer(cmd_buffer, buffer, self.total_vert_size, vk::IndexType::UINT32);
             device.cmd_set_viewport(cmd_buffer, 0, &[engine.swapchain.viewport()]);
         }
-        let vk::Extent2D { width, height } = engine.swapchain.extent;
         let scale = self.context.pixels_per_point();
         let constants = PushConstants {
-            proj: Mat4::orthographic_rh(0.0, width as _, 0.0, height as _, 0.0, 1.0),
+            proj: gui_projection(engine.swapchain.extent),
             scale,
             _unused: Default::default(),
         };
@@ -316,6 +315,11 @@ struct PushConstants {
     _unused: [f32; 3],
 }
 
+fn gui_projection(extent: vk::Extent2D) -> Mat4 {
+    // GUI pixel coordinates and the positive-height viewport both increase Y down the screen.
+    directx::orthographic(0.0, extent.width as f32, 0.0, extent.height as f32, 0.0, 1.0)
+}
+
 fn vk_rect(rect: egui::Rect, scale: f32) -> vk::Rect2D {
     let pos = rect.min * scale;
     let size = (rect.max - rect.min).abs() * scale;
@@ -328,5 +332,28 @@ fn vk_rect(rect: egui::Rect, scale: f32) -> vk::Rect2D {
             width: size.x as _,
             height: size.y as _,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use glam::Vec3;
+
+    #[test]
+    fn gui_projection_maps_pixels_top_to_bottom_in_the_positive_height_viewport() {
+        let projection = gui_projection(vk::Extent2D { width: 800, height: 600 });
+
+        for (pixel, ndc) in [
+            (Vec3::ZERO, Vec3::new(-1.0, -1.0, 0.0)),
+            (Vec3::new(400.0, 300.0, 0.0), Vec3::ZERO),
+            (Vec3::new(800.0, 600.0, 0.0), Vec3::new(1.0, 1.0, 0.0)),
+        ] {
+            let projected = projection.project_point3(pixel);
+            assert!(
+                projected.abs_diff_eq(ndc, 1e-5),
+                "expected {pixel:?} to project to {ndc:?}, got {projected:?}"
+            );
+        }
     }
 }

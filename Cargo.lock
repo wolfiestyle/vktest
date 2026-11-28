@@ -1021,9 +1021,9 @@ checksum = "8babf46d4c1c9d92deac9f7be466f76dfc4482b6452fc5024b5e8daf6ffeb3ee"
 
 [[package]]
 name = "glam"
-version = "0.31.1"
+version = "0.34.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "556f6b2ea90b8d15a74e0e7bb41671c9bdf38cd9f78c284d750b9ce58a2b5be7"
+checksum = "627003914c6057c9c8f0832ee4f870b5a4f599d0cfa83f4072675114860cd0ff"
 dependencies = [
  "bytemuck",
 ]
@@ -1061,7 +1061,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
  "bevy_mikktspace",
- "glam 0.31.1",
+ "glam 0.34.3",
  "gltf",
  "image",
  "thiserror 2.0.21",
@@ -3030,7 +3030,7 @@ dependencies = [
  "bytemuck_derive",
  "egui",
  "egui-winit",
- "glam 0.31.1",
+ "glam 0.34.3",
  "gltf-import",
  "gpu-allocator",
  "inline-spirv",
